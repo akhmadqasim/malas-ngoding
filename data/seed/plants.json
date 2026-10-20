@@ -94,20 +94,20 @@
     "fuel": "gas",
     "capacityMw": 224,
     "status": "unknown",
-    "lat": -1.27,
-    "lng": 116.8,
+    "lat": -1.25,
+    "lng": 116.82,
     "approx": true,
-    "source": "Capacity: inzonex WRI power atlas list (snippet, unverified). Coordinates: asumsi, Balikpapan refinery area"
+    "source": "Capacity: inzonex WRI power atlas list (snippet, unverified). Coordinates: asumsi, Balikpapan refinery area (moved onto land at the bay shore)"
   },
   {
     "name": "AlamTri captive coal power station",
     "fuel": "batubara",
     "capacityMw": 2200,
     "status": "unknown",
-    "lat": -0.1,
-    "lng": 117.5,
+    "lat": -0.12,
+    "lng": 117.45,
     "approx": true,
-    "source": "Capacity: inzonex WRI power atlas list (snippet, captive, not PLN grid). Coordinates: asumsi, placeholder inside Kutai Kartanegara"
+    "source": "Capacity: inzonex WRI power atlas list (snippet, captive, not PLN grid). Coordinates: asumsi, placeholder inside Kutai Kartanegara (moved onto land; the first guess fell in the sea)"
   },
   {
     "name": "NALCO East Kutai power station",

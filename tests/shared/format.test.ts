@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { fmtKg, fmtKwh, fmtNumber, fmtRupiah } from "../../src/shared/format.ts";
+import { fmtCompact, fmtKg, fmtKwh, fmtNumber, fmtRupiah } from "../../src/shared/format.ts";
 
 describe("format", () => {
   test("fmtNumber uses id-ID separators", () => {
@@ -20,5 +20,13 @@ describe("format", () => {
     expect(fmtRupiah(950_000)).toBe("Rp 950.000");
     expect(fmtRupiah(999_990_000)).toBe("Rp 1,0 M");
     expect(fmtRupiah(0)).toBe("Rp 0");
+  });
+  test("fmtCompact uses Indonesian words for large numbers", () => {
+    expect(fmtCompact(1_380_700_000)).toBe("1,38 miliar");
+    expect(fmtCompact(346_400_000)).toBe("346,4 juta");
+    expect(fmtCompact(865_310)).toBe("865,3 ribu");
+    expect(fmtCompact(950)).toBe("950");
+    expect(fmtCompact(999_960_000)).toBe("1,00 miliar");
+    expect(fmtCompact(Number.NaN)).toBe("0");
   });
 });
