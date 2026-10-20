@@ -3,6 +3,9 @@ import { runMigrations } from "../../scripts/migrate.ts";
 import { seedAll } from "../../scripts/seed.ts";
 import {
   cacheGet,
+  cacheGetAged,
+  climatologyGet,
+  climatologySet,
   cacheSet,
   getBuildingTypes,
   getEquivalentFactors,
@@ -141,6 +144,31 @@ describe.skipIf(!reachable)("db", () => {
     expect(await cacheGet("building_estimates", "test:b")).toEqual({ kwhYear: 5 });
     await sql`DELETE FROM poi_cache WHERE key LIKE 'test:%'`;
     await sql`DELETE FROM building_estimates WHERE feature_id LIKE 'test:%'`;
+  });
+
+  test("cacheGetAged returns the payload with its fetched_at, and rejects other tables", async () => {
+    expect(await cacheGetAged("weather_cache", "test:missing")).toBeNull();
+    const before = Date.now() - 5000;
+    await cacheSet("weather_cache", "test:w", { hours: [1, 2] });
+    const row = await cacheGetAged("weather_cache", "test:w");
+    expect(row?.payload).toEqual({ hours: [1, 2] });
+    expect(row!.fetchedAt.getTime()).toBeGreaterThan(before);
+    expect(row!.fetchedAt.getTime()).toBeLessThan(Date.now() + 5000);
+    await sql`DELETE FROM weather_cache WHERE key LIKE 'test:%'`;
+    await expect(cacheGetAged("regions" as any, "x")).rejects.toThrow(/Unknown cache table/);
+  });
+
+  test("climatologySet and climatologyGet round-trip the monthly array and overwrite", async () => {
+    await sql`DELETE FROM solar_climatology WHERE key LIKE 'test:%'`;
+    expect(await climatologyGet("test:-0.5,117.2")).toBeNull();
+    const months = [4.5, 5, 5, 4.9, 4.7, 4.3, 4.6, 5, 5.1, 4.9, 4.6, 4.5];
+    await climatologySet("test:-0.5,117.2", -0.5, 117.2, { pshByMonth: months, pshYear: 4.77 });
+    expect(await climatologyGet("test:-0.5,117.2")).toEqual({ pshByMonth: months, pshYear: 4.77 });
+    await climatologySet("test:-0.5,117.2", -0.5, 117.2, { pshByMonth: months.map(() => 4), pshYear: 4 });
+    expect((await climatologyGet("test:-0.5,117.2"))?.pshYear).toBe(4);
+    const [row] = await sql`SELECT jsonb_typeof(psh_by_month) AS t, jsonb_array_length(psh_by_month) AS n FROM solar_climatology WHERE key = 'test:-0.5,117.2'`;
+    expect(row).toEqual({ t: "array", n: 12 });
+    await sql`DELETE FROM solar_climatology WHERE key LIKE 'test:%'`;
   });
 
   test("cache functions reject table names outside the whitelist", async () => {

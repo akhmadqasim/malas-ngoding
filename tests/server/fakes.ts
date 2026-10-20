@@ -1,5 +1,7 @@
 import type { AppDeps } from "../../src/server/index.ts";
+import type { Climatology } from "../../src/server/services/nasaPower.ts";
 import type { PoiHit } from "../../src/server/services/tilequery.ts";
+import type { ForecastHour } from "../../src/shared/pvForecast.ts";
 import type {
   BuildingType,
   EquivalentFactor,
@@ -64,16 +66,32 @@ export interface FakeDeps {
   deps: AppDeps;
   /** Cache rows written so far, keyed "table:key", to assert what was (not) stored. */
   stored: Map<string, Record<string, unknown>>;
+  /** `fetched_at` of rows in `stored` (rows without an entry count as just fetched). Set it to age a row. */
+  ages: Map<string, Date>;
   poiCalls: Array<[number, number]>;
+  nasaCalls: Array<[number, number]>;
+  meteoCalls: Array<[number, number]>;
+}
+
+export interface FakeUpstreams {
+  /** NASA POWER answer: a climatology or an Error to throw. Default: 4.8 peak sun hours all year. */
+  nasa?: Climatology | Error;
+  /** Open-Meteo answer: hours or an Error to throw. Default: a forecast that fails the test if used. */
+  meteo?: ForecastHour[] | Error;
 }
 
 /**
  * In-memory AppDeps. Points with lng 116.5 to 118 and lat -2 to 1 count as Samarinda; anything else is
  * outside Kaltim. `poi` answers with `poiAnswer` (a hit, null, or an Error to throw).
  */
-export function fakeDeps(poiAnswer: PoiHit | null | Error = null): FakeDeps {
+export function fakeDeps(poiAnswer: PoiHit | null | Error = null, upstreams: FakeUpstreams = {}): FakeDeps {
   const stored = new Map<string, Record<string, unknown>>();
+  const ages = new Map<string, Date>();
   const poiCalls: Array<[number, number]> = [];
+  const nasaCalls: Array<[number, number]> = [];
+  const meteoCalls: Array<[number, number]> = [];
+  const nasaAnswer = upstreams.nasa ?? { pshByMonth: Array<number>(12).fill(4.8), pshYear: 4.8 };
+  const meteoAnswer = upstreams.meteo ?? new Error("meteo not expected");
   const deps: AppDeps = {
     db: {
       regionAt: async (lng, lat) =>
@@ -98,6 +116,18 @@ export function fakeDeps(poiAnswer: PoiHit | null | Error = null): FakeDeps {
       cacheGet: async (table, key) => stored.get(`${table}:${key}`) ?? null,
       cacheSet: async (table, key, payload) => {
         stored.set(`${table}:${key}`, JSON.parse(JSON.stringify(payload)));
+        ages.set(`${table}:${key}`, new Date());
+      },
+      cacheGetAged: async (table, key) => {
+        const payload = stored.get(`${table}:${key}`);
+        return payload ? { payload, fetchedAt: ages.get(`${table}:${key}`) ?? new Date() } : null;
+      },
+      climatologyGet: async (key) => {
+        const row = stored.get(`solar_climatology:${key}`);
+        return row ? (row as unknown as Climatology) : null;
+      },
+      climatologySet: async (key, _lat, _lng, value) => {
+        stored.set(`solar_climatology:${key}`, JSON.parse(JSON.stringify(value)));
       },
     },
     poi: async (lng, lat) => {
@@ -105,6 +135,16 @@ export function fakeDeps(poiAnswer: PoiHit | null | Error = null): FakeDeps {
       if (poiAnswer instanceof Error) throw poiAnswer;
       return poiAnswer;
     },
+    nasa: async (lat, lng) => {
+      nasaCalls.push([lat, lng]);
+      if (nasaAnswer instanceof Error) throw nasaAnswer;
+      return nasaAnswer;
+    },
+    meteo: async (lat, lng) => {
+      meteoCalls.push([lat, lng]);
+      if (meteoAnswer instanceof Error) throw meteoAnswer;
+      return meteoAnswer;
+    },
   };
-  return { deps, stored, poiCalls };
+  return { deps, stored, ages, poiCalls, nasaCalls, meteoCalls };
 }

@@ -1,5 +1,8 @@
 import type { BuildingInput } from "../../shared/types.ts";
 import type { AppDeps } from "../index.ts";
+import type { ForecastHour } from "../../shared/pvForecast.ts";
+import { climatologyKey, type Climatology } from "./nasaPower.ts";
+import { weatherKey } from "./openMeteo.ts";
 import type { PoiHit } from "./tilequery.ts";
 
 /** POI cache key: coordinates rounded to 5 decimals (about 1 m). */
@@ -59,4 +62,85 @@ export async function cachedPoi(
     warn("poi cache write failed", err);
   }
   return { poi, degraded: false };
+}
+
+/** Peak sun hours used when NASA POWER is down and nothing is cached. */
+export const FALLBACK_PSH = 4.2;
+const FALLBACK_NOTE = `Data radiasi matahari NASA POWER sedang tidak tersedia, jadi dipakai asumsi ${FALLBACK_PSH.toLocaleString("id-ID")} jam puncak matahari per hari (perkiraan).`;
+
+const WEATHER_TTL_MS = 60 * 60 * 1000;
+
+/**
+ * NASA POWER climatology for a point, read through `solar_climatology` (it never expires: it is a
+ * 25-year average). When the live call fails and nothing is cached, returns the seed value with a
+ * `fallback` note; that result is not stored. Never throws.
+ */
+export async function cachedClimatology(
+  deps: Pick<AppDeps, "db" | "nasa">,
+  lat: number,
+  lng: number,
+): Promise<Climatology & { fallback?: string }> {
+  const key = climatologyKey(lat, lng);
+  try {
+    const hit = await deps.db.climatologyGet(key);
+    if (hit) return hit;
+  } catch (err) {
+    warn("climatology cache read failed", err);
+  }
+  let fresh: Climatology;
+  try {
+    fresh = await deps.nasa(lat, lng);
+  } catch (err) {
+    warn("nasa power lookup failed", err);
+    return { pshByMonth: Array<number>(12).fill(FALLBACK_PSH), pshYear: FALLBACK_PSH, fallback: FALLBACK_NOTE };
+  }
+  try {
+    await deps.db.climatologySet(key, lat, lng, fresh);
+  } catch (err) {
+    warn("climatology cache write failed", err);
+  }
+  return fresh;
+}
+
+function asHours(payload: Record<string, unknown> | undefined): ForecastHour[] | null {
+  const hours = payload?.hours;
+  return Array.isArray(hours) && hours.length > 0 ? (hours as ForecastHour[]) : null;
+}
+
+/**
+ * Seven-day forecast for a point, read through `weather_cache` (fresh for one hour).
+ * When the live call fails, a cached forecast of any age is returned with `stale: true`.
+ * Returns null only when the live call fails and nothing is cached. Never throws.
+ */
+export async function cachedForecast(
+  deps: Pick<AppDeps, "db" | "meteo">,
+  lat: number,
+  lng: number,
+  nowMs = Date.now(),
+): Promise<{ hours: ForecastHour[]; stale: boolean } | null> {
+  const key = weatherKey(lat, lng);
+  let cached: { hours: ForecastHour[]; fetchedAt: Date } | null = null;
+  try {
+    const row = await deps.db.cacheGetAged("weather_cache", key);
+    const hours = asHours(row?.payload);
+    if (row && hours) cached = { hours, fetchedAt: row.fetchedAt };
+  } catch (err) {
+    warn("weather cache read failed", err);
+  }
+  if (cached && nowMs - cached.fetchedAt.getTime() < WEATHER_TTL_MS) {
+    return { hours: cached.hours, stale: false };
+  }
+  try {
+    const hours = await deps.meteo(lat, lng);
+    if (hours.length === 0) throw new Error("empty forecast");
+    try {
+      await deps.db.cacheSet("weather_cache", key, { hours });
+    } catch (err) {
+      warn("weather cache write failed", err);
+    }
+    return { hours, stale: false };
+  } catch (err) {
+    warn("open-meteo lookup failed", err);
+    return cached ? { hours: cached.hours, stale: true } : null;
+  }
 }

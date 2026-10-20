@@ -1,7 +1,16 @@
 import type { PvHour } from "./types.ts";
 
+/** One forecast hour: local time (no offset), irradiance in W/m2, cloud in %, rain in mm, WMO weather code. */
+export interface ForecastHour {
+  time: string;
+  ghiWm2: number;
+  cloudPct: number;
+  precipMm: number;
+  weatherCode: number;
+}
+
 export function pvFromForecast(
-  hours: { time: string; ghiWm2: number; cloudPct: number; precipMm: number; weatherCode: number }[],
+  hours: ForecastHour[],
   kWp: number,
   pr = 0.78,
 ): PvHour[] {
@@ -12,7 +21,7 @@ export function pvFromForecast(
   });
 }
 
-function isRainCode(code: number): boolean {
+export function isRainCode(code: number): boolean {
   return (code >= 51 && code <= 67) || (code >= 80 && code <= 82) || (code >= 95 && code <= 99);
 }
 

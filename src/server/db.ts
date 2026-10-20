@@ -7,6 +7,7 @@ import type {
   RegionSummary,
 } from "../shared/types.ts";
 import { env } from "./env.ts";
+import type { Climatology } from "./services/nasaPower.ts";
 
 export const sql = new SQL(env.databaseUrl);
 
@@ -190,6 +191,39 @@ export async function cacheGet(table: CacheTable, key: string): Promise<Record<s
     SELECT ${sql(col.value)} AS payload FROM ${sql(table)} WHERE ${sql(col.key)} = ${key}`;
   const payload = rows[0]?.payload;
   return payload && typeof payload === "object" ? (payload as Record<string, unknown>) : null;
+}
+
+/** Like `cacheGet`, plus when the row was stored. Only for tables that have a `fetched_at` column. */
+export async function cacheGetAged(
+  table: "poi_cache" | "weather_cache",
+  key: string,
+): Promise<{ payload: Record<string, unknown>; fetchedAt: Date } | null> {
+  if (table !== "poi_cache" && table !== "weather_cache") throw new Error(`Unknown cache table: ${table}`);
+  const rows = await sql`
+    SELECT payload, fetched_at FROM ${sql(table)} WHERE key = ${key}`;
+  const row = rows[0];
+  if (!row || !row.payload || typeof row.payload !== "object") return null;
+  return { payload: row.payload as Record<string, unknown>, fetchedAt: new Date(row.fetched_at) };
+}
+
+/** NASA POWER climatology stored for `key` (coordinates rounded by the caller), or null on a miss. */
+export async function climatologyGet(key: string): Promise<Climatology | null> {
+  const rows = await sql`SELECT psh_by_month, psh_year FROM solar_climatology WHERE key = ${key}`;
+  const row = rows[0];
+  if (!row) return null;
+  const months: unknown = typeof row.psh_by_month === "string" ? JSON.parse(row.psh_by_month) : row.psh_by_month;
+  if (!Array.isArray(months)) return null;
+  return { pshByMonth: months.map(Number), pshYear: Number(row.psh_year) };
+}
+
+export async function climatologySet(key: string, lat: number, lng: number, value: Climatology): Promise<void> {
+  const months = JSON.stringify(value.pshByMonth);
+  await sql`
+    INSERT INTO solar_climatology (key, lat, lng, psh_by_month, psh_year, fetched_at)
+    VALUES (${key}, ${lat}, ${lng}, ${months}::text::jsonb, ${value.pshYear}, now())
+    ON CONFLICT (key) DO UPDATE
+      SET lat = EXCLUDED.lat, lng = EXCLUDED.lng, psh_by_month = EXCLUDED.psh_by_month,
+          psh_year = EXCLUDED.psh_year, fetched_at = now()`;
 }
 
 /**
