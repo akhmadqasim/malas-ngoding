@@ -1,0 +1,22 @@
+services:
+  db:
+    image: postgis/postgis:17-3.5
+    container_name: malas_ngoding_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: malas
+      POSTGRES_PASSWORD: malas
+      POSTGRES_DB: malas_ngoding
+    ports:
+      - "5433:5432"
+    volumes:
+      - malas_ngoding_pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U malas -d malas_ngoding"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  malas_ngoding_pg:
+    name: malas_ngoding_pg

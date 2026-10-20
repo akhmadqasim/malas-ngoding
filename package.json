@@ -1,0 +1,28 @@
+{
+  "name": "malas-ngoding",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bun --hot src/server/index.ts",
+    "start": "bun src/server/index.ts",
+    "test": "bun test",
+    "migrate": "bun scripts/migrate.ts",
+    "seed": "bun scripts/seed.ts",
+    "warm": "bun scripts/warm.ts",
+    "setup": "bun scripts/setup.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "bun-plugin-tailwind": "^0.1.2",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "tailwindcss": "^4.3.3"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.4.3",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "typescript": "^7.0.2"
+  }
+}
