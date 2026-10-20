@@ -7,9 +7,24 @@ export function poiCacheKey(lng: number, lat: number): string {
   return `${lng.toFixed(5)},${lat.toFixed(5)}`;
 }
 
-/** Estimate cache key: the feature plus the user overrides that change the result. */
-export function estimateCacheKey(input: Pick<BuildingInput, "featureId" | "typeOverride" | "floorsOverride">): string {
-  return `${input.featureId}|${input.typeOverride ?? ""}|${input.floorsOverride ?? ""}`;
+/**
+ * Estimate cache key: the feature, the user overrides, the footprint (nearest m2) and the client POI
+ * class. A changed footprint or POI for the same feature id therefore recomputes.
+ */
+export function estimateCacheKey(
+  input: Pick<BuildingInput, "featureId" | "typeOverride" | "floorsOverride" | "footprintM2" | "poiClass">,
+): string {
+  return [
+    input.featureId,
+    input.typeOverride ?? "",
+    input.floorsOverride ?? "",
+    Math.round(input.footprintM2),
+    input.poiClass ?? "",
+  ].join("|");
+}
+
+function warn(what: string, err: unknown): void {
+  console.warn(`${what}:`, err instanceof Error ? err.message : "unknown error");
 }
 
 /**
@@ -26,19 +41,22 @@ export async function cachedPoi(
   try {
     const hit = await deps.db.cacheGet("poi_cache", key);
     if (hit) return { poi: (hit.poi as PoiHit | null) ?? null, degraded: false };
-  } catch {
+  } catch (err) {
     // A broken cache must not break the estimate; fall through to the live lookup.
+    warn("poi cache read failed", err);
   }
   let poi: PoiHit | null;
   try {
     poi = await deps.poi(lng, lat);
-  } catch {
+  } catch (err) {
+    warn("poi lookup failed", err);
     return { poi: null, degraded: true };
   }
   try {
     await deps.db.cacheSet("poi_cache", key, { poi });
-  } catch {
-    // Ignore: the result is still valid, it just is not stored.
+  } catch (err) {
+    // The result is still valid, it just is not stored.
+    warn("poi cache write failed", err);
   }
   return { poi, degraded: false };
 }

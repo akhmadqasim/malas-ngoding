@@ -10,7 +10,9 @@ const BUILDING_TYPES: readonly BuildingType[] = [
 ];
 
 const isNum = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
-const isOptStr = (v: unknown) => v === undefined || v === null || typeof v === "string";
+const MAX_POI_TEXT = 100;
+const isOptStr = (v: unknown) =>
+  v === undefined || v === null || (typeof v === "string" && v.length <= MAX_POI_TEXT);
 
 /** Validates the request body; returns the input or a message for the 400 response. */
 function parseInput(body: unknown): { input: BuildingInput } | { problem: string } {
@@ -27,7 +29,7 @@ function parseInput(body: unknown): { input: BuildingInput } | { problem: string
   if (b.heightM !== undefined && b.heightM !== null && !isNum(b.heightM)) {
     return { problem: "Tinggi bangunan (heightM) harus berupa angka atau null." };
   }
-  if (!isOptStr(b.poiClass) || !isOptStr(b.poiType)) return { problem: "poiClass dan poiType harus berupa teks." };
+  if (!isOptStr(b.poiClass) || !isOptStr(b.poiType)) return { problem: `poiClass dan poiType harus berupa teks, paling panjang ${MAX_POI_TEXT} karakter.` };
   if (b.typeOverride !== undefined && !BUILDING_TYPES.includes(b.typeOverride as BuildingType)) {
     return { problem: "Jenis bangunan (typeOverride) tidak dikenal." };
   }
@@ -64,8 +66,12 @@ export function buildingRoutes(deps: AppDeps): RouteTable {
         const { input } = parsed;
 
         const cacheKey = estimateCacheKey(input);
-        const cached = await deps.db.cacheGet("building_estimates", cacheKey);
-        if (cached) return json(cached as unknown as BuildingEstimate);
+        try {
+          const cached = await deps.db.cacheGet("building_estimates", cacheKey);
+          if (cached) return json(cached as unknown as BuildingEstimate);
+        } catch (err) {
+          console.warn("estimate cache read failed:", err instanceof Error ? err.message : "unknown error");
+        }
 
         // A user-chosen type or a client-supplied POI makes the Tilequery call unnecessary.
         let degraded = false;
@@ -87,12 +93,16 @@ export function buildingRoutes(deps: AppDeps): RouteTable {
         const estimate = estimateBuilding(input, { types, grid, equivalents, region });
         // Do not store an estimate built while Tilequery was down; the next call should retry it.
         if (!degraded) {
-          await deps.db.cacheSet(
-            "building_estimates",
-            cacheKey,
-            estimate as unknown as Record<string, unknown>,
-            input as unknown as Record<string, unknown>,
-          );
+          try {
+            await deps.db.cacheSet(
+              "building_estimates",
+              cacheKey,
+              estimate as unknown as Record<string, unknown>,
+              input as unknown as Record<string, unknown>,
+            );
+          } catch (err) {
+            console.warn("estimate cache write failed:", err instanceof Error ? err.message : "unknown error");
+          }
         }
         return json(estimate);
       }),

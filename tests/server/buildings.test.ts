@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import type { Server } from "bun";
 import { createServer } from "../../src/server/index.ts";
 import type { BuildingEstimate } from "../../src/shared/types.ts";
@@ -27,8 +27,16 @@ const post = (s: Server<undefined>, body: unknown) =>
 
 describe("POST /api/buildings/estimate", () => {
   let server: Server<undefined>;
+  let warn: ReturnType<typeof spyOn>;
   beforeAll(() => {
     server = start(fakeDeps(SCHOOL));
+  });
+  // Swallowed errors log a warning; keep the test output clean and assert on it where it matters.
+  beforeEach(() => {
+    warn = spyOn(console, "warn").mockImplementation(() => {});
+  });
+  afterEach(() => {
+    warn.mockRestore();
   });
 
   test("a school POI gives type sekolah from the poi", async () => {
@@ -67,9 +75,37 @@ describe("POST /api/buildings/estimate", () => {
     expect(res.status).toBe(200);
     const est = (await res.json()) as BuildingEstimate;
     expect(est.typeSource).toBe("footprint");
-    expect(local.stored.has("building_estimates:down-1||")).toBe(false);
+    expect(local.stored.has("building_estimates:down-1|||400|")).toBe(false);
     await post(s, { ...SAMARINDA, featureId: "down-1" });
     expect(local.poiCalls).toHaveLength(2);
+  });
+
+  test("the same featureId with a different footprint recomputes", async () => {
+    const local = fakeDeps(SCHOOL);
+    const s = start(local);
+    const small = (await (await post(s, { ...SAMARINDA, featureId: "fp-1", footprintM2: 400 })).json()) as BuildingEstimate;
+    const big = (await (await post(s, { ...SAMARINDA, featureId: "fp-1", footprintM2: 800 })).json()) as BuildingEstimate;
+    expect(big.floorAreaM2).toBe(small.floorAreaM2 * 2);
+    expect(local.stored.has("building_estimates:fp-1|||400|")).toBe(true);
+    expect(local.stored.has("building_estimates:fp-1|||800|")).toBe(true);
+    // 400.4 rounds to the same m2 as 400, so it is a cache hit.
+    const again = (await (await post(s, { ...SAMARINDA, featureId: "fp-1", footprintM2: 400.4 })).json()) as BuildingEstimate;
+    expect(again).toEqual(small);
+  });
+
+  test("a failing estimate cache still returns the estimate", async () => {
+    const local = fakeDeps(SCHOOL);
+    local.deps.db.cacheGet = async (table, key) => {
+      if (table === "building_estimates") throw new Error("db down");
+      return null;
+    };
+    local.deps.db.cacheSet = async (table) => {
+      if (table === "building_estimates") throw new Error("db down");
+    };
+    const res = await post(start(local), { ...SAMARINDA, featureId: "cachefail-1" });
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as BuildingEstimate).type).toBe("sekolah");
+    expect(warn).toHaveBeenCalledTimes(2);
   });
 
   test("no poi nearby gives the footprint fallback and the miss is cached", async () => {
@@ -106,6 +142,8 @@ describe("POST /api/buildings/estimate", () => {
     ["footprint null", { ...SAMARINDA, footprintM2: null }],
     ["featureId missing", { ...SAMARINDA, featureId: undefined }],
     ["unknown typeOverride", { ...SAMARINDA, typeOverride: "kastil" }],
+    ["poiClass over 100 chars", { ...SAMARINDA, poiClass: "x".repeat(101) }],
+    ["poiType over 100 chars", { ...SAMARINDA, poiType: "x".repeat(101) }],
     ["body is an array", [1, 2]],
     ["body is not json", "not json{"],
   ])("invalid body (%s) returns 400 with an error", async (_name, body) => {
