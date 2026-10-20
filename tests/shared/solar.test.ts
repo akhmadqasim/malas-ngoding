@@ -32,12 +32,20 @@ describe("simulateSolar", () => {
     expect(r.co2AvoidedKgYear).toBeCloseTo(3600 * 0.8, 6);
   });
   test("small roof limits capacity", () => {
-    // usable 12 m2 -> max 2.18 kWp -> rounded up to 2.5
+    // usable 12 m2 -> max 2.18 kWp -> rounded down to 2.0 (never above the roof capacity)
     const r = simulateSolar({ ...input, roofAreaM2: 20, kwhYear: 12000 });
-    expect(r.kWp).toBe(2.5);
-    expect(r.panels).toBe(5);
+    expect(r.kWp).toBe(2);
+    expect(r.panels).toBe(4);
     expect(r.coveragePct).toBeGreaterThan(0);
     expect(r.coveragePct).toBeLessThan(100);
+  });
+  test("roof too small for 0.5 kWp returns all zeros", () => {
+    // 0.5 kWp needs 2.75 m2 usable, so a 5 m2 roof (3 m2 usable) still fits 0.5 kWp
+    expect(simulateSolar({ ...input, roofAreaM2: 5 }).kWp).toBe(0.5);
+    // 4 m2 roof: usable 2.4 m2 -> max 0.436 kWp -> rounded down to 0.0
+    const r = simulateSolar({ ...input, roofAreaM2: 4 });
+    expect(r.kWp).toBe(0);
+    expect(Object.values(r).every((v) => v === 0)).toBe(true);
   });
   test("zero roof returns all zeros", () => {
     const r = simulateSolar({ ...input, roofAreaM2: 0 });

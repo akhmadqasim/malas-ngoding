@@ -31,7 +31,8 @@ export function simulateSolar(input: SolarInput): SolarResult {
   const yieldPerKwp = psh * 365 * PERFORMANCE_RATIO;
   const maxKwp = (roof * USABLE_ROOF_RATIO) / M2_PER_KWP;
   const neededKwp = load / yieldPerKwp;
-  const kWp = Math.ceil(Math.min(maxKwp, neededKwp) * 2) / 2;
+  // Size to the need (rounded up to 0.5 kWp) but never above what the roof can hold (rounded down).
+  const kWp = Math.min(Math.ceil(neededKwp * 2) / 2, Math.floor(maxKwp * 2) / 2);
   if (kWp <= 0) return { ...ZERO };
 
   const panels = Math.ceil(kWp / PANEL_KWP);
