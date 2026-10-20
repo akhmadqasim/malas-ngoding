@@ -1,0 +1,62 @@
+{
+  "rumah": {
+    "intensityKwhM2Year": 35,
+    "typicalFloors": 1,
+    "source": "Estimate: 900-1300 VA households 165-373 kWh/month on 60-136 m2 gives about 33 kWh/m2/year (estimated)"
+  },
+  "ruko": {
+    "intensityKwhM2Year": 110,
+    "typicalFloors": 3,
+    "source": "Estimate: shop on ground floor with AC, living space above; about half of the commercial survey mean (estimated)"
+  },
+  "kantor": {
+    "intensityKwhM2Year": 181,
+    "typicalFloors": 4,
+    "source": "ESDM SEC survey 2021, 7 regions, office mean 180.95 kWh/m2/year (verified)"
+  },
+  "pemerintahan": {
+    "intensityKwhM2Year": 130,
+    "typicalFloors": 2,
+    "source": "Estimate: about 70 percent of private office mean, fewer AC hours; 2025 study of 33 offices gave mean 160 (snippet)"
+  },
+  "sekolah": {
+    "intensityKwhM2Year": 35,
+    "typicalFloors": 2,
+    "source": "Estimate: mostly fan and lighting, few AC rooms, about 200 days per year (estimated)"
+  },
+  "kampus": {
+    "intensityKwhM2Year": 85,
+    "typicalFloors": 3,
+    "source": "Measured Undip Engineering faculty 84.71 kWh/m2/year; Polines buildings 27-78 (journal snippets); estimate"
+  },
+  "rumah_sakit": {
+    "intensityKwhM2Year": 181,
+    "typicalFloors": 4,
+    "source": "ESDM SEC survey 2021, hospital mean 180.81 kWh/m2/year (verified). Old ASEAN-USAID value was 380"
+  },
+  "hotel": {
+    "intensityKwhM2Year": 208,
+    "typicalFloors": 6,
+    "source": "ESDM SEC survey 2021, hotel mean 208.15 kWh/m2/year (verified)"
+  },
+  "mal": {
+    "intensityKwhM2Year": 287,
+    "typicalFloors": 3,
+    "source": "ESDM SEC survey 2021, shopping centre mean 286.54 kWh/m2/year (verified)"
+  },
+  "ibadah": {
+    "intensityKwhM2Year": 30,
+    "typicalFloors": 1,
+    "source": "Estimate: lighting, fans, sound system, AC only in some mosques; no study found (estimated)"
+  },
+  "gudang": {
+    "intensityKwhM2Year": 25,
+    "typicalFloors": 1,
+    "source": "Estimate: lighting and fans, low load (estimated)"
+  },
+  "industri": {
+    "intensityKwhM2Year": 120,
+    "typicalFloors": 1,
+    "source": "Estimate: light manufacturing; heavy industry is far higher and needs a metered value (estimated)"
+  }
+}

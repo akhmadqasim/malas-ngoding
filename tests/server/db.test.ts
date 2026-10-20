@@ -1,0 +1,120 @@
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { runMigrations } from "../../scripts/migrate.ts";
+import { seedAll } from "../../scripts/seed.ts";
+import {
+  getBuildingTypes,
+  getEquivalentFactors,
+  getGridMix,
+  listPlants,
+  listRegions,
+  regionAt,
+  regionGeoJSON,
+  sql,
+} from "../../src/server/db.ts";
+import type { BuildingType } from "../../src/shared/types.ts";
+
+const BUILDING_TYPES: BuildingType[] = [
+  "rumah", "ruko", "kantor", "pemerintahan", "sekolah", "kampus",
+  "rumah_sakit", "hotel", "mal", "ibadah", "gudang", "industri",
+];
+
+async function dbReachable(): Promise<boolean> {
+  try {
+    await sql`SELECT 1`;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+const reachable = await dbReachable();
+if (!reachable) {
+  console.warn("SKIP tests/server/db.test.ts: database unreachable (start it with `docker compose up -d db`)");
+}
+
+describe.skipIf(!reachable)("db", () => {
+  beforeAll(async () => {
+    await runMigrations();
+    await seedAll();
+  });
+  afterAll(async () => {
+    await sql.close();
+  });
+
+  test("migrate and seed are idempotent", async () => {
+    await runMigrations();
+    await seedAll();
+    const [row] = await sql`SELECT count(*)::int AS n FROM regions`;
+    expect(row?.n).toBe(10);
+  });
+
+  test("listRegions returns 10 regions with co2 from the grid factor", async () => {
+    const regions = await listRegions();
+    expect(regions).toHaveLength(10);
+    const samarinda = regions.find((r) => r.id === "samarinda");
+    expect(samarinda?.kind).toBe("kota");
+    expect(samarinda?.kwhYear).toBe(1380700000);
+    expect(samarinda?.co2KgYear).toBeCloseTo(1380700000 * 1.14, 0);
+    expect(samarinda?.estimated).toBe(true);
+    const mahulu = regions.find((r) => r.id === "mahakam-ulu");
+    expect(mahulu?.villagesNoPln).toBe(11);
+    expect(regions.find((r) => r.id === "paser")?.villagesNoPln).toBeNull();
+  });
+
+  test("regionAt finds the region containing a point", async () => {
+    expect(await regionAt(117.1466, -0.4998)).toEqual({ id: "samarinda", name: "Samarinda" });
+    expect((await regionAt(116.8312, -1.2717))?.id).toBe("balikpapan");
+  });
+
+  test("regionAt returns null outside Kaltim", async () => {
+    expect(await regionAt(106.8, -6.2)).toBeNull();
+  });
+
+  test("regionGeoJSON has 10 polygon features with summary properties", async () => {
+    const fc = await regionGeoJSON();
+    expect(fc.type).toBe("FeatureCollection");
+    expect(fc.features).toHaveLength(10);
+    for (const f of fc.features) {
+      expect(["Polygon", "MultiPolygon"]).toContain(f.geometry.type);
+      expect(typeof f.properties?.id).toBe("string");
+      expect(typeof f.properties?.co2KgYear).toBe("number");
+    }
+  });
+
+  test("getGridMix shares sum to 1 and carry the official factor", async () => {
+    const mix = await getGridMix();
+    const total = Object.values(mix.shares).reduce((a, b) => a + b, 0);
+    expect(Math.abs(total - 1)).toBeLessThanOrEqual(0.01);
+    expect(mix.factorKgPerKwh).toBe(1.14);
+    expect(mix.shares.batubara).toBe(0.66);
+    expect(mix.fuelFactors.batubara).toBe(1.04);
+    expect(mix.source.length).toBeGreaterThan(0);
+  });
+
+  test("listPlants returns at least 10 point features", async () => {
+    const fc = await listPlants();
+    expect(fc.features.length).toBeGreaterThanOrEqual(10);
+    for (const f of fc.features) {
+      expect(f.geometry.type).toBe("Point");
+      expect(Object.keys(f.properties ?? {}).sort()).toEqual(
+        ["approx", "capacityMw", "fuel", "name", "source", "status"],
+      );
+    }
+  });
+
+  test("getBuildingTypes covers all 12 types", async () => {
+    const types = await getBuildingTypes();
+    expect(Object.keys(types).sort()).toEqual([...BUILDING_TYPES].sort());
+    expect(types.kantor.intensityKwhM2Year).toBe(181);
+    expect(types.hotel.typicalFloors).toBe(6);
+    expect(types.rumah.source.length).toBeGreaterThan(0);
+  });
+
+  test("getEquivalentFactors returns the 5 equivalents", async () => {
+    const eq = await getEquivalentFactors();
+    expect(eq.map((e) => e.key).sort()).toEqual(
+      ["charge_hp", "mobil_km", "motor_km", "penerbangan", "pohon"],
+    );
+    expect(eq.find((e) => e.key === "pohon")?.kgCo2PerUnit).toBe(22);
+  });
+});

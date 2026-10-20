@@ -1,0 +1,122 @@
+[
+  {
+    "id": "paser",
+    "name": "Paser",
+    "kind": "kabupaten",
+    "kwhYear": 346400000,
+    "population": 289750,
+    "customers": 99721,
+    "electrificationPct": 92.31,
+    "villagesNoPln": null,
+    "estimated": true,
+    "source": "kWh: estimate, PLN branch kWh sold 2024 (BPS Tabel 6.1) split by customers, see gaps-filled.md section 4; customers/electrification: BPS Kaltim Dalam Angka 2025 Tabel 6.2 and 6.6 (verified); population: BPS projection 2025 Tabel 3.1 (verified, projection);"
+  },
+  {
+    "id": "kutai-barat",
+    "name": "Kutai Barat",
+    "kind": "kabupaten",
+    "kwhYear": 330800000,
+    "population": 180310,
+    "customers": 58549,
+    "electrificationPct": 94.82,
+    "villagesNoPln": 21,
+    "estimated": true,
+    "source": "kWh: estimate, PLN branch kWh sold 2024 (BPS Tabel 6.1) split by customers, see gaps-filled.md section 4; customers/electrification: BPS Kaltim Dalam Angka 2025 Tabel 6.2 and 6.6 (verified); population: BPS projection 2025 Tabel 3.1 (verified, projection);"
+  },
+  {
+    "id": "kutai-kartanegara",
+    "name": "Kutai Kartanegara",
+    "kind": "kabupaten",
+    "kwhYear": 1195500000,
+    "population": 845620,
+    "customers": 245946,
+    "electrificationPct": 89.32,
+    "villagesNoPln": null,
+    "estimated": true,
+    "source": "kWh: estimate, PLN branch kWh sold 2024 (BPS Tabel 6.1) split by customers, see gaps-filled.md section 4; customers/electrification: BPS Kaltim Dalam Angka 2025 Tabel 6.2 and 6.6 (verified); population: BPS projection 2025 Tabel 3.1 (verified, projection);"
+  },
+  {
+    "id": "kutai-timur",
+    "name": "Kutai Timur",
+    "kind": "kabupaten",
+    "kwhYear": 460100000,
+    "population": 470400,
+    "customers": 114579,
+    "electrificationPct": 89.17,
+    "villagesNoPln": null,
+    "estimated": true,
+    "source": "kWh: estimate, PLN branch kWh sold 2024 (BPS Tabel 6.1) split by customers, see gaps-filled.md section 4; customers/electrification: BPS Kaltim Dalam Angka 2025 Tabel 6.2 and 6.6 (verified); population: BPS projection 2025 Tabel 3.1 (verified, projection);"
+  },
+  {
+    "id": "berau",
+    "name": "Berau",
+    "kind": "kabupaten",
+    "kwhYear": 209500000,
+    "population": 265300,
+    "customers": 89331,
+    "electrificationPct": 89.58,
+    "villagesNoPln": null,
+    "estimated": true,
+    "source": "kWh: estimate, PLN branch kWh sold 2024 (BPS Tabel 6.1) split by customers, see gaps-filled.md section 4; customers/electrification: BPS Kaltim Dalam Angka 2025 Tabel 6.2 and 6.6 (verified); population: BPS projection 2025 Tabel 3.1 (verified, projection);"
+  },
+  {
+    "id": "penajam-paser-utara",
+    "name": "Penajam Paser Utara",
+    "kind": "kabupaten",
+    "kwhYear": 236200000,
+    "population": 400030,
+    "customers": 68008,
+    "electrificationPct": 92.83,
+    "villagesNoPln": null,
+    "estimated": true,
+    "source": "kWh: estimate, PLN branch kWh sold 2024 (BPS Tabel 6.1) split by customers, see gaps-filled.md section 4; customers/electrification: BPS Kaltim Dalam Angka 2025 Tabel 6.2 and 6.6 (verified); population: BPS projection 2025 Tabel 3.1 (verified, projection);"
+  },
+  {
+    "id": "mahakam-ulu",
+    "name": "Mahakam Ulu",
+    "kind": "kabupaten",
+    "kwhYear": 10600000,
+    "population": 34740,
+    "customers": 7071,
+    "electrificationPct": 87.41,
+    "villagesNoPln": 11,
+    "estimated": true,
+    "source": "kWh: estimate, PLN branch kWh sold 2024 (BPS Tabel 6.1) split by customers, see gaps-filled.md section 4; customers/electrification: BPS Kaltim Dalam Angka 2025 Tabel 6.2 and 6.6 (verified); population: BPS projection 2025 Tabel 3.1 (verified, projection);"
+  },
+  {
+    "id": "balikpapan",
+    "name": "Balikpapan",
+    "kind": "kota",
+    "kwhYear": 967800000,
+    "population": 725440,
+    "customers": 278604,
+    "electrificationPct": 99.62,
+    "villagesNoPln": null,
+    "estimated": true,
+    "source": "kWh: estimate, PLN branch kWh sold 2024 (BPS Tabel 6.1) split by customers, see gaps-filled.md section 4; customers/electrification: BPS Kaltim Dalam Angka 2025 Tabel 6.2 and 6.6 (verified); population: BPS projection 2025 Tabel 3.1 (verified, projection);"
+  },
+  {
+    "id": "samarinda",
+    "name": "Samarinda",
+    "kind": "kota",
+    "kwhYear": 1380700000,
+    "population": 865310,
+    "customers": 340041,
+    "electrificationPct": 100,
+    "villagesNoPln": null,
+    "estimated": true,
+    "source": "kWh: BPS Samarinda table 1,380,657 thousand kWh (search snippet, year not confirmed, assumed 2024); customers/electrification: BPS Kaltim Dalam Angka 2025 Tabel 6.2 and 6.6 (verified); population: BPS projection 2025 Tabel 3.1 (verified, projection);"
+  },
+  {
+    "id": "bontang",
+    "name": "Bontang",
+    "kind": "kota",
+    "kwhYear": 256000000,
+    "population": 190710,
+    "customers": 63761,
+    "electrificationPct": 94.43,
+    "villagesNoPln": null,
+    "estimated": true,
+    "source": "kWh: estimate, PLN branch kWh sold 2024 (BPS Tabel 6.1) split by customers, see gaps-filled.md section 4; customers/electrification: BPS Kaltim Dalam Angka 2025 Tabel 6.2 and 6.6 (verified); population: BPS projection 2025 Tabel 3.1 (verified, projection);"
+  }
+]

@@ -1,0 +1,37 @@
+[
+  {
+    "key": "mobil_km",
+    "label": "km naik mobil",
+    "kgCo2PerUnit": 0.19,
+    "unit": "km",
+    "source": "Average new car 190 g/km (GFEI/IEA via snippet; also 2.31 kg CO2/L / 12 km/L); unverified"
+  },
+  {
+    "key": "motor_km",
+    "label": "km naik motor",
+    "kgCo2PerUnit": 0.05,
+    "unit": "km",
+    "source": "Estimate: 2.31 kg CO2/L / 45 km/L; Indonesian dyno studies 0.027-0.082 kg/km"
+  },
+  {
+    "key": "pohon",
+    "label": "pohon menyerap setahun",
+    "kgCo2PerUnit": 22,
+    "unit": "pohon",
+    "source": "22 kg CO2/tree/year, widely quoted EEA figure, contested range 10-40"
+  },
+  {
+    "key": "charge_hp",
+    "label": "kali charge HP",
+    "kgCo2PerUnit": 0.017,
+    "unit": "kali",
+    "source": "Estimate: 15 Wh per full charge x 1.14 kg/kWh (Kaltim grid factor)"
+  },
+  {
+    "key": "penerbangan",
+    "label": "penerbangan Jakarta–Balikpapan",
+    "kgCo2PerUnit": 111.1,
+    "unit": "penerbangan",
+    "source": "ICAO ICEC API, CGK-BPN economy one way, 1,255 km, 111.13 kg CO2 per passenger (verified, queried 2026-10-21)"
+  }
+]

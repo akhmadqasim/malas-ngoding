@@ -1,0 +1,23 @@
+{
+  "year": 2024,
+  "factorKgPerKwh": 1.14,
+  "shares": {
+    "batubara": 0.66,
+    "gas": 0.25,
+    "diesel": 0.07,
+    "surya": 0.01,
+    "air": 0,
+    "biomassa": 0.01,
+    "lainnya": 0
+  },
+  "fuelFactors": {
+    "batubara": 1.04,
+    "gas": 0.53,
+    "diesel": 0.75,
+    "surya": 0,
+    "air": 0,
+    "biomassa": 0,
+    "lainnya": 0
+  },
+  "source": "Factor: Kepmen ESDM 163.K/HK.02/MEM.S/2021 Lampiran no. 73 Mahakam (Kalimantan Timur), CM ex-post OM0.5/BM0.5 = 1.14 t CO2/MWh (2019 data, verified; 1.13 for PLTS/PLTB). Shares: estimate for 2024 from capacity (Dinas ESDM Kaltim) x capacity factors. Fuel factors: IPCC 2006 EF x assumed efficiency (estimate)."
+}

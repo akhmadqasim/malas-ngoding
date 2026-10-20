@@ -1,0 +1,132 @@
+[
+  {
+    "name": "PLTU Kaltim Teluk Balikpapan",
+    "fuel": "batubara",
+    "capacityMw": 220,
+    "status": "operating",
+    "lat": -1.17036,
+    "lng": 116.78872,
+    "approx": false,
+    "source": "gem.wiki Kaltim Teluk Balikpapan power station (2 x 110 MW, operating 2017, biomass co-firing 5%); coordinates as printed on gem.wiki"
+  },
+  {
+    "name": "PLTU Embalut",
+    "fuel": "batubara",
+    "capacityMw": 60,
+    "status": "operating",
+    "lat": -0.46,
+    "lng": 117.05,
+    "approx": true,
+    "source": "Capacity: gem.wiki Embalut power station (operating 2014). Coordinates: asumsi, near Tenggarong Seberang, Kutai Kartanegara (no source found)"
+  },
+  {
+    "name": "PLTU Embalut - Tanjung Batu",
+    "fuel": "batubara",
+    "capacityMw": 50,
+    "status": "unknown",
+    "lat": -0.4,
+    "lng": 117.05,
+    "approx": true,
+    "source": "Capacity: inzonex WRI power atlas list (snippet, unverified). Coordinates: asumsi, near Tanjung Batu, Kutai Kartanegara"
+  },
+  {
+    "name": "PLTGU Tanjung Batu",
+    "fuel": "gas",
+    "capacityMw": 60,
+    "status": "operating",
+    "lat": -0.381356,
+    "lng": 117.051316,
+    "approx": false,
+    "source": "gem.wiki Tanjung Batu power station (operating 1997); a 2014 Antara snippet gives 2 x 20 MW, which conflicts"
+  },
+  {
+    "name": "Kaltim power station (Kaltim Peaker 2)",
+    "fuel": "gas",
+    "capacityMw": 100,
+    "status": "operating",
+    "lat": -0.384362,
+    "lng": 117.051473,
+    "approx": false,
+    "source": "gem.wiki Kaltim power station (2 x 50 MW operating since 2013; more units planned 2026-2027)"
+  },
+  {
+    "name": "PLTG Senipah",
+    "fuel": "gas",
+    "capacityMw": 117,
+    "status": "operating",
+    "lat": -0.987643,
+    "lng": 117.135578,
+    "approx": false,
+    "source": "gem.wiki Senipah power station (IPP, combined cycle, operating 2020)"
+  },
+  {
+    "name": "PLTG Sambera",
+    "fuel": "gas",
+    "capacityMw": 40,
+    "status": "operating",
+    "lat": -0.22,
+    "lng": 117.28,
+    "approx": true,
+    "source": "Capacity: esdm.go.id news (snippet, commissioned 2009). Coordinates: asumsi, Muara Badak, Kutai Kartanegara"
+  },
+  {
+    "name": "PLTS IKN",
+    "fuel": "surya",
+    "capacityMw": 50,
+    "status": "operating",
+    "lat": -0.975,
+    "lng": 116.7,
+    "approx": true,
+    "source": "Capacity: bisnis.com 2 Mar 2024 (phase 1, 10 MW connected; full 50 MW status not confirmed). Coordinates: asumsi, IKN area, Sepaku, Penajam Paser Utara"
+  },
+  {
+    "name": "PLTU Kaltim-1",
+    "fuel": "batubara",
+    "capacityMw": 100,
+    "status": "operating",
+    "lat": -1.17,
+    "lng": 116.79,
+    "approx": true,
+    "source": "Capacity: siujptl.co.id company page (location unclear, may overlap PLTU Teluk Balikpapan). Coordinates: asumsi, copied from Teluk Balikpapan"
+  },
+  {
+    "name": "Balikpapan Refinery power plant",
+    "fuel": "gas",
+    "capacityMw": 224,
+    "status": "unknown",
+    "lat": -1.27,
+    "lng": 116.8,
+    "approx": true,
+    "source": "Capacity: inzonex WRI power atlas list (snippet, unverified). Coordinates: asumsi, Balikpapan refinery area"
+  },
+  {
+    "name": "AlamTri captive coal power station",
+    "fuel": "batubara",
+    "capacityMw": 2200,
+    "status": "unknown",
+    "lat": -0.1,
+    "lng": 117.5,
+    "approx": true,
+    "source": "Capacity: inzonex WRI power atlas list (snippet, captive, not PLN grid). Coordinates: asumsi, placeholder inside Kutai Kartanegara"
+  },
+  {
+    "name": "NALCO East Kutai power station",
+    "fuel": "batubara",
+    "capacityMw": 1250,
+    "status": "unknown",
+    "lat": 0.5,
+    "lng": 117.15,
+    "approx": true,
+    "source": "Capacity: inzonex WRI power atlas list (snippet, captive, not PLN grid). Coordinates: asumsi, near Sangatta, Kutai Timur"
+  },
+  {
+    "name": "PLTU Kaltim 4 (planned)",
+    "fuel": "batubara",
+    "capacityMw": 200,
+    "status": "planned",
+    "lat": -0.45,
+    "lng": 117.1,
+    "approx": true,
+    "source": "Capacity: RUPTL 2016-2025 via Undip journal (snippet, current status unknown). Coordinates: asumsi, Kutai Kartanegara"
+  }
+]

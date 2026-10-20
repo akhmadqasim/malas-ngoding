@@ -1,0 +1,11 @@
+{
+  "costRpPerKwp": 15000000,
+  "batteryRpPerKwh": 2500000,
+  "tariffs": {
+    "R1_1300": 1444.7,
+    "R1_2200": 1444.7,
+    "B2": 1444.7,
+    "P1": 1699.53
+  },
+  "source": "PV: Rp14-17 million/kWp on-grid (sobatbangun.com Apr 2026, vendor blogs; PLN 2022 figure Rp15 million). Battery: marketplace LiFePO4 listings 2026, Rp1.8-3.3 million/kWh. Tariffs: detik.com Oct 2026, same as Q3 2026 (news, not the Kepmen)."
+}
