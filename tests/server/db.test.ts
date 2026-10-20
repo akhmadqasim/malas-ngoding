@@ -2,12 +2,15 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { runMigrations } from "../../scripts/migrate.ts";
 import { seedAll } from "../../scripts/seed.ts";
 import {
+  cacheGet,
+  cacheSet,
   getBuildingTypes,
   getEquivalentFactors,
   getGridMix,
   listPlants,
   listRegions,
   regionAt,
+  regionById,
   regionGeoJSON,
   sql,
 } from "../../src/server/db.ts";
@@ -116,5 +119,33 @@ describe.skipIf(!reachable)("db", () => {
       ["charge_hp", "mobil_km", "motor_km", "penerbangan", "pohon"],
     );
     expect(eq.find((e) => e.key === "pohon")?.kgCo2PerUnit).toBe(22);
+  });
+
+  test("regionById returns the summary with a centroid, or null", async () => {
+    const r = await regionById("samarinda");
+    expect(r?.name).toBe("Samarinda");
+    expect(r?.kwhYear).toBe(1380700000);
+    expect(r?.centroid).toHaveLength(2);
+    expect(r?.centroid[0]).toBeGreaterThan(116);
+    expect(r?.centroid[0]).toBeLessThan(118);
+    expect(await regionById("nope")).toBeNull();
+  });
+
+  test("cacheSet and cacheGet round-trip objects and overwrite", async () => {
+    expect(await cacheGet("poi_cache", "test:missing")).toBeNull();
+    await cacheSet("poi_cache", "test:k", { poi: { class: "education", distanceM: 3 } });
+    expect(await cacheGet("poi_cache", "test:k")).toEqual({ poi: { class: "education", distanceM: 3 } });
+    await cacheSet("poi_cache", "test:k", { poi: null });
+    expect(await cacheGet("poi_cache", "test:k")).toEqual({ poi: null });
+    await cacheSet("building_estimates", "test:b", { kwhYear: 5 }, { footprintM2: 10 });
+    expect(await cacheGet("building_estimates", "test:b")).toEqual({ kwhYear: 5 });
+    await sql`DELETE FROM poi_cache WHERE key LIKE 'test:%'`;
+    await sql`DELETE FROM building_estimates WHERE feature_id LIKE 'test:%'`;
+  });
+
+  test("cache functions reject table names outside the whitelist", async () => {
+    await expect(cacheGet("regions; DROP TABLE regions" as any, "x")).rejects.toThrow(/Unknown cache table/);
+    await expect(cacheSet("regions" as any, "x", {})).rejects.toThrow(/Unknown cache table/);
+    expect((await sql`SELECT count(*)::int AS n FROM regions`)[0]?.n).toBe(10);
   });
 });

@@ -1,11 +1,12 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import type { Server } from "bun";
 import { createServer } from "../../src/server/index.ts";
+import { fakeDeps } from "./fakes.ts";
 
 let server: Server<undefined>;
 
 beforeAll(() => {
-  server = createServer({ port: 0, deps: {} });
+  server = createServer({ port: 0, deps: fakeDeps().deps });
 });
 
 afterAll(() => {

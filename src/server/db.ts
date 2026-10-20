@@ -154,3 +154,65 @@ export async function getEquivalentFactors(): Promise<EquivalentFactor[]> {
     unit: String(r.unit),
   }));
 }
+
+/** One region with its centroid, or null when the id does not exist. */
+export async function regionById(
+  id: string,
+): Promise<(RegionSummary & { centroid: [number, number] }) | null> {
+  const factor = await latestGridFactor();
+  const rows = await sql`
+    SELECT id, name, kind, kwh_year, population, customers, electrification_pct,
+           villages_no_pln, estimated,
+           ST_X(centroid) AS lng, ST_Y(centroid) AS lat
+    FROM regions WHERE id = ${id}`;
+  const row = rows[0];
+  if (!row) return null;
+  return { ...toSummary(row, factor), centroid: [Number(row.lng), Number(row.lat)] };
+}
+
+/** Cache tables and the columns that hold the key and the cached value. */
+const CACHE_TABLES = {
+  poi_cache: { key: "key", value: "payload" },
+  weather_cache: { key: "key", value: "payload" },
+  building_estimates: { key: "feature_id", value: "result" },
+} as const;
+export type CacheTable = keyof typeof CACHE_TABLES;
+
+function cacheColumns(table: string) {
+  if (!Object.hasOwn(CACHE_TABLES, table)) throw new Error(`Unknown cache table: ${table}`);
+  return CACHE_TABLES[table as CacheTable];
+}
+
+/** Cached JSON object for `key`, or null on a miss. */
+export async function cacheGet(table: CacheTable, key: string): Promise<Record<string, unknown> | null> {
+  const col = cacheColumns(table);
+  const rows = await sql`
+    SELECT ${sql(col.value)} AS payload FROM ${sql(table)} WHERE ${sql(col.key)} = ${key}`;
+  const payload = rows[0]?.payload;
+  return payload && typeof payload === "object" ? (payload as Record<string, unknown>) : null;
+}
+
+/**
+ * Insert or replace a cached JSON object. `input` is only stored by `building_estimates`,
+ * whose `input` column is required.
+ */
+export async function cacheSet(
+  table: CacheTable,
+  key: string,
+  payload: Record<string, unknown>,
+  input: Record<string, unknown> = {},
+): Promise<void> {
+  cacheColumns(table);
+  if (table === "building_estimates") {
+    await sql`
+      INSERT INTO building_estimates (feature_id, input, result)
+      VALUES (${key}, ${input}, ${payload})
+      ON CONFLICT (feature_id) DO UPDATE
+        SET input = EXCLUDED.input, result = EXCLUDED.result, created_at = now()`;
+    return;
+  }
+  await sql`
+    INSERT INTO ${sql(table)} (key, payload, fetched_at)
+    VALUES (${key}, ${payload}, now())
+    ON CONFLICT (key) DO UPDATE SET payload = EXCLUDED.payload, fetched_at = now()`;
+}
