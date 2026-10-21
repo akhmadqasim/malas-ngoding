@@ -37,10 +37,12 @@ export async function regionAt(
   return row ? { id: row.id, name: row.name } : null;
 }
 
+const GRID_EMPTY = "grid_mix is empty; run `bun run seed`";
+
 /** Latest grid factor (kg CO2 per kWh). Throws on an unseeded database, like `getGridMix`. */
 async function latestGridFactor(): Promise<number> {
   const rows = await sql`SELECT grid_factor FROM grid_mix ORDER BY year DESC LIMIT 1`;
-  if (!rows[0]) throw new Error("grid_mix is empty; run `bun run seed`");
+  if (!rows[0]) throw new Error(GRID_EMPTY);
   return Number(rows[0].grid_factor);
 }
 
@@ -136,7 +138,7 @@ export async function getGridMix(): Promise<GridMix> {
     SELECT year, fuel, share, fuel_factor, grid_factor, source FROM grid_mix
     WHERE year = (SELECT max(year) FROM grid_mix)`;
   const first = rows[0];
-  if (!first) throw new Error("grid_mix is empty; run `bun run seed`");
+  if (!first) throw new Error(GRID_EMPTY);
   const shares = {} as Record<FuelType, number>;
   const fuelFactors = {} as Record<FuelType, number>;
   for (const r of rows) {
