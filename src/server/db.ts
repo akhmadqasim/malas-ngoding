@@ -252,6 +252,37 @@ export async function climatologySet(key: string, lat: number, lng: number, valu
           psh_year = EXCLUDED.psh_year, fetched_at = now()`;
 }
 
+export type ChatRole = "user" | "assistant";
+
+/** Creates the chat session row the first time a session id is used. */
+export async function ensureChatSession(id: string): Promise<void> {
+  await sql`INSERT INTO chat_sessions (id) VALUES (${id}) ON CONFLICT (id) DO NOTHING`;
+}
+
+/** The last `limit` messages of a session, oldest first, as role and text ("" when a message has no text). */
+export async function chatHistory(sessionId: string, limit: number): Promise<{ role: ChatRole; text: string }[]> {
+  const rows = await sql`
+    SELECT role, content->>'text' AS text FROM (
+      SELECT id, role, content FROM chat_messages
+      WHERE session_id = ${sessionId}
+      ORDER BY id DESC LIMIT ${limit}
+    ) recent
+    ORDER BY id`;
+  return rows.map((r: Record<string, unknown>) => ({
+    role: r.role as ChatRole,
+    text: typeof r.text === "string" ? r.text : "",
+  }));
+}
+
+/** Stores one chat message. The session row must exist (see `ensureChatSession`). */
+export async function addChatMessage(
+  sessionId: string,
+  role: ChatRole,
+  content: Record<string, unknown>,
+): Promise<void> {
+  await sql`INSERT INTO chat_messages (session_id, role, content) VALUES (${sessionId}, ${role}, ${content})`;
+}
+
 /**
  * Insert or replace a cached JSON object. `input` is only stored by `building_estimates`,
  * whose `input` column is required.

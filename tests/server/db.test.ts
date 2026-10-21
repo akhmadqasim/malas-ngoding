@@ -2,11 +2,14 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { runMigrations } from "../../scripts/migrate.ts";
 import { seedAll } from "../../scripts/seed.ts";
 import {
+  addChatMessage,
   cacheGet,
   cacheGetAged,
+  chatHistory,
   climatologyGet,
   climatologySet,
   cacheSet,
+  ensureChatSession,
   getBuildingTypes,
   getEquivalentFactors,
   getGridMix,
@@ -212,5 +215,36 @@ describe.skipIf(!reachable)("db", () => {
     await expect(cacheGet("regions; DROP TABLE regions" as any, "x")).rejects.toThrow(/Unknown cache table/);
     await expect(cacheSet("regions" as any, "x", {})).rejects.toThrow(/Unknown cache table/);
     expect((await sql`SELECT count(*)::int AS n FROM regions`)[0]?.n).toBe(10);
+  });
+
+  test("a chat session is created once and its history returns the last messages oldest first", async () => {
+    const id = crypto.randomUUID();
+    const action = { name: "fly_to_region", input: { region: "samarinda" } };
+    try {
+      await ensureChatSession(id);
+      await ensureChatSession(id);
+      expect((await sql`SELECT count(*)::int AS n FROM chat_sessions WHERE id = ${id}`)[0]?.n).toBe(1);
+      for (let i = 0; i < 5; i++) {
+        if (i % 2 === 0) await addChatMessage(id, "user", { text: `tanya ${i}` });
+        else await addChatMessage(id, "assistant", { text: `jawab ${i}`, actions: [action] });
+      }
+      expect(await chatHistory(id, 3)).toEqual([
+        { role: "user", text: "tanya 2" },
+        { role: "assistant", text: "jawab 3" },
+        { role: "user", text: "tanya 4" },
+      ]);
+      expect(await chatHistory(id, 20)).toHaveLength(5);
+      expect(await chatHistory(crypto.randomUUID(), 20)).toEqual([]);
+      const [row] = await sql`
+        SELECT content FROM chat_messages WHERE session_id = ${id} AND role = 'assistant' ORDER BY id LIMIT 1`;
+      expect(row?.content).toEqual({ text: "jawab 1", actions: [action] });
+    } finally {
+      await sql`DELETE FROM chat_sessions WHERE id = ${id}`;
+    }
+    expect((await sql`SELECT count(*)::int AS n FROM chat_messages WHERE session_id = ${id}`)[0]?.n).toBe(0);
+  });
+
+  test("a chat message for a session that does not exist is rejected", async () => {
+    await expect(addChatMessage(crypto.randomUUID(), "user", { text: "x" })).rejects.toThrow();
   });
 });

@@ -16,9 +16,16 @@ export type SolarSimulation = SolarResult & {
   assumptions: string[];
 };
 
-function parseInput(
-  body: unknown,
-): { input: { lat: number; lng: number; roofAreaM2: number; kwhYear: number; backupHours: number } } | { problem: string } {
+export interface SolarRequestInput {
+  lat: number;
+  lng: number;
+  roofAreaM2: number;
+  kwhYear: number;
+  backupHours: number;
+}
+
+/** Validates a simulation request (the HTTP body or a chat tool input) and clamps roof and backup hours. */
+export function parseSolarInput(body: unknown): { input: SolarRequestInput } | { problem: string } {
   if (typeof body !== "object" || body === null || Array.isArray(body)) {
     return { problem: "Data simulasi tidak valid." };
   }
@@ -39,6 +46,38 @@ function parseInput(
   };
 }
 
+/**
+ * Rooftop solar for a point with the seed tariff and costs, NASA POWER sun hours (cached, with a seed
+ * fallback) and the grid factor. Used by the HTTP route and the chat, so both give the same numbers.
+ */
+export async function simulateSolarAt(
+  deps: Pick<AppDeps, "db" | "nasa">,
+  { lat, lng, roofAreaM2, kwhYear, backupHours }: SolarRequestInput,
+): Promise<SolarSimulation> {
+  const [climate, grid] = await Promise.all([cachedClimatology(deps, lat, lng), deps.db.getGridMix()]);
+  const result = simulateSolar({
+    roofAreaM2,
+    kwhYear,
+    peakSunHours: climate.pshYear,
+    backupHours,
+    tariffRpPerKwh: costs.tariffs.R1_1300,
+    costRpPerKwp: costs.costRpPerKwp,
+    batteryRpPerKwh: costs.batteryRpPerKwh,
+    gridFactorKgPerKwh: grid.factorKgPerKwh,
+  });
+  const assumptions = [
+    `Tarif listrik Rp ${costs.tariffs.R1_1300.toLocaleString("id-ID")} per kWh (golongan R-1 1300 VA).`,
+    `Biaya panel Rp ${costs.costRpPerKwp.toLocaleString("id-ID")} per kWp dan baterai Rp ${costs.batteryRpPerKwh.toLocaleString("id-ID")} per kWh (perkiraan).`,
+  ];
+  if (climate.fallback) assumptions.push(climate.fallback);
+  return {
+    ...result,
+    peakSunHours: climate.pshYear,
+    pshByMonth: climate.pshByMonth,
+    assumptions,
+  };
+}
+
 export function solarRoutes(deps: AppDeps): RouteTable {
   return {
     "/api/solar/simulate": {
@@ -49,33 +88,9 @@ export function solarRoutes(deps: AppDeps): RouteTable {
         } catch {
           return error("Isi permintaan bukan JSON yang valid.", 400);
         }
-        const parsed = parseInput(body);
+        const parsed = parseSolarInput(body);
         if ("problem" in parsed) return error(parsed.problem, 400);
-        const { lat, lng, roofAreaM2, kwhYear, backupHours } = parsed.input;
-
-        const [climate, grid] = await Promise.all([cachedClimatology(deps, lat, lng), deps.db.getGridMix()]);
-        const result = simulateSolar({
-          roofAreaM2,
-          kwhYear,
-          peakSunHours: climate.pshYear,
-          backupHours,
-          tariffRpPerKwh: costs.tariffs.R1_1300,
-          costRpPerKwp: costs.costRpPerKwp,
-          batteryRpPerKwh: costs.batteryRpPerKwh,
-          gridFactorKgPerKwh: grid.factorKgPerKwh,
-        });
-        const assumptions = [
-          `Tarif listrik Rp ${costs.tariffs.R1_1300.toLocaleString("id-ID")} per kWh (golongan R-1 1300 VA).`,
-          `Biaya panel Rp ${costs.costRpPerKwp.toLocaleString("id-ID")} per kWp dan baterai Rp ${costs.batteryRpPerKwh.toLocaleString("id-ID")} per kWh (perkiraan).`,
-        ];
-        if (climate.fallback) assumptions.push(climate.fallback);
-        const out: SolarSimulation = {
-          ...result,
-          peakSunHours: climate.pshYear,
-          pshByMonth: climate.pshByMonth,
-          assumptions,
-        };
-        return json(out);
+        return json(await simulateSolarAt(deps, parsed.input));
       }),
     },
   };

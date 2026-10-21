@@ -1,4 +1,5 @@
 import type { AppDeps } from "../../src/server/index.ts";
+import type { ChatModel } from "../../src/server/services/claude.ts";
 import type { Climatology } from "../../src/server/services/nasaPower.ts";
 import type { PoiHit } from "../../src/server/services/tilequery.ts";
 import type { ForecastHour } from "../../src/shared/pvForecast.ts";
@@ -62,6 +63,12 @@ const EQUIVALENTS: EquivalentFactor[] = [
   { key: "penerbangan", label: "Penerbangan", kgCo2PerUnit: 90, unit: "penerbangan" },
 ];
 
+export interface FakeChatMessage {
+  sessionId: string;
+  role: "user" | "assistant";
+  content: Record<string, unknown>;
+}
+
 export interface FakeDeps {
   deps: AppDeps;
   /** Cache rows written so far, keyed "table:key", to assert what was (not) stored. */
@@ -71,6 +78,10 @@ export interface FakeDeps {
   poiCalls: Array<[number, number]>;
   nasaCalls: Array<[number, number]>;
   meteoCalls: Array<[number, number]>;
+  /** Chat session ids created so far. */
+  chatSessions: Set<string>;
+  /** Chat messages stored so far, oldest first. Push to it to seed a history. */
+  chatMessages: FakeChatMessage[];
 }
 
 export interface FakeUpstreams {
@@ -78,6 +89,8 @@ export interface FakeUpstreams {
   nasa?: Climatology | Error;
   /** Open-Meteo answer: hours or an Error to throw. Default: a forecast that fails the test if used. */
   meteo?: ForecastHour[] | Error;
+  /** The Claude model behind the chat. Default: one that fails the request if used. */
+  chat?: ChatModel;
 }
 
 /**
@@ -90,6 +103,8 @@ export function fakeDeps(poiAnswer: PoiHit | null | Error = null, upstreams: Fak
   const poiCalls: Array<[number, number]> = [];
   const nasaCalls: Array<[number, number]> = [];
   const meteoCalls: Array<[number, number]> = [];
+  const chatSessions = new Set<string>();
+  const chatMessages: FakeChatMessage[] = [];
   const nasaAnswer = upstreams.nasa ?? { pshByMonth: Array<number>(12).fill(4.8), pshYear: 4.8 };
   const meteoAnswer = upstreams.meteo ?? new Error("meteo not expected");
   const deps: AppDeps = {
@@ -129,6 +144,18 @@ export function fakeDeps(poiAnswer: PoiHit | null | Error = null, upstreams: Fak
       climatologySet: async (key, _lat, _lng, value) => {
         stored.set(`solar_climatology:${key}`, JSON.parse(JSON.stringify(value)));
       },
+      ensureChatSession: async (id) => {
+        chatSessions.add(id);
+      },
+      chatHistory: async (sessionId, limit) =>
+        chatMessages
+          .filter((m) => m.sessionId === sessionId)
+          .slice(-limit)
+          .map((m) => ({ role: m.role, text: typeof m.content.text === "string" ? m.content.text : "" })),
+      addChatMessage: async (sessionId, role, content) => {
+        if (!chatSessions.has(sessionId)) throw new Error("chat session does not exist");
+        chatMessages.push({ sessionId, role, content: JSON.parse(JSON.stringify(content)) });
+      },
     },
     poi: async (lng, lat) => {
       poiCalls.push([lng, lat]);
@@ -145,6 +172,11 @@ export function fakeDeps(poiAnswer: PoiHit | null | Error = null, upstreams: Fak
       if (meteoAnswer instanceof Error) throw meteoAnswer;
       return meteoAnswer;
     },
+    chatModel:
+      upstreams.chat ??
+      (() => {
+        throw new Error("chat model not expected");
+      }),
   };
-  return { deps, stored, ages, poiCalls, nasaCalls, meteoCalls };
+  return { deps, stored, ages, poiCalls, nasaCalls, meteoCalls, chatSessions, chatMessages };
 }

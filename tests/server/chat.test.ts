@@ -1,0 +1,815 @@
+import Anthropic from "@anthropic-ai/sdk";
+import { afterAll, afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import type { Server } from "bun";
+import { createServer } from "../../src/server/index.ts";
+import {
+  CHAT_MAX_ITERATIONS,
+  CHAT_MAX_TOKENS,
+  CHAT_MODEL,
+  type ChatModel,
+  type ChatModelStream,
+  LAST_CALL_NOTICE,
+  createChatModel,
+  runChat,
+} from "../../src/server/services/claude.ts";
+import type { PoiHit } from "../../src/server/services/tilequery.ts";
+import { fmtRupiah } from "../../src/shared/format.ts";
+import type { ForecastHour } from "../../src/shared/pvForecast.ts";
+import type { BuildingEstimate } from "../../src/shared/types.ts";
+import { type FakeDeps, type FakeUpstreams, fakeDeps } from "./fakes.ts";
+
+const SESSION = "6f1c2b9e-3d4a-4e5f-8a7b-9c0d1e2f3a4b";
+const CONTEXT = { selectedRegionId: null, selectedBuilding: null, view: { center: [117.15, -0.5], zoom: 9 } };
+const SCHOOL: PoiHit = { class: "education", type: "School", name: "SMA 1", distanceM: 6 };
+const BUILDING: BuildingEstimate = {
+  featureId: "b1",
+  type: "sekolah",
+  typeSource: "poi",
+  floors: 2,
+  floorAreaM2: 800,
+  kwhYear: 145_600,
+  kwhMonth: 12_133.3,
+  co2KgYear: 165_984,
+  bySource: [],
+  equivalents: [],
+  region: { id: "samarinda", name: "Samarinda" },
+  assumptions: ["Tinggi bangunan tidak ada di data peta, dipakai jumlah lantai umum: 2 lantai."],
+};
+const TOOL_NAMES = [
+  "list_regions",
+  "get_region_stats",
+  "get_grid_mix",
+  "estimate_building_at",
+  "simulate_solar",
+  "get_weather",
+  "fly_to_region",
+  "fly_to",
+  "select_building_at",
+  "toggle_layer",
+  "set_metric",
+  "set_rain",
+  "open_tab",
+];
+
+// ---------- a fake Claude that streams scripted replies the way the SDK does ----------
+
+interface ToolCall {
+  name: string;
+  input: unknown;
+}
+/** One scripted reply. A bare Error is thrown before anything streams; `fail` is thrown after the text. */
+type Turn =
+  | { text?: string; tools?: ToolCall[]; thinking?: boolean; stop?: Anthropic.StopReason; fail?: Error }
+  | Error;
+
+interface FakeModel {
+  model: ChatModel;
+  /** Request params of every call, copied when the call was made. */
+  calls: Anthropic.MessageStreamParams[];
+  signals: AbortSignal[];
+}
+
+const textDelta = (text: string): Anthropic.MessageStreamEvent => ({
+  type: "content_block_delta",
+  index: 0,
+  delta: { type: "text_delta", text },
+});
+
+function replay(turn: Turn, n: number): ChatModelStream {
+  if (turn instanceof Error) {
+    return {
+      async *[Symbol.asyncIterator]() {
+        throw turn;
+      },
+      finalMessage: () => Promise.reject(turn),
+    };
+  }
+  const tools = turn.tools ?? [];
+  const content: unknown[] = [];
+  if (turn.thinking) content.push({ type: "thinking", thinking: "", signature: `sig_${n}` });
+  if (turn.text) content.push({ type: "text", text: turn.text, citations: null });
+  tools.forEach((t, i) =>
+    content.push({ type: "tool_use", id: `toolu_${n}_${i}`, name: t.name, input: t.input, caller: { type: "direct" } }),
+  );
+  const message = {
+    id: `msg_${n}`,
+    type: "message",
+    role: "assistant",
+    model: CHAT_MODEL,
+    content,
+    stop_reason: turn.stop ?? (tools.length > 0 ? "tool_use" : "end_turn"),
+    stop_sequence: null,
+    usage: { input_tokens: 10, output_tokens: 10 },
+  } as unknown as Anthropic.Message;
+  const text = turn.text ?? "";
+  return {
+    async *[Symbol.asyncIterator]() {
+      // Two deltas, so the answer really streams.
+      const cut = Math.ceil(text.length / 2);
+      for (const part of [text.slice(0, cut), text.slice(cut)]) if (part) yield textDelta(part);
+      if (turn.fail) throw turn.fail;
+      for (const [i, t] of tools.entries()) {
+        yield {
+          type: "content_block_start",
+          index: i + 1,
+          content_block: { type: "tool_use", id: `toolu_${n}_${i}`, name: t.name, input: {}, caller: { type: "direct" } },
+        } as Anthropic.MessageStreamEvent;
+        yield { type: "content_block_delta", index: i + 1, delta: { type: "input_json_delta", partial_json: JSON.stringify(t.input) } };
+      }
+    },
+    finalMessage: async () => message,
+  };
+}
+
+function fakeModel(script: Turn[] | ((call: number) => Turn)): FakeModel {
+  const calls: Anthropic.MessageStreamParams[] = [];
+  const signals: AbortSignal[] = [];
+  const model: ChatModel = (params, { signal }) => {
+    calls.push(structuredClone(params));
+    signals.push(signal);
+    const n = calls.length;
+    return replay(typeof script === "function" ? script(n) : (script[n - 1] ?? { text: "" }), n);
+  };
+  return { model, calls, signals };
+}
+
+/** A model whose stream hangs after `before` until its signal aborts. */
+function hangingModel(before: string[] = []): FakeModel {
+  const calls: Anthropic.MessageStreamParams[] = [];
+  const signals: AbortSignal[] = [];
+  const model: ChatModel = (params, { signal }) => {
+    calls.push(structuredClone(params));
+    signals.push(signal);
+    return {
+      async *[Symbol.asyncIterator]() {
+        for (const text of before) yield textDelta(text);
+        await new Promise<never>((_, reject) =>
+          signal.addEventListener("abort", () => reject(new Anthropic.APIUserAbortError()), { once: true }),
+        );
+      },
+      finalMessage: async () => {
+        throw new Error("not reached");
+      },
+    };
+  };
+  return { model, calls, signals };
+}
+
+// ---------- server and SSE helpers ----------
+
+const servers: Server<undefined>[] = [];
+afterAll(() => {
+  for (const s of servers) s.stop(true);
+});
+
+function start(upstreams: FakeUpstreams = {}, poi: PoiHit | null | Error = null): { server: Server<undefined>; fake: FakeDeps } {
+  const fake = fakeDeps(poi, upstreams);
+  const server = createServer({ port: 0, deps: fake.deps });
+  servers.push(server);
+  return { server, fake };
+}
+
+const body = (message: string, context: unknown = CONTEXT, sessionId: unknown = SESSION) => ({ sessionId, message, context });
+
+const post = (s: Server<undefined>, payload: unknown, signal?: AbortSignal) =>
+  fetch(new URL("/api/chat", s.url), {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: typeof payload === "string" ? payload : JSON.stringify(payload),
+    signal,
+  });
+
+interface Received {
+  event: string;
+  data: any;
+}
+
+function parseSse(text: string): Received[] {
+  return text
+    .split("\n\n")
+    .filter((chunk) => chunk.trim() !== "")
+    .map((chunk) => {
+      let event = "message";
+      const data: string[] = [];
+      for (const line of chunk.split("\n")) {
+        if (line.startsWith("event: ")) event = line.slice(7);
+        else if (line.startsWith("data: ")) data.push(line.slice(6));
+      }
+      return { event, data: JSON.parse(data.join("\n")) };
+    });
+}
+
+async function chat(s: Server<undefined>, payload: unknown): Promise<Received[]> {
+  const res = await post(s, payload);
+  expect(res.status).toBe(200);
+  expect(res.headers.get("content-type")).toContain("text/event-stream");
+  return parseSse(await res.text());
+}
+
+const eventNames = (events: Received[]) => events.map((e) => e.event);
+const streamedText = (events: Received[]) =>
+  events
+    .filter((e) => e.event === "text")
+    .map((e) => e.data.delta)
+    .join("");
+const actions = (events: Received[]) => events.filter((e) => e.event === "action").map((e) => e.data);
+
+/** The tool_result blocks Claude received in the last user message of a call. */
+function toolResults(params: Anthropic.MessageStreamParams | undefined): Anthropic.ToolResultBlockParam[] {
+  const last = params?.messages.at(-1);
+  if (!last || last.role !== "user" || typeof last.content === "string") return [];
+  return last.content.filter((b): b is Anthropic.ToolResultBlockParam => b.type === "tool_result");
+}
+const resultJson = (r: Anthropic.ToolResultBlockParam | undefined): any =>
+  JSON.parse(typeof r?.content === "string" ? r.content : "null");
+
+/** Runs one server tool through the chat and returns what Claude got back. */
+async function callTool(name: string, input: unknown, upstreams: FakeUpstreams = {}, poi: PoiHit | null | Error = null) {
+  const model = fakeModel([{ tools: [{ name, input }] }, { text: "Selesai." }]);
+  const { server, fake } = start({ ...upstreams, chat: model.model }, poi);
+  const events = await chat(server, body("Tolong cek."));
+  const [result] = toolResults(model.calls[1]);
+  // Error results are plain text for Claude to read; only successful ones are JSON.
+  return { events, result, json: result?.is_error ? null : resultJson(result), fake };
+}
+
+async function waitFor(check: () => boolean, ms = 2000): Promise<void> {
+  const until = Date.now() + ms;
+  while (!check() && Date.now() < until) await Bun.sleep(10);
+}
+
+/** Hourly forecast from today 00:00 WITA for two days; tomorrow has rain and dim sun from 12:00 to 15:00. */
+function forecastFromToday(): ForecastHour[] {
+  const witaMs = 8 * 3600_000;
+  const today = new Date(Date.now() + witaMs).toISOString().slice(0, 10);
+  const startMs = Date.parse(`${today}T00:00:00+08:00`);
+  return Array.from({ length: 48 }, (_, i) => {
+    const hour = i % 24;
+    const rainy = i >= 36 && i < 39;
+    const sunny = hour >= 6 && hour < 18;
+    return {
+      time: new Date(startMs + i * 3600_000 + witaMs).toISOString().slice(0, 13) + ":00",
+      ghiWm2: sunny ? (rainy ? 150 : 600) : 0,
+      cloudPct: rainy ? 90 : 20,
+      precipMm: rainy ? 3 : 0,
+      weatherCode: rainy ? 63 : 1,
+    };
+  });
+}
+
+// ---------- tests ----------
+
+describe("POST /api/chat", () => {
+  let warn: ReturnType<typeof spyOn>;
+  let logError: ReturnType<typeof spyOn>;
+  // Failures are logged on purpose; keep the test output clean and assert on the logs where it matters.
+  beforeEach(() => {
+    warn = spyOn(console, "warn").mockImplementation(() => {});
+    logError = spyOn(console, "error").mockImplementation(() => {});
+  });
+  afterEach(() => {
+    warn.mockRestore();
+    logError.mockRestore();
+  });
+
+  test("streams the answer as text events, then done, using the model settings of the plan", async () => {
+    const model = fakeModel([{ text: "Halo! Saya asisten energi Kaltim." }]);
+    const { server } = start({ chat: model.model });
+    const events = await chat(server, body("Halo"));
+
+    expect(eventNames(events)).toEqual(["text", "text", "done"]);
+    expect(streamedText(events)).toBe("Halo! Saya asisten energi Kaltim.");
+    expect(events.at(-1)?.data).toEqual({});
+
+    const params = model.calls[0]!;
+    expect(params.model).toBe("claude-sonnet-5-5");
+    expect(params.max_tokens).toBe(2048);
+    expect(CHAT_MAX_TOKENS).toBe(2048);
+    expect(CHAT_MAX_ITERATIONS).toBe(8);
+    expect(params.tool_choice).toBeUndefined();
+    expect((params.tools ?? []).map((t) => ("name" in t ? t.name : t.type)).sort()).toEqual([...TOOL_NAMES].sort());
+    for (const tool of params.tools ?? []) {
+      expect("description" in tool && typeof tool.description === "string" && tool.description.length > 20).toBe(true);
+    }
+    expect(typeof params.system).toBe("string");
+    expect(String(params.system)).toContain("Malas Ngoding");
+    expect(String(params.system)).toContain("perkiraan");
+  });
+
+  test.each([
+    ["Kukar", "kutai-kartanegara"],
+    ["balikpapan", "balikpapan"],
+    ["Kota Samarinda", "samarinda"],
+  ])("fly_to_region with %p emits an action with region %p and answers Claude with ok", async (alias, id) => {
+    const model = fakeModel([{ tools: [{ name: "fly_to_region", input: { region: alias } }] }, { text: "Ini wilayahnya." }]);
+    const { server } = start({ chat: model.model });
+    const events = await chat(server, body(`Tunjukkan ${alias}`));
+
+    expect(eventNames(events)).toEqual(["action", "text", "text", "done"]);
+    expect(actions(events)).toEqual([{ name: "fly_to_region", input: { region: id } }]);
+    const [result] = toolResults(model.calls[1]);
+    expect(result?.tool_use_id).toBe("toolu_1_0");
+    expect(result?.is_error).toBeUndefined();
+    expect(resultJson(result)).toEqual({ ok: true });
+  });
+
+  test("a region that cannot be resolved returns an error result to Claude and emits no action", async () => {
+    const model = fakeModel([{ tools: [{ name: "fly_to_region", input: { region: "Jakarta" } }] }, { text: "Jakarta di luar Kaltim." }]);
+    const { server } = start({ chat: model.model });
+    const events = await chat(server, body("Tunjukkan Jakarta"));
+
+    expect(actions(events)).toEqual([]);
+    expect(eventNames(events).at(-1)).toBe("done");
+    const [result] = toolResults(model.calls[1]);
+    expect(result?.is_error).toBe(true);
+    expect(String(result?.content)).toContain("Jakarta");
+  });
+
+  test("the tool loop stops after 8 model calls with done and no error", async () => {
+    const model = fakeModel(() => ({ tools: [{ name: "set_metric", input: { metric: "kwh" } }] }));
+    const { server } = start({ chat: model.model });
+    const events = await chat(server, body("Ganti metrik terus"));
+
+    expect(model.calls).toHaveLength(8);
+    expect(eventNames(events)).not.toContain("error");
+    expect(eventNames(events).at(-1)).toBe("done");
+    // Only the last call ends with a system message telling Claude to answer with what it has.
+    expect(model.calls.slice(0, 7).every((c) => c.messages.at(-1)?.role === "user")).toBe(true);
+    expect(model.calls[7]?.messages.at(-1)).toEqual({ role: "system", content: LAST_CALL_NOTICE });
+    expect(model.calls[7]?.messages.at(-2)?.role).toBe("user");
+    expect(model.calls.every((c) => c.tool_choice === undefined)).toBe(true);
+    // Tool calls of the 8th reply are not run.
+    expect(actions(events)).toHaveLength(7);
+    expect(streamedText(events).length).toBeGreaterThan(0);
+  });
+
+  test.each([
+    ["a connection error", new Anthropic.APIConnectionError({ message: "Connection error." }), /terhubung/],
+    ["a timeout", new Anthropic.APIConnectionTimeoutError(), /terlalu lama/],
+    ["a rate limit", new Anthropic.RateLimitError(429, { type: "error", error: { type: "rate_limit_error", message: "slow" } }, undefined, new Headers()), /sibuk/],
+    ["an overload", new Anthropic.InternalServerError(529, { type: "error", error: { type: "overloaded_error", message: "Overloaded" } }, undefined, new Headers()), /sibuk/],
+    ["a rejected key", new Anthropic.AuthenticationError(401, { type: "error", error: { type: "authentication_error", message: "invalid x-api-key" } }, undefined, new Headers()), /kunci API/],
+    ["an unknown error", new Error("boom"), /bermasalah/],
+  ])("Anthropic throwing %s gives an Indonesian error event and ends the stream", async (_name, err, message) => {
+    const model = fakeModel([err]);
+    const { server, fake } = start({ chat: model.model });
+    const events = await chat(server, body("Halo"));
+
+    expect(eventNames(events)).toEqual(["error"]);
+    expect(events[0]?.data.message).toMatch(message);
+    expect(logError).toHaveBeenCalled();
+    // The question is kept; there is no answer to keep.
+    expect(fake.chatMessages.map((m) => m.role)).toEqual(["user"]);
+  });
+
+  test("an error halfway through an answer keeps the streamed text and ends with error, not done", async () => {
+    const overloaded = new Anthropic.InternalServerError(529, { type: "error", error: { type: "overloaded_error", message: "Overloaded" } }, undefined, new Headers());
+    const model = fakeModel([{ text: "Sebentar, saya cek.", fail: overloaded }]);
+    const { server, fake } = start({ chat: model.model });
+    const events = await chat(server, body("Halo"));
+
+    expect(eventNames(events)).toEqual(["text", "text", "error"]);
+    expect(events.at(-1)?.data.message).toMatch(/sibuk/);
+    expect(fake.chatMessages.map((m) => m.role)).toEqual(["user"]);
+  });
+
+  test("without an API key the chat answers with an Indonesian error instead of crashing", async () => {
+    const { server } = start({ chat: createChatModel("") });
+    const events = await chat(server, body("Halo"));
+    expect(eventNames(events)).toEqual(["error"]);
+    expect(events[0]?.data.message).toMatch(/kunci API/);
+  });
+
+  test("a refusal ends with an Indonesian error event", async () => {
+    const model = fakeModel([{ stop: "refusal" }]);
+    const { server } = start({ chat: model.model });
+    const events = await chat(server, body("Halo"));
+    expect(eventNames(events)).toEqual(["error"]);
+    expect(events[0]?.data.message).toMatch(/tidak bisa membantu/);
+  });
+
+  test("stores the question and the answer with its map actions, in a session created on first use", async () => {
+    const model = fakeModel([
+      { text: "Saya tunjukkan.", tools: [{ name: "fly_to_region", input: { region: "Kukar" } }] },
+      { text: "Ini Kutai Kartanegara." },
+    ]);
+    const { server, fake } = start({ chat: model.model });
+    await chat(server, body("  Tunjukkan Kukar  "));
+
+    expect(fake.chatSessions.has(SESSION)).toBe(true);
+    expect(fake.chatMessages).toEqual([
+      { sessionId: SESSION, role: "user", content: { text: "Tunjukkan Kukar" } },
+      {
+        sessionId: SESSION,
+        role: "assistant",
+        content: {
+          text: "Saya tunjukkan.\n\nIni Kutai Kartanegara.",
+          actions: [{ name: "fly_to_region", input: { region: "kutai-kartanegara" } }],
+        },
+      },
+    ]);
+  });
+
+  test("sends the last 20 messages as plain text turns that start with a user turn", async () => {
+    const model = fakeModel([{ text: "Baik." }]);
+    const { server, fake } = start({ chat: model.model });
+    fake.chatSessions.add(SESSION);
+    for (let i = 0; i < 25; i++) {
+      const user = i % 2 === 0;
+      fake.chatMessages.push({
+        sessionId: SESSION,
+        role: user ? "user" : "assistant",
+        // Message 9 is an answer that only moved the map: it has no text to replay.
+        content: user ? { text: `tanya ${i}` } : { text: i === 9 ? "" : `jawab ${i}`, actions: [] },
+      });
+    }
+    fake.chatMessages.push({ sessionId: "0b9c4d1e-2f3a-4b5c-8d6e-7f8091a2b3c4", role: "user", content: { text: "sesi lain" } });
+    await chat(server, body("Pertanyaan baru"));
+
+    const sent = model.calls[0]!.messages;
+    // Messages 5 to 24 are the last 20; 5 is an answer (a turn may not start with one) and 9 has no text.
+    expect(sent).toHaveLength(19);
+    expect(sent[0]).toEqual({ role: "user", content: "tanya 6" });
+    expect(sent[1]).toEqual({ role: "assistant", content: "jawab 7" });
+    expect(sent.slice(0, -1).every((m) => typeof m.content === "string")).toBe(true);
+    expect(sent.some((m) => m.content === "jawab 9" || m.content === "sesi lain")).toBe(false);
+    expect(sent.at(-2)).toEqual({ role: "user", content: "tanya 24" });
+    const last = sent.at(-1)!;
+    expect(last.role).toBe("user");
+    expect(Array.isArray(last.content) && last.content.at(-1)).toEqual({ type: "text", text: "Pertanyaan baru" });
+  });
+
+  test("puts the app state in front of the question: time, view, region and the selected building", async () => {
+    const model = fakeModel([{ text: "Baik." }]);
+    const { server } = start({ chat: model.model });
+    const context = { selectedRegionId: "samarinda", selectedBuilding: BUILDING, view: { center: [117.15, -0.5], zoom: 17.5 } };
+    await chat(server, body("Kalau gedung ini pakai panel surya?", context));
+
+    const last = model.calls[0]!.messages.at(-1)!;
+    expect(Array.isArray(last.content)).toBe(true);
+    const blocks = last.content as Anthropic.TextBlockParam[];
+    expect(blocks).toHaveLength(2);
+    expect(blocks[1]).toEqual({ type: "text", text: "Kalau gedung ini pakai panel surya?" });
+    const state = blocks[0]!.text;
+    expect(state).toContain("WITA");
+    expect(state).toContain("lng 117.15000, lat -0.50000, zoom 17.5");
+    expect(state).toContain("samarinda");
+    expect(state).toContain("sekolah");
+    expect(state).toContain("2 lantai");
+    expect(state).toContain("145.600 kWh");
+    // Exact values for the tools: the roof is the footprint (floor area / floors) and the point is the map centre.
+    expect(state).toContain('{"lat":-0.5,"lng":117.15,"roofAreaM2":400,"kwhYear":145600}');
+    expect(state).toContain("Tinggi bangunan tidak ada di data peta");
+  });
+
+  test("with nothing selected the app state says so", async () => {
+    const model = fakeModel([{ text: "Baik." }]);
+    const { server } = start({ chat: model.model });
+    await chat(server, body("Halo"));
+    const blocks = model.calls[0]!.messages.at(-1)!.content as Anthropic.TextBlockParam[];
+    expect(blocks[0]!.text).toContain("Wilayah terpilih: tidak ada");
+    expect(blocks[0]!.text).toContain("Gedung terpilih: tidak ada");
+  });
+
+  test.each([["Samarinda paling tinggi."], ["\n\nSamarinda paling tinggi."]])(
+    "text from consecutive model calls is separated by exactly one blank line (second reply %j)",
+    async (second) => {
+      const model = fakeModel([
+        { text: "Saya cek dulu.", tools: [{ name: "list_regions", input: {} }] },
+        { text: second },
+      ]);
+      const { server } = start({ chat: model.model });
+      const events = await chat(server, body("Wilayah mana emisinya paling tinggi?"));
+      expect(streamedText(events)).toBe("Saya cek dulu.\n\nSamarinda paling tinggi.");
+    },
+  );
+
+  test("assistant turns, thinking blocks included, go back to Claude unchanged within the tool loop", async () => {
+    const model = fakeModel([{ thinking: true, tools: [{ name: "set_metric", input: { metric: "co2" } }] }, { text: "Sudah." }]);
+    const { server } = start({ chat: model.model });
+    await chat(server, body("Tampilkan emisi"));
+
+    const replayed = model.calls[1]!.messages.at(-2)!;
+    expect(replayed.role).toBe("assistant");
+    expect(replayed.content).toEqual([
+      { type: "thinking", thinking: "", signature: "sig_1" },
+      { type: "tool_use", id: "toolu_1_0", name: "set_metric", input: { metric: "co2" }, caller: { type: "direct" } },
+    ]);
+  });
+
+  test("several tool calls in one reply: actions go out in order, all results come back in one message in order", async () => {
+    const model = fakeModel([
+      {
+        tools: [
+          { name: "fly_to_region", input: { region: "Kukar" } },
+          { name: "list_regions", input: {} },
+          { name: "toggle_layer", input: { layer: "plants", visible: false } },
+        ],
+      },
+      { text: "Selesai." },
+    ]);
+    const { server } = start({ chat: model.model });
+    const events = await chat(server, body("Tunjukkan Kukar tanpa pembangkit"));
+
+    expect(actions(events)).toEqual([
+      { name: "fly_to_region", input: { region: "kutai-kartanegara" } },
+      { name: "toggle_layer", input: { layer: "plants", visible: false } },
+    ]);
+    const results = toolResults(model.calls[1]);
+    expect(results.map((r) => r.tool_use_id)).toEqual(["toolu_1_0", "toolu_1_1", "toolu_1_2"]);
+    expect(resultJson(results[1]).regions).toHaveLength(10);
+    expect(model.calls[1]!.messages.at(-1)!.content).toHaveLength(3);
+  });
+
+  test.each([
+    ["fly_to", { lng: 117.15, lat: -0.5, zoom: 15 }, { lng: 117.15, lat: -0.5, zoom: 15 }],
+    ["select_building_at", { lng: 117.1466, lat: -0.4998 }, { lng: 117.1466, lat: -0.4998 }],
+    ["toggle_layer", { layer: "Buildings", visible: true }, { layer: "buildings", visible: true }],
+    ["set_metric", { metric: "CO2" }, { metric: "co2" }],
+    ["set_rain", { mode: "on" }, { mode: "on" }],
+    ["open_tab", { tab: "surya" }, { tab: "surya" }],
+  ])("%s emits its action with a clean input", async (name, input, expected) => {
+    const model = fakeModel([{ tools: [{ name, input }] }, { text: "Sudah." }]);
+    const { server } = start({ chat: model.model });
+    const events = await chat(server, body("Tolong"));
+    expect(actions(events)).toEqual([{ name, input: expected }]);
+    expect(resultJson(toolResults(model.calls[1])[0])).toEqual({ ok: true });
+  });
+
+  test.each([
+    ["toggle_layer", { layer: "jalan", visible: true }],
+    ["toggle_layer", { layer: "plants", visible: "ya" }],
+    ["set_metric", { metric: "suhu" }],
+    ["set_rain", { mode: "kadang" }],
+    ["open_tab", { tab: "cuaca-buruk" }],
+    ["fly_to", { lng: 117.15, lat: -95, zoom: 10 }],
+    ["fly_to", { lng: 117.15, lat: -0.5 }],
+    ["select_building_at", { lng: "117", lat: -0.5 }],
+    ["hapus_peta", {}],
+  ])("%s with input %j returns an error result and emits no action", async (name, input) => {
+    const model = fakeModel([{ tools: [{ name, input }] }, { text: "Maaf." }]);
+    const { server } = start({ chat: model.model });
+    const events = await chat(server, body("Tolong"));
+    expect(actions(events)).toEqual([]);
+    const [result] = toolResults(model.calls[1]);
+    expect(result?.is_error).toBe(true);
+    expect(String(result?.content).length).toBeGreaterThan(0);
+  });
+
+  test("a reply cut off at max_tokens does not run its tool calls", async () => {
+    const model = fakeModel([{ text: "Saya tunjukkan", tools: [{ name: "fly_to_region", input: { region: "Kukar" } }], stop: "max_tokens" }]);
+    const { server } = start({ chat: model.model });
+    const events = await chat(server, body("Tunjukkan Kukar"));
+    expect(model.calls).toHaveLength(1);
+    expect(actions(events)).toEqual([]);
+    expect(eventNames(events).at(-1)).toBe("done");
+    expect(streamedText(events)).toContain("terpotong");
+  });
+
+  test("an empty reply still gives the user a short text", async () => {
+    const model = fakeModel([{ text: "" }]);
+    const { server } = start({ chat: model.model });
+    const events = await chat(server, body("Halo"));
+    expect(eventNames(events)).toEqual(["text", "done"]);
+    expect(streamedText(events).length).toBeGreaterThan(10);
+  });
+
+  test("a 2,000-character message is accepted", async () => {
+    const model = fakeModel([{ text: "Baik." }]);
+    const { server } = start({ chat: model.model });
+    const events = await chat(server, body("a".repeat(2000)));
+    expect(eventNames(events).at(-1)).toBe("done");
+  });
+
+  test("a context without selectedRegionId and selectedBuilding counts them as null", async () => {
+    const model = fakeModel([{ text: "Baik." }]);
+    const { server } = start({ chat: model.model });
+    const events = await chat(server, body("Halo", { view: { center: [117.15, -0.5], zoom: 9 } }));
+    expect(eventNames(events).at(-1)).toBe("done");
+  });
+
+  test("a failing chat store still answers", async () => {
+    const model = fakeModel([{ text: "Halo juga." }]);
+    const { server, fake } = start({ chat: model.model });
+    const down = async () => {
+      throw new Error("db down");
+    };
+    fake.deps.db.ensureChatSession = down;
+    fake.deps.db.chatHistory = down;
+    fake.deps.db.addChatMessage = down;
+    const events = await chat(server, body("Halo"));
+    expect(eventNames(events)).toEqual(["text", "text", "done"]);
+    expect(warn).toHaveBeenCalled();
+  });
+
+  test("closing the connection aborts the upstream Claude stream and stores no answer", async () => {
+    const model = hangingModel(["Sebentar"]);
+    const { server, fake } = start({ chat: model.model });
+    const client = new AbortController();
+    const res = await post(server, body("Halo"), client.signal);
+    const reader = res.body!.getReader();
+    const first = await reader.read();
+    expect(new TextDecoder().decode(first.value)).toContain("event: text");
+
+    client.abort();
+    await waitFor(() => model.signals[0]?.aborted === true);
+    expect(model.signals[0]?.aborted).toBe(true);
+    await Bun.sleep(30);
+    expect(fake.chatMessages.map((m) => m.role)).toEqual(["user"]);
+  });
+
+  test.each([
+    ["body is not json", "nope{"],
+    ["body is an array", [1]],
+    ["sessionId is missing", { message: "Halo", context: CONTEXT }],
+    ["sessionId is not a uuid", body("Halo", CONTEXT, "sesi-1")],
+    ["message is missing", { sessionId: SESSION, context: CONTEXT }],
+    ["message is not a string", { sessionId: SESSION, message: 5, context: CONTEXT }],
+    ["message is empty", body("")],
+    ["message is only spaces", body("   ")],
+    ["message is over 2,000 characters", body("a".repeat(2001))],
+    ["context is missing", { sessionId: SESSION, message: "Halo" }],
+    ["context is a string", body("Halo", "peta")],
+    ["view is missing", body("Halo", { selectedRegionId: null, selectedBuilding: null })],
+    ["center is not a pair", body("Halo", { ...CONTEXT, view: { center: [117.15], zoom: 9 } })],
+    ["center is out of range", body("Halo", { ...CONTEXT, view: { center: [200, -0.5], zoom: 9 } })],
+    ["zoom is not a number", body("Halo", { ...CONTEXT, view: { center: [117.15, -0.5], zoom: "9" } })],
+    ["selectedRegionId is a number", body("Halo", { ...CONTEXT, selectedRegionId: 3 })],
+    ["selectedBuilding is a string", body("Halo", { ...CONTEXT, selectedBuilding: "gedung" })],
+    ["selectedBuilding has an unknown type", body("Halo", { ...CONTEXT, selectedBuilding: { ...BUILDING, type: "kastil" } })],
+    ["selectedBuilding has a text kWh", body("Halo", { ...CONTEXT, selectedBuilding: { ...BUILDING, kwhYear: "banyak" } })],
+    ["selectedBuilding has zero floors", body("Halo", { ...CONTEXT, selectedBuilding: { ...BUILDING, floors: 0 } })],
+  ])("invalid body (%s) returns 400 with an Indonesian error and never calls Claude", async (_name, payload) => {
+    const model = fakeModel([{ text: "tidak boleh" }]);
+    const { server, fake } = start({ chat: model.model });
+    const res = await post(server, payload);
+    expect(res.status).toBe(400);
+    const out = (await res.json()) as { error: string };
+    expect(out.error.length).toBeGreaterThan(0);
+    expect(model.calls).toHaveLength(0);
+    expect(fake.chatMessages).toHaveLength(0);
+  });
+});
+
+describe("chat server tools", () => {
+  let warn: ReturnType<typeof spyOn>;
+  beforeEach(() => {
+    warn = spyOn(console, "warn").mockImplementation(() => {});
+  });
+  afterEach(() => {
+    warn.mockRestore();
+  });
+
+  test("list_regions ranks all regions by CO2 with Indonesian number text", async () => {
+    const { json, result } = await callTool("list_regions", {});
+    expect(result?.is_error).toBeUndefined();
+    expect(json.regions).toHaveLength(10);
+    expect(json.regions[0]).toMatchObject({ rank: 1, id: "samarinda", name: "Samarinda", kind: "kota" });
+    expect(json.regions[9]).toMatchObject({ rank: 10, id: "berau" });
+    // Fake Samarinda: 1.000.000.000 kWh and 1.140.000.000 kg CO2, in the region panel's format.
+    expect(json.regions[0].kwhText).toBe("1,00 miliar kWh per tahun (perkiraan)");
+    expect(json.regions[0].co2Text).toBe("1,1 juta ton CO2 per tahun (perkiraan)");
+    expect(json.regions[0].kwhShareText).toBe("18,2% (perkiraan)");
+    expect(json.kaltim.kwhText).toBe("5,50 miliar kWh per tahun (perkiraan)");
+    expect(json.note).toContain("perkiraan");
+  });
+
+  test("get_region_stats resolves an alias and returns the region figures with perkiraan labels", async () => {
+    const { json, result } = await callTool("get_region_stats", { region: "Kukar" });
+    expect(result?.is_error).toBeUndefined();
+    expect(json).toMatchObject({ id: "kutai-kartanegara", name: "Kutai Kartanegara", kind: "kabupaten" });
+    expect(json.co2Rank).toContain("6 dari 10");
+    // Same format as the region panel (fmtCompact keeps one decimal for juta).
+    expect(json.facts["Listrik terpakai"]).toBe("500,0 juta kWh per tahun (perkiraan)");
+    expect(json.facts["Penduduk"]).toBe("100.000 jiwa");
+    expect(json.facts["Desa belum dilayani PLN"]).toBe("belum ada data");
+  });
+
+  test("get_region_stats with a region outside Kaltim returns an error result", async () => {
+    const { result } = await callTool("get_region_stats", { region: "Bandung" });
+    expect(result?.is_error).toBe(true);
+    expect(String(result?.content)).toContain("Bandung");
+  });
+
+  test("get_grid_mix returns the grid factor and the shares by fuel", async () => {
+    const { json } = await callTool("get_grid_mix", {});
+    expect(json.year).toBe(2023);
+    expect(json.gridFactorText).toBe("1,14 kg CO2 per kWh");
+    expect(json.mix).toEqual([{ fuel: "batu bara", shareText: "100%" }]);
+    expect(json.note).toContain("perkiraan");
+  });
+
+  test("estimate_building_at uses the POI type and a 150 m2 footprint that is flagged as an assumption", async () => {
+    const { json, fake } = await callTool("estimate_building_at", { lng: 117.15, lat: -0.5 }, {}, SCHOOL);
+    expect(fake.poiCalls).toEqual([[117.15, -0.5]]);
+    expect(json).toMatchObject({ type: "sekolah", floors: 2, footprintM2: 150, floorAreaM2: 300, kwhYear: 30_000, region: "Samarinda" });
+    expect(json.poi).toEqual({ name: "SMA 1", class: "education", type: "School", distanceM: 6 });
+    expect(json.kwhYearText).toBe("30.000 kWh per tahun (perkiraan)");
+    expect(json.co2YearText).toBe("34,2 ton CO2 per tahun (perkiraan)");
+    expect(json.assumptions[0]).toContain("150 m2");
+    expect(json.equivalents.length).toBeGreaterThan(0);
+  });
+
+  test("estimate_building_at with Tilequery down still estimates from the footprint", async () => {
+    const { json, result } = await callTool("estimate_building_at", { lng: 117.15, lat: -0.5 }, {}, new Error("tilequery down"));
+    expect(result?.is_error).toBeUndefined();
+    expect(json.type).toBe("rumah");
+    expect(json.poi).toBeNull();
+    expect(json.assumptions.some((a: string) => /POI/.test(a))).toBe(true);
+  });
+
+  test("estimate_building_at outside Kaltim says so and still estimates", async () => {
+    const { json } = await callTool("estimate_building_at", { lng: 106.8, lat: -6.2 });
+    expect(json.region).toBe("Di luar Kalimantan Timur");
+    expect(json.kwhYear).toBeGreaterThan(0);
+  });
+
+  test("simulate_solar gives the same numbers as POST /api/solar/simulate", async () => {
+    const input = { lat: -0.5, lng: 117.15, roofAreaM2: 100, kwhYear: 5000, backupHours: 4 };
+    const { json, result } = await callTool("simulate_solar", input);
+    expect(result?.is_error).toBeUndefined();
+
+    const { server } = start();
+    const res = await fetch(new URL("/api/solar/simulate", server.url), {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(input),
+    });
+    const direct = (await res.json()) as { kWp: number; costRp: number };
+    expect(json.kWp).toBe(direct.kWp);
+    expect(json.costText).toBe(`${fmtRupiah(direct.costRp)} (perkiraan)`);
+    expect(json.assumptions.length).toBeGreaterThan(0);
+  });
+
+  test("simulate_solar with an invalid input returns an error result", async () => {
+    const { result } = await callTool("simulate_solar", { lat: -0.5, lng: 117.15, roofAreaM2: 0, kwhYear: 5000, backupHours: 4 });
+    expect(result?.is_error).toBe(true);
+  });
+
+  test("get_weather labels today and tomorrow and sizes the solar output to the given kWp", async () => {
+    const { json, result } = await callTool("get_weather", { lat: -0.5, lng: 117.15, kWp: 2 }, { meteo: forecastFromToday() });
+    expect(result?.is_error).toBeUndefined();
+    expect(json.kWp).toBe(2);
+    expect(json.kWpNote).toBeUndefined();
+    expect(json.days).toHaveLength(2);
+    expect(json.days[0].day).toStartWith("hari ini");
+    expect(json.days[1].day).toStartWith("besok");
+    expect(json.days[0]).toMatchObject({ rain: false, comparedToBestDay: "hari terbaik dalam prakiraan" });
+    // 12 sunny hours x 2 kWp x 0.6 kW/m2 x PR 0.78.
+    expect(json.days[0].solarText).toBe("11,2 kWh (perkiraan)");
+    // Tomorrow: 9 sunny hours plus 3 rainy ones at 150 W/m2 is 9,126 kWh, 19% below today's 11,232 kWh.
+    expect(json.days[1]).toMatchObject({
+      rain: true,
+      heaviestRainText: "3,0 mm per jam",
+      solarText: "9,1 kWh (perkiraan)",
+      comparedToBestDay: "19% lebih rendah dari hari terbaik dalam prakiraan",
+    });
+  });
+
+  test("get_weather without kWp uses 1 kWp and says so", async () => {
+    const { json } = await callTool("get_weather", { lat: -0.5, lng: 117.15 }, { meteo: forecastFromToday() });
+    expect(json.kWp).toBe(1);
+    expect(json.kWpNote).toContain("1 kWp");
+  });
+
+  test("get_weather with Open-Meteo down and nothing cached returns an error result", async () => {
+    const { result } = await callTool("get_weather", { lat: -0.5, lng: 117.15 }, { meteo: new Error("open-meteo down") });
+    expect(result?.is_error).toBe(true);
+    expect(String(result?.content)).toContain("tidak tersedia");
+  });
+
+  test("a server tool that throws gives Claude an error result instead of breaking the chat", async () => {
+    const model = fakeModel([{ tools: [{ name: "get_grid_mix", input: {} }] }, { text: "Maaf, datanya belum ada." }]);
+    const { server, fake } = start({ chat: model.model });
+    fake.deps.db.getGridMix = async () => {
+      throw new Error("db down");
+    };
+    const events = await chat(server, body("Campuran listriknya apa?"));
+    expect(eventNames(events).at(-1)).toBe("done");
+    const [result] = toolResults(model.calls[1]);
+    expect(result?.is_error).toBe(true);
+    expect(warn).toHaveBeenCalled();
+  });
+});
+
+describe("runChat", () => {
+  test("a stalled stream ends with an Indonesian timeout error at the deadline", async () => {
+    const model = hangingModel();
+    const fake = fakeDeps(null, { chat: model.model });
+    const logError = spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const outcome = await runChat({
+        deps: fake.deps,
+        messages: [{ role: "user", content: "Halo" }],
+        signal: new AbortController().signal,
+        onText: () => {},
+        onAction: () => {},
+        deadlineMs: 50,
+      });
+      expect(outcome).toEqual({ status: "error", message: expect.stringMatching(/terlalu lama/) });
+      expect(model.signals[0]?.aborted).toBe(true);
+    } finally {
+      logError.mockRestore();
+    }
+  });
+});
