@@ -114,6 +114,9 @@ let popup: mapboxgl.Popup | null = null;
 let groups: GroupNode<PlantProperties>[] = [];
 let onZoom: (() => void) | null = null;
 let onPointer: ((e: MapMouseEvent) => void) | null = null;
+let onPointerOut: (() => void) | null = null;
+/** Whether the pointer cursor is ours, so the region columns keep the one they set. */
+let cursorOwned = false;
 /** The marker whose tooltip is open. */
 let openNode: number | null = null;
 /** The opacity last written per marker, so a zoom step only touches the markers that changed. */
@@ -292,11 +295,26 @@ export function addPlants(map: MapboxMap, fc: PlantCollection, visible = true, o
       .queryRenderedFeatures(e.point, { layers: [PLANT_CLUSTER_LAYER, PLANT_LAYER] })
       .map((f) => groups.find((g) => g.id === Number((f as unknown as { properties?: { node?: number } }).properties?.node)))
       .find((n) => n !== undefined && markerShown(n, z) >= 0.5);
-    map.getCanvas().style.cursor = hit ? "pointer" : "";
-    if (hit) open(hit);
-    else if (openNode !== null) close();
+    if (hit) {
+      map.getCanvas().style.cursor = "pointer";
+      cursorOwned = true;
+      open(hit);
+      return;
+    }
+    if (cursorOwned) {
+      map.getCanvas().style.cursor = "";
+      cursorOwned = false;
+    }
+    if (openNode !== null) close();
   };
   map.on("mousemove", onPointer);
+  // Leaving the map for the sheet or the dock sends no more mousemoves, so the tooltip closes here.
+  onPointerOut = () => {
+    if (cursorOwned) map.getCanvas().style.cursor = "";
+    cursorOwned = false;
+    if (openNode !== null) close();
+  };
+  map.on("mouseout", onPointerOut);
   // Touch screens have no hover, so a tap opens the same tooltip (and does not select the region below).
   map.addInteraction("plants-click", {
     type: "click",
@@ -357,6 +375,9 @@ export function removePlants(map: MapboxMap): void {
   landed = false;
   if (onPointer) map.off("mousemove", onPointer);
   onPointer = null;
+  if (onPointerOut) map.off("mouseout", onPointerOut);
+  onPointerOut = null;
+  cursorOwned = false;
   openNode = null;
   if (onZoom) map.off("zoom", onZoom);
   onZoom = null;

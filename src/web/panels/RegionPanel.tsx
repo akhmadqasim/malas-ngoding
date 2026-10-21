@@ -250,7 +250,7 @@ function RegionDetail({
       <footer className="sheet__foot">
         <p className="sheet__note">
           {chem(
-            "Listrik terpakai: perkiraan dari penjualan PLN 2024 per cabang. Emisi CO2 = kWh dikali faktor emisi jaringan Kaltim (Kementerian ESDM, data 2019). Rinciannya ada di Tentang peta ini, Cara menghitung dan sumber data.",
+            "Perkiraan dari penjualan PLN 2024 per cabang dan faktor emisi ESDM. Rincian: Tentang peta ini, Cara menghitung dan sumber data.",
           )}
         </p>
       </footer>
