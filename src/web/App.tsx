@@ -30,8 +30,9 @@ export function App() {
   const [data, setData] = useState<AppData | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
   const [phase, setPhase] = useState<Phase>("loading");
-  // Which region the pointer is over on the map. Changes on enter and leave only, never per mouse move.
-  const [mapHoverId, setMapHoverId] = useState<string | null>(null);
+  // The region the pointer is over on the map: the one hover that shows a tooltip. It changes on enter and
+  // leave only (never per mouse move) and ends with the hover, e.g. when a click selects the region.
+  const mapHoverId = useAppStore((s) => (s.hoverOrigin === "map" ? s.hoveredRegionId : null));
   const metric = useAppStore((s) => s.metric);
   const tone = useAppStore((s) => presetTone(s.lightPreset));
   const regionList = useMemo(() => data?.regions.features.map((f) => f.properties) ?? [], [data]);
@@ -42,7 +43,6 @@ export function App() {
     setFailure(null);
     setData(null);
     setPhase("loading");
-    setMapHoverId(null);
     useAppStore.getState().setHoveredRegion(null);
     Promise.all([api.config(), api.regions(), api.plants()])
       .then(([config, regions, plants]) => {
@@ -78,9 +78,12 @@ export function App() {
     },
     [placeTooltip],
   );
+  // The map reports null only when the hover it shows has ended (the pointer left that column, or the
+  // columns faded out on the way to city zoom), so that hover ends everywhere.
   const onRegionHover = useCallback((id: string | null) => {
-    setMapHoverId(id);
-    useAppStore.getState().setHoveredRegion(id);
+    const store = useAppStore.getState();
+    if (id) store.setHoveredRegion(id, "map");
+    else store.setHoveredRegion(null);
   }, []);
 
   const showUi = phase === "done" && !failure;

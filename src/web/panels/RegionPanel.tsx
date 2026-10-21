@@ -1,5 +1,5 @@
 import { AnimatePresence, motion } from "motion/react";
-import { type ReactNode, useMemo, useRef } from "react";
+import { type ReactNode, useEffect, useMemo, useRef } from "react";
 import { fmtCompact, fmtNumber } from "../../shared/format.ts";
 import type { RegionSummary } from "../../shared/types.ts";
 import { AnimatedNumber } from "../components/AnimatedNumber.tsx";
@@ -90,16 +90,16 @@ function Overview({
   const m = METRIC_TEXT[metric];
   const hoveredId = useAppStore((s) => s.hoveredRegionId);
   const setHovered = useAppStore((s) => s.setHoveredRegion);
+  const endListHover = useAppStore((s) => s.endListHover);
   const total = regions.reduce((sum, r) => sum + m.value(r), 0);
   const ranked = useMemo(() => [...regions].sort((a, b) => m.value(b) - m.value(a)), [regions, m]);
   const t = useMemo(() => intensities(regions, metric), [regions, metric]);
   const tone = useAppStore((s) => presetTone(s.lightPreset));
   const ramp = useMemo(() => rampTokens(metric, tone), [metric, tone]);
   const max = Math.max(...regions.map(m.value), 1);
-  // Leaving a row clears the hover only if no other row or the map took it over meanwhile.
-  const leave = (id: string) => {
-    if (useAppStore.getState().hoveredRegionId === id) setHovered(null);
-  };
+  // A row that disappears while pointed at or focused (a pick swaps the list for the detail view) fires
+  // no pointerleave or blur, so the list ends its own preview when it goes away.
+  useEffect(() => () => useAppStore.getState().endListHover(), []);
 
   return (
     <div className="sheet__body">
@@ -122,10 +122,11 @@ function Overview({
                 className="ranking__row"
                 data-active={hoveredId === r.id || undefined}
                 onClick={() => onPick(r.id)}
-                onPointerEnter={() => setHovered(r.id)}
-                onPointerLeave={() => leave(r.id)}
-                onFocus={() => setHovered(r.id)}
-                onBlur={() => leave(r.id)}
+                onPointerEnter={() => setHovered(r.id, "list")}
+                // Leaving ends the preview only if no other row or the map took it over meanwhile.
+                onPointerLeave={() => endListHover(r.id)}
+                onFocus={() => setHovered(r.id, "list")}
+                onBlur={() => endListHover(r.id)}
               >
                 <span className="ranking__name">{r.name}</span>
                 <span className="ranking__value num">{fmtCompact(m.value(r) * m.scale)}</span>
