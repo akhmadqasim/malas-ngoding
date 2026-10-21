@@ -1,0 +1,68 @@
+/* Dev-only stand-in for the building panel shell (00-direction section 8): right side, 360 px wide
+   (320 px at 1440 px and below), from the top inset to just above the legend strip. */
+.harness {
+  position: fixed;
+  inset: 0;
+  background: var(--color-dim-dark);
+}
+[data-theme="atlas-day"] .harness {
+  background: var(--color-dim-light);
+}
+.harness__panel {
+  position: absolute;
+  top: var(--layout-inset);
+  right: var(--layout-inset);
+  bottom: 140px;
+  width: 360px;
+  background: var(--surface);
+  box-shadow: var(--surface-shadow);
+}
+@media (max-width: 1440px) {
+  .harness__panel {
+    width: 320px;
+  }
+}
+.harness__scroll {
+  height: 100%;
+  overflow: hidden auto;
+  padding: 20px;
+  scrollbar-width: thin;
+}
+.harness__name {
+  margin: 0;
+  font-size: var(--text-xl);
+  line-height: var(--text-xl--line-height);
+  font-weight: var(--font-weight-semibold);
+}
+.harness__meta {
+  margin: 2px 0 0;
+  font-size: var(--text-sm);
+  color: var(--muted);
+}
+.harness__readout {
+  margin: 16px 0 0;
+  font-size: var(--text-readout);
+  line-height: var(--text-readout--line-height);
+  font-weight: var(--font-weight-medium);
+  font-stretch: var(--font-stretch-readout);
+}
+.harness__tabs {
+  display: flex;
+  gap: 16px;
+  margin: 20px 0 16px;
+  border-bottom: 1px solid var(--border);
+}
+.harness__tab {
+  padding: 8px 0;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: var(--text-sm);
+}
+.harness__tab[aria-selected="true"] {
+  border-bottom-color: var(--accent);
+  color: var(--foreground);
+}
