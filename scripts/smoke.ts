@@ -1508,35 +1508,47 @@ async function buildingHeapSoak(page: Page) {
 
 /**
  * The AI chat (Task 8b), with canned answers so the check spends no tokens: the button opens the panel with
- * the suggested questions; an answer streams in, its map actions move the map (a region is selected, the
- * metric switches) and show as buttons; an error shows "Coba lagi"; the panel never covers the dock cards;
- * Escape closes it and gives focus back to the button. Leaves the province view as it found it.
+ * the suggested questions; an answer streams in, its map actions move the map and show as buttons; the
+ * panel covers no dock card, not the map tools and not the building panel; an error stays in view with
+ * "Coba lagi"; with the region already open the chat still selects the building; Escape closes the panel,
+ * gives focus back and keeps the draft. Leaves the province view as it found it.
  */
 async function chatChecks(page: Page) {
   const sse = (events: [string, unknown][]) => events.map(([e, d]) => `event: ${e}\ndata: ${JSON.stringify(d)}\n\n`).join("");
-  // The panel ends above any dock card under it.
-  const chatCoversDock = () =>
-    page.evaluate((cards) => {
+  /** The panels the chat panel must never cover: the dock cards, the map tools and the building panel. */
+  const chatOverlaps = () =>
+    page.evaluate((panels) => {
       const p = document.querySelector(".chat__card")!.getBoundingClientRect();
-      return cards.some((sel) => {
+      return panels.filter((sel) => {
         const r = document.querySelector(sel)?.getBoundingClientRect();
-        return Boolean(r && r.left < p.right && r.right > p.left && r.top < p.bottom && r.bottom > p.top);
+        return Boolean(r && r.width > 0 && r.left < p.right && r.right > p.left && r.top < p.bottom && r.bottom > p.top);
       });
-    }, DOCK_CARDS);
+    }, [...DOCK_CARDS, ".map-tools", ".building-slot__panel"]);
+  /** Every map tool can be pressed: the element at its centre is the tool itself. */
+  const toolsReachable = () =>
+    page.evaluate(() =>
+      [...document.querySelectorAll<HTMLElement>(".map-tools .map-tool")].every((tool) => {
+        const r = tool.getBoundingClientRect();
+        return tool.contains(document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2));
+      }),
+    );
   const reply = (body: string) => (route: import("playwright").Route) =>
     route.fulfill({ status: 200, headers: { "content-type": "text/event-stream" }, body });
   await page.evaluate((view) => (window as MapWindow).__malasMap!.jumpTo(view), KALTIM_VIEW);
   await waitForMapIdle(page, 12_000);
 
-  const launcher = page.getByRole("button", { name: "Tanya asisten AI" });
+  const launcher = page.getByRole("button", { name: "Asisten AI", exact: true });
   check(await launcher.isVisible(), "the chat button sits in the bottom-right corner");
   await launcher.click();
+  check((await launcher.getAttribute("aria-expanded")) === "true", "the chat button says the panel is open");
   const panel = page.getByRole("region", { name: "Asisten AI" });
   await panel.waitFor({ timeout: 3000 });
   const prompts = await panel.locator(".chat__prompt").count();
   check(prompts === 4, `the empty chat offers the 4 suggested questions (${prompts})`);
   await page.waitForTimeout(400); // the panel finishes sliding in
-  check(!(await chatCoversDock()), "the empty chat panel does not cover the legend or the map controls");
+  const emptyOverlaps = await chatOverlaps();
+  check(emptyOverlaps.length === 0, `the empty chat panel covers no dock card and not the map tools (${emptyOverlaps.join(", ") || "none"})`);
+  check(await toolsReachable(), "every map tool can still be pressed while the chat is open");
   const focused = await page.evaluate(() => document.activeElement?.getAttribute("aria-label"));
   check(focused === "Pertanyaan untuk asisten AI", `opening the chat puts the cursor in the question box (${focused})`);
 
@@ -1564,9 +1576,10 @@ async function chatChecks(page: Page) {
   check((await page.getByRole("radio", { name: "Listrik" }).getAttribute("aria-checked")) === "true", "set_metric switches the columns to kWh");
   await page.waitForTimeout(2200);
   await shot(page, "9-chat-answer");
+  const answerOverlaps = await chatOverlaps();
+  check(answerOverlaps.length === 0, `with an answer, the chat panel covers no dock card and not the map tools (${answerOverlaps.join(", ") || "none"})`);
 
-  check(!(await chatCoversDock()), "with an answer, the chat panel does not cover the legend or the map controls");
-
+  // A failed answer: the reason and "Coba lagi" scroll into view.
   await page.unroute("**/api/chat");
   await page.route("**/api/chat", reply(sse([["error", { message: "Asisten AI sedang sibuk. Coba lagi sebentar lagi." }]])));
   await panel.getByRole("textbox", { name: "Pertanyaan untuk asisten AI" }).fill("Bandingkan emisi Samarinda dan Balikpapan");
@@ -1574,14 +1587,68 @@ async function chatChecks(page: Page) {
   const problem = panel.getByRole("alert");
   await problem.waitFor({ timeout: 5000 });
   check(((await problem.textContent()) ?? "").includes("sibuk"), "a failed answer says why and offers 'Coba lagi'");
+  await page.waitForTimeout(300);
+  const retryInView = await page.evaluate(() => {
+    const log = document.querySelector(".chat__log")!.getBoundingClientRect();
+    const alert = document.querySelector(".chat-msg__problem[role='alert']")!.getBoundingClientRect();
+    return alert.top >= log.top - 1 && alert.bottom <= log.bottom + 1;
+  });
+  check(retryInView, "the error line and its 'Coba lagi' are fully in view");
   await shot(page, "9-chat-error");
   await page.unroute("**/api/chat");
 
+  // The review's path: Samarinda is already open, then the chat picks a school there. It must end on the
+  // building, never on "Gedung tidak ditemukan", and the button may only say what happened.
+  const school = { name: "Sekolah uji", lng: 117.161276, lat: -0.50273, type: "sekolah" };
+  await page.route(
+    "**/api/chat",
+    reply(
+      sse([
+        ["action", { name: "fly_to_region", input: { region: "samarinda" } }],
+        ["action", { name: "mark_places", input: { label: "sekolah", places: [school] } }],
+        ["action", { name: "select_building_at", input: { lng: school.lng, lat: school.lat } }],
+        ["text", { delta: "Ini sekolahnya." }],
+        ["done", {}],
+      ]),
+    ),
+  );
+  await panel.getByRole("textbox", { name: "Pertanyaan untuk asisten AI" }).fill("Tunjukkan gedung sekolah di Samarinda");
+  await page.keyboard.press("Enter");
+  const settled = await page
+    .waitForFunction(
+      () => {
+        const answers = document.querySelectorAll(".chat-msg--ai");
+        const chips = [...(answers[answers.length - 1]?.querySelectorAll(".chat-chip") ?? [])].map((c) => c.textContent ?? "");
+        return chips.some((c) => c.includes("Gedung dipilih") || c.includes("Gedung tidak ditemukan")) ? chips : null;
+      },
+      null,
+      { timeout: 25_000 },
+    )
+    .then((h) => h.jsonValue() as Promise<string[]>)
+    .catch(() => [] as string[]);
+  await page.waitForTimeout(2500); // the estimate arrives and the camera settles
+  const buildingText = (await page.locator(".building-panel").textContent().catch(() => "")) ?? "";
+  check(
+    settled.some((c) => c.includes("Gedung dipilih")) && buildingText.length > 0 && !buildingText.includes("Gedung tidak ditemukan"),
+    `with the region already open, the chat selects the school's building (buttons: ${settled.join(", ") || "none"})`,
+  );
+  const besideOverlaps = await chatOverlaps();
+  check(besideOverlaps.length === 0, `beside the building panel the chat covers nothing (${besideOverlaps.join(", ") || "none"})`);
+  check(await toolsReachable(), "with the building panel and the chat open, every map tool can still be pressed");
+  await shot(page, "9-chat-building");
+  await page.unroute("**/api/chat");
+  await page.getByRole("button", { name: "Tutup panel gedung" }).click().catch(() => {});
+
+  await panel.getByRole("textbox", { name: "Pertanyaan untuk asisten AI" }).fill("Draf yang belum dikirim");
   await page.keyboard.press("Escape");
   await panel.waitFor({ state: "detached", timeout: 3000 }).catch(() => {});
   check(!(await panel.isVisible()), "Escape closes the chat");
   const back = await page.evaluate(() => document.activeElement?.getAttribute("aria-label"));
-  check(back === "Tanya asisten AI", `closing the chat gives focus back to its button (${back})`);
+  check(back === "Asisten AI", `closing the chat gives focus back to its button (${back})`);
+  await launcher.click();
+  const draft = await panel.getByRole("textbox", { name: "Pertanyaan untuk asisten AI" }).inputValue();
+  check(draft === "Draf yang belum dikirim", "a half-written question survives closing and opening the chat");
+  await launcher.click();
 
   // Leave the province view as the next checks expect it.
   await page.getByRole("radio", { name: "Emisi CO2" }).click();
