@@ -432,6 +432,14 @@ describe("SYSTEM_PROMPT", () => {
     expect(SYSTEM_PROMPT).toContain("dalam data kami");
     expect(SYSTEM_PROMPT).toContain('jangan menulis "Dataan"');
   });
+
+  test("bans outcome claims, asks for a complete plant list and labels mix shares and rupiah figures", () => {
+    expect(SYSTEM_PROMPT).toContain("Jangan menulis hasil atau peringkat yang akan dicapai");
+    expect(SYSTEM_PROMPT).toContain("mengangkat dari posisi terendah");
+    expect(SYSTEM_PROMPT).toContain("Uraikan daftar pembangkit dengan lengkap");
+    expect(SYSTEM_PROMPT).toContain('Jangan menulis "satu-satunya"');
+    expect(SYSTEM_PROMPT).toContain("persentase bauran listrik, dan nilai rupiah hasil hitungan");
+  });
 });
 
 describe("parseRecommendationItems", () => {
@@ -618,6 +626,9 @@ describe("ruleBasedRecommendations", () => {
     const items = ruleBasedRecommendations(facts("kutai-kartanegara"));
     const access = items.find((i) => i.category === "akses_listrik");
     expect(access?.body).toContain("89,32% (BPS 2024), terendah ketiga dari 10 kabupaten/kota");
+    // Connecting homes is PLN's job: the region proposes it, it does not do it.
+    expect(access?.title).toContain("usulkan penyambungan");
+    expect(access?.title).not.toContain("sambungkan");
     expect(access?.body).toContain("Dinas ESDM Provinsi Kalimantan Timur");
     expect(access?.priority).toBe(1);
     expect(ruleBasedRecommendations(facts("samarinda")).some((i) => i.category === "akses_listrik")).toBe(false);
