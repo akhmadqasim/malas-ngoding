@@ -87,8 +87,14 @@ async function shotsFor(theme: "day" | "night") {
  * own PLN tariff class and daytime share, and the ring never claims more than that share.
  */
 async function typeShots() {
-  const expected = { rumah: ["R-1/TR 1.300 VA", 40], kantor: ["B-2/TR", 85], mal: ["B-3/TM", 70], pemerintahan: ["P-1/TR", 85] } as const;
-  for (const [type, [golongan, share]] of Object.entries(expected)) {
+  const expected = {
+    rumah: ["R-1/TR 1.300 VA", 40, "setiap hari"],
+    kantor: ["B-2/TR", 85, "sekitar 250 hari setahun"],
+    mal: ["B-3/TM", 70, "setiap hari"],
+    pemerintahan: ["P-1/TR", 85, "sekitar 250 hari setahun"],
+    sekolah: ["S)", 85, "sekitar 200 hari setahun"],
+  } as const;
+  for (const [type, [golongan, share, days]] of Object.entries(expected)) {
     for (const theme of ["night", "day"] as const) {
       const page = await open(theme, "surya", [1600, 900], type);
       await page.locator(".sw-cover").waitFor({ timeout: 30_000 });
@@ -100,6 +106,8 @@ async function typeShots() {
         check(notes.includes(`golongan ${golongan}`), `${type}: the tariff line names ${golongan}`);
         check(notes.includes(`${share}%`) && cover <= share, `${type}: the ring stays within the ${share}% daytime share (${cover}%)`);
         check(notes.includes("Permen ESDM 2/2024"), `${type}: says export earns nothing`);
+        check(notes.includes(days), `${type}: names its operating days (${days})`);
+        if (type === "sekolah") check(cover < 60, `sekolah: open about 200 days, so the ring shows about half, not 85% (${cover}%)`);
       }
       await page.locator(".harness__scroll").evaluate((el) => el.scrollTo(0, el.scrollHeight));
       await page.waitForTimeout(500);
