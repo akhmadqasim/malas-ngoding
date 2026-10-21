@@ -11,6 +11,8 @@
  */
 import type { Page } from "playwright";
 import { launchBrowser } from "./chromium.ts";
+import type { RegionCollection } from "../src/web/api.ts";
+import { calmShapes } from "../src/web/map/regionShapes.ts";
 
 const BASE_URL = Bun.env.BASE_URL ?? "http://localhost:3000";
 const PRESETS = (Bun.env.CONTRAST_PRESETS ?? "day,dawn,dusk,night").split(",");
@@ -34,16 +36,18 @@ async function preparePage(page: Page, metric: "co2" | "kwh") {
   // The metric switch sinks and re-raises the columns; let that finish before flattening them.
   if (metric === "kwh") await page.getByRole("radio", { name: "Listrik" }).click();
   await page.waitForTimeout(2500);
-  return page.evaluate(async (stops) => {
+  // Sample the shapes the columns are drawn from (the calmer copy: no tiny delta islands).
+  const calm = calmShapes((await (await fetch(new URL("/api/regions", BASE_URL))).json()) as RegionCollection);
+  return page.evaluate(async ({ stops, calm }) => {
     const map = (window as MapWindow).__malasMap!;
     (document.querySelector(".ui-layer") as HTMLElement).style.display = "none";
-    // Only the columns and the ground are measured: outlines, plant markers and the region names drawn on
-    // top of the columns go (the name covers most of small Balikpapan and pulled its sample to the halo).
-    for (const id of ["regions-outline", "plants", "plant-clusters", "region-labels"]) map.setLayoutProperty(id, "visibility", "none");
+    // Only the columns and the ground are measured: outlines, top rims, plant markers and the region names
+    // drawn on top of the columns go (the name covers most of small Balikpapan and pulled its sample to the halo).
+    for (const id of ["regions-outline", "regions-rim", "plants", "plant-clusters", "region-labels"]) map.setLayoutProperty(id, "visibility", "none");
     for (const key of ["showPlaceLabels", "showRoadLabels", "showAdminBoundaries"]) map.setConfigProperty("basemap", key, false);
     map.jumpTo({ center: [116.6, 0.4], zoom: 6.15, pitch: 0, bearing: 0, padding: { top: 0, bottom: 0, left: 0, right: 0 } });
     type Shape = { type: "Polygon"; coordinates: number[][][] } | { type: "MultiPolygon"; coordinates: number[][][][] };
-    const fc = (await (await fetch("/api/regions")).json()) as { features: { properties: { id: string }; geometry: Shape }[] };
+    const fc = calm as unknown as { features: { properties: { id: string }; geometry: Shape }[] };
     const inside = (pt: number[], rings: number[][][]) => {
       let hit = false;
       for (const ring of rings) {
@@ -79,7 +83,7 @@ async function preparePage(page: Page, metric: "co2" | "kwh") {
     });
     await new Promise((r) => map.once("idle", r));
     return out;
-  }, STOPS);
+  }, { stops: STOPS, calm });
 }
 
 /** Median colour under each region's points, from a PNG screenshot. */

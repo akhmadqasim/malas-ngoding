@@ -1,8 +1,9 @@
-import type { ExpressionSpecification, GeoJSONSourceSpecification, Map as MapboxMap, MapMouseEvent } from "mapbox-gl";
+import type { ExpressionSpecification, FilterSpecification, GeoJSONSourceSpecification, Map as MapboxMap, MapMouseEvent } from "mapbox-gl";
 import type { RegionCollection } from "../api.ts";
 import type { Metric } from "../store.ts";
 import { rampTokens, token } from "../theme.ts";
-import { columnHeight, columnZoomScale, HIDE_ZOOM, intensities, metricValue } from "./columns.ts";
+import { calmShapes } from "./regionShapes.ts";
+import { columnHeight, columnZoomScale, columnZoomScaleShift, FLATTEN_SELECTED, HIDE_ZOOM, intensities, metresPerPixel, metricValue, selectedZoomScale } from "./columns.ts";
 import type { Tone } from "./effects.ts";
 import {
   addRegionLabels,
@@ -19,7 +20,14 @@ export { columnHeight, columnZoomScale, intensities, metricValue };
 export const REGION_SOURCE = "regions";
 export const REGION_LAYER = "regions-extrusion";
 const OUTLINE_LAYER = "regions-outline";
-const INTERACTIONS = ["regions-enter", "regions-leave", "regions-click"] as const;
+/** The selected region's own column, so the others can step aside without it (see setSelectedRegion). */
+export const SELECTED_LAYER = "regions-selected";
+/** The crisp edge on top of every column: a thin wall along its outline at the column's own height. */
+export const RIM_LAYER = "regions-rim";
+const SELECTED_RIM_LAYER = "regions-selected-rim";
+const COLUMN_LAYERS = [REGION_LAYER, SELECTED_LAYER] as const;
+const RIM_LAYERS = [RIM_LAYER, SELECTED_RIM_LAYER] as const;
+const INTERACTIONS = ["regions-enter", "regions-leave", "regions-click", "regions-selected-click"] as const;
 
 /** By this zoom the columns have all but faded, so a hover on them ends (see `onZoom` in addRegions). */
 const HOVER_END_ZOOM = HIDE_ZOOM - 0.5;
@@ -27,8 +35,29 @@ const HOVER_END_ZOOM = HIDE_ZOOM - 0.5;
 const MS = { rise: 1600, riseStagger: 110, hover: 300, select: 900, sink: 380, swapRise: 900, swapStagger: 40 } as const;
 /** Hover previews a selection: the column under the pointer rises this much ... */
 const HOVER_LIFT = 1.12;
-/** Columns stay opaque through the zoom a selected region rests at, then fade out toward city zoom. */
+/** With nothing selected, the columns are opaque until they fade out toward city zoom. */
 const COLUMN_OPACITY: ExpressionSpecification = ["interpolate", ["linear"], ["zoom"], 11, 1, HIDE_ZOOM, 0];
+/**
+ * Behind a selection the other columns sink, dim and are gone from zoom 8.6, so a region seen up close
+ * stands alone on the basemap, with its river, roads and coast in view.
+ */
+const NEIGHBOUR_OPACITY: ExpressionSpecification = ["interpolate", ["linear"], ["zoom"], 8, 1, 8.6, 0];
+/**
+ * The selected column turns see-through from zoom 10 (a city fills the view there): the city shows
+ * through and its crisp rim keeps the shape.
+ */
+const SELECTED_OPACITY: ExpressionSpecification = ["interpolate", ["linear"], ["zoom"], 9.8, 1, 10.6, 0.4, HIDE_ZOOM, 0];
+/** The rims stay at full strength until the columns go at city zoom. */
+const RIM_OPACITY: ExpressionSpecification = ["interpolate", ["linear"], ["zoom"], 11.5, 1, HIDE_ZOOM, 0];
+/** The rim's width in metres, about 1.5 screen px at every zoom (wall-mode extrusion). */
+const RIM_WIDTH: ExpressionSpecification = ["interpolate", ["exponential", 0.5], ["zoom"], 6, 1.5 * metresPerPixel(6), HIDE_ZOOM, 1.5 * metresPerPixel(HIDE_ZOOM)];
+/**
+ * Wall-mode fill-extrusions are not drawn on the globe (Mapbox skips tiles built in globe mode and warns
+ * once), so the rims start at zoom 6, where tiles are built flat.
+ */
+const RIM_MIN_ZOOM = 6;
+/** How long the selected column keeps its own layer after a deselect, while the camera flies out. */
+const DESELECT_SETTLE_MS = 2200;
 
 /** ... and the other columns fade this far toward the dimmed colour of a real selection (which goes all the way). */
 const RECEDE = 0.6;
@@ -67,6 +96,35 @@ function colorExpression(metric: Metric, tone: Tone): ExpressionSpecification {
 
 const outlineColor = (tone: Tone) => token(tone === "light" ? "--color-outline-light" : "--color-paper");
 
+/** Paint of a column layer; only the opacity curve differs between the shared and the selected layer. */
+function columnPaint(metric: Metric, tone: Tone, height: ExpressionSpecification, opacity: ExpressionSpecification, selected = false) {
+  return {
+    "fill-extrusion-color": colorExpression(metric, tone),
+    "fill-extrusion-height": selected ? selectedZoomScale(height) : columnZoomScale(height),
+    "fill-extrusion-base": 0,
+    "fill-extrusion-opacity": opacity,
+    // One value for every column: hover is shown by the lift and the receding neighbours, not by glow.
+    "fill-extrusion-emissive-strength": EMISSIVE[tone],
+    // Calm walls: no darkening gradient and no ambient occlusion, which broke the low walls of a selected
+    // region into dark fragments.
+    "fill-extrusion-vertical-gradient": false,
+    "fill-extrusion-ambient-occlusion-intensity": 0,
+  } as const;
+}
+
+/** Rim colour: ink on every column, a quiet grey on a dimmed one (feature-state `fade`, as the fill). */
+function rimColor(): ExpressionSpecification {
+  return ["interpolate", ["linear"], ["coalesce", ["feature-state", "fade"], 0], 0, token("--color-ink"), 1, token("--color-paper-faint")];
+}
+
+/** Which columns each layer draws: the selected one alone in its own layers, the others in the shared ones. */
+function applySelectionFilters(map: MapboxMap, selected: string | null) {
+  const others: FilterSpecification | null = selected ? ["!=", ["get", "id"], selected] : null;
+  const own: FilterSpecification = ["==", ["get", "id"], selected ?? ""];
+  for (const id of [REGION_LAYER, RIM_LAYER]) if (map.getLayer(id)) map.setFilter(id, others);
+  for (const id of [SELECTED_LAYER, SELECTED_RIM_LAYER]) if (map.getLayer(id)) map.setFilter(id, own);
+}
+
 // --- Animation ----------------------------------------------------------------------------------
 // Heights (`h`) and colour fades (`fade`) live in feature-state, so animating them only updates paint
 // buffers (no re-tiling).
@@ -97,6 +155,8 @@ interface LayerState {
   risen: boolean;
   /** The pending colour swap of a metric switch. */
   metricTimer: ReturnType<typeof setTimeout> | undefined;
+  /** The pending hand-back of a just deselected column to the shared layers. */
+  deselectTimer: ReturnType<typeof setTimeout> | undefined;
   /** The labels come back once the running height animation has finished... */
   labelsPending: boolean;
   /** ...and no metric swap is waiting to start the next one. */
@@ -155,7 +215,8 @@ function targetHeight(id: string): number {
   const t = intensities(state.regions, state.metric).get(id) ?? 0;
   const base = columnHeight(t);
   if (!state.selected) return state.hovered === id ? base * HOVER_LIFT : base;
-  return id === state.selected ? base * 1.1 : base * 0.4;
+  // The others sink to the ground; they are gone from zoom 8.6 anyway (NEIGHBOUR_OPACITY).
+  return id === state.selected ? base * 1.1 : 0;
 }
 
 /**
@@ -212,9 +273,9 @@ export function addRegions(
   tone: Tone = "dark",
 ): void {
   removeRegions(map);
-  // A little more simplification than Mapbox's default (0.375 tile px), scaled by zoom like it: the walls
-  // of the columns read as calm planes instead of a stripe per tiny coastline step.
-  map.addSource(REGION_SOURCE, { type: "geojson", data: fc as unknown as GeoJSONSourceSpecification["data"], promoteId: "id", tolerance: 2.5 });
+  // A little more simplification than Mapbox's default (0.375 tile px) on top, scaled by zoom like it.
+  // The columns use a calmer copy of the shapes (regionShapes.ts): no delta slivers, no comb of walls.
+  map.addSource(REGION_SOURCE, { type: "geojson", data: calmShapes(fc) as unknown as GeoJSONSourceSpecification["data"], promoteId: "id", tolerance: 1.5 });
 
   const height: ExpressionSpecification = ["coalesce", ["feature-state", "h"], 0];
 
@@ -224,21 +285,40 @@ export function addRegions(
     source: REGION_SOURCE,
     slot: "middle",
     maxzoom: HIDE_ZOOM,
-    paint: {
-      "fill-extrusion-color": colorExpression(metric, tone),
-      "fill-extrusion-height": columnZoomScale(height),
-      "fill-extrusion-base": 0,
-      // Opaque, so the ground does not tint the data colour, also at the zoom a selected region rests at
-      // (up to 10.5); fades out only on the way to city zoom.
-      "fill-extrusion-opacity": COLUMN_OPACITY,
-      // One value for every column: hover is shown by the lift and the receding neighbours, not by glow.
-      "fill-extrusion-emissive-strength": EMISSIVE[tone],
-      // Calm walls: no darkening gradient and no ambient occlusion, which broke the low walls of a
-      // selected region into dark fragments.
-      "fill-extrusion-vertical-gradient": false,
-      "fill-extrusion-ambient-occlusion-intensity": 0,
-    },
+    paint: columnPaint(metric, tone, height, COLUMN_OPACITY),
   });
+  map.addLayer({
+    id: SELECTED_LAYER,
+    type: "fill-extrusion",
+    source: REGION_SOURCE,
+    slot: "middle",
+    maxzoom: HIDE_ZOOM,
+    filter: ["==", ["get", "id"], ""],
+    paint: columnPaint(metric, tone, height, SELECTED_OPACITY, true),
+  });
+  for (const id of RIM_LAYERS) {
+    map.addLayer({
+      id,
+      type: "fill-extrusion",
+      source: REGION_SOURCE,
+      slot: "middle",
+      minzoom: RIM_MIN_ZOOM,
+      maxzoom: HIDE_ZOOM,
+      ...(id === SELECTED_RIM_LAYER ? { filter: ["==", ["get", "id"], ""] as FilterSpecification } : {}),
+      paint: {
+        // Wall mode: a thin wall along each outline, from just under the column top to just over it, on the
+        // same feature-state height, so it follows the rise, the hover lift and the selection exactly.
+        "fill-extrusion-line-width": RIM_WIDTH,
+        "fill-extrusion-color": rimColor(),
+        "fill-extrusion-height": columnZoomScaleShift(height, 0.6, id === SELECTED_RIM_LAYER ? FLATTEN_SELECTED : undefined),
+        "fill-extrusion-base": columnZoomScaleShift(height, -0.6, id === SELECTED_RIM_LAYER ? FLATTEN_SELECTED : undefined),
+        "fill-extrusion-opacity": RIM_OPACITY,
+        "fill-extrusion-emissive-strength": 1,
+        "fill-extrusion-vertical-gradient": false,
+        "fill-extrusion-ambient-occlusion-intensity": 0,
+      },
+    });
+  }
   map.addLayer({
     id: OUTLINE_LAYER,
     type: "line",
@@ -278,6 +358,7 @@ export function addRegions(
     selected: null,
     risen: false,
     metricTimer: undefined,
+    deselectTimer: undefined,
     labelsPending: false,
     swapPending: false,
     fc,
@@ -289,6 +370,9 @@ export function addRegions(
   map.on("mousemove", onMouseMove);
   map.on("zoom", onZoom);
 
+  // The selected column has its own layer: a click on it must not fall through to the map, which would
+  // read it as a click on empty ground and close the selection.
+  map.addInteraction("regions-selected-click", { type: "click", target: { layerId: SELECTED_LAYER }, handler: () => {} });
   map.addInteraction("regions-enter", {
     type: "mouseenter",
     target: { layerId: REGION_LAYER },
@@ -358,7 +442,7 @@ export function setRegionMetric(map: MapboxMap, metric: Metric): void {
     s.swapPending = false;
     // The labels follow the new metric's column heights (hidden until the rise below has finished).
     setRegionLabelData(map, s.fc, s.metric);
-    map.setPaintProperty(REGION_LAYER, "fill-extrusion-color", colorExpression(s.metric, s.tone));
+    for (const layer of COLUMN_LAYERS) map.setPaintProperty(layer, "fill-extrusion-color", colorExpression(s.metric, s.tone));
     writeIntensity();
     s.regions.forEach((r, i) => animateTo(r.id, "h", targetHeight(r.id), MS.swapRise, i * MS.swapStagger));
   }, MS.sink + 20);
@@ -367,8 +451,27 @@ export function setRegionMetric(map: MapboxMap, metric: Metric): void {
 /** Highlights one region (the others dim and step back), or clears the selection with `null`. */
 export function setSelectedRegion(map: MapboxMap, id: string | null): void {
   if (!state || state.map !== map || state.selected === id) return;
+  const previous = state.selected;
   state.selected = id;
   holdLabels(state);
+  clearTimeout(state.deselectTimer);
+  if (id) {
+    // The selected column moves to its own layers; the others sink, dim and go from zoom 8.6.
+    applySelectionFilters(map, id);
+    map.setPaintProperty(REGION_LAYER, "fill-extrusion-opacity", NEIGHBOUR_OPACITY);
+    map.setPaintProperty(RIM_LAYER, "fill-extrusion-opacity", NEIGHBOUR_OPACITY);
+  } else {
+    // The others come back while the camera flies out; the region just left keeps its own layers until the
+    // flight is over, so it never blinks between two opacity curves.
+    map.setPaintProperty(REGION_LAYER, "fill-extrusion-opacity", COLUMN_OPACITY);
+    map.setPaintProperty(RIM_LAYER, "fill-extrusion-opacity", RIM_OPACITY);
+    if (previous) {
+      const s = state;
+      s.deselectTimer = setTimeout(() => {
+        if (state === s && !s.selected) applySelectionFilters(map, null);
+      }, DESELECT_SETTLE_MS);
+    }
+  }
   // A selection keeps only its own label; the others belong to columns that step back.
   setRegionLabelFocus(map, id);
   for (const r of state.regions) animateTo(r.id, "h", targetHeight(r.id), MS.select);
@@ -385,15 +488,16 @@ export function setRegionHover(map: MapboxMap, id: string | null): void {
 export function setRegionTone(map: MapboxMap, tone: Tone): void {
   if (!state || state.map !== map || state.tone === tone) return;
   state.tone = tone;
-  if (map.getLayer(REGION_LAYER)) {
-    map.setPaintProperty(REGION_LAYER, "fill-extrusion-color", colorExpression(state.metric, tone));
-    map.setPaintProperty(REGION_LAYER, "fill-extrusion-emissive-strength", EMISSIVE[tone]);
+  for (const layer of COLUMN_LAYERS) {
+    if (!map.getLayer(layer)) continue;
+    map.setPaintProperty(layer, "fill-extrusion-color", colorExpression(state.metric, tone));
+    map.setPaintProperty(layer, "fill-extrusion-emissive-strength", EMISSIVE[tone]);
   }
   if (map.getLayer(OUTLINE_LAYER)) map.setPaintProperty(OUTLINE_LAYER, "line-color", outlineColor(tone));
 }
 
 export function setRegionsVisible(map: MapboxMap, visible: boolean): void {
-  for (const layer of [REGION_LAYER, OUTLINE_LAYER]) {
+  for (const layer of [...COLUMN_LAYERS, ...RIM_LAYERS, OUTLINE_LAYER]) {
     if (map.getLayer(layer)) map.setLayoutProperty(layer, "visibility", visible ? "visible" : "none");
   }
   setRegionLabelsVisible(map, visible);
@@ -404,12 +508,13 @@ export function removeRegions(map: MapboxMap): void {
   if (state) {
     if (state.frame) cancelAnimationFrame(state.frame);
     clearTimeout(state.metricTimer);
+    clearTimeout(state.deselectTimer);
     map.off("mousemove", state.onMouseMove);
     map.off("zoom", state.onZoom);
     state = null;
   }
   removeRegionLabels(map);
   for (const id of INTERACTIONS) map.removeInteraction(id);
-  for (const layer of [REGION_LAYER, OUTLINE_LAYER]) if (map.getLayer(layer)) map.removeLayer(layer);
+  for (const layer of [...RIM_LAYERS, ...COLUMN_LAYERS, OUTLINE_LAYER]) if (map.getLayer(layer)) map.removeLayer(layer);
   if (map.getSource(REGION_SOURCE)) map.removeSource(REGION_SOURCE);
 }
