@@ -658,6 +658,8 @@ try {
     check(text.includes(markers.one.name) && /\d MW/.test(text) && /Batu bara|Gas|Surya|Diesel|Air|Biomassa|Lainnya/.test(text), `hovering a plant shows its name, fuel and MW (${text.replace(/\s+/g, " ").trim().slice(0, 80)})`);
   } else check(false, "a single plant marker is on screen at the province view");
   if (markers.many) {
+    // From off the map, so the way there crosses no other marker (its leave would close the new tooltip).
+    await page.mouse.move(sheet.left + 30, sheet.top + 20);
     await page.mouse.move(markers.many.x, markers.many.y, { steps: 3 });
     await page.waitForTimeout(600);
     const listed = await page.locator(".map-popup .plant-list li").count();
