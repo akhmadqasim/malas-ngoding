@@ -25,7 +25,9 @@ export interface PointGeometry {
   coordinates: [number, number];
 }
 
-export type RegionCollection = FeatureCollection<PolygonGeometry, RegionSummary>;
+/** A region on the map: its figures plus where its name goes (inside the region, where it is widest). */
+export type RegionProperties = RegionSummary & { labelPoint?: [number, number] };
+export type RegionCollection = FeatureCollection<PolygonGeometry, RegionProperties>;
 export type RegionDetail = RegionSummary & { centroid: [number, number] };
 
 export interface PlantProperties {

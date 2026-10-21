@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import type { FogSpecification } from "mapbox-gl";
+import { clearTokenCache } from "../../src/web/theme.ts";
 import {
   basemapTheme,
   lightModeFromQuery,
@@ -6,8 +8,10 @@ import {
   overcastOpacity,
   presetTone,
   RAIN_MIN_ZOOM,
+  rainFog,
   rainSpec,
   resolvePreset,
+  setRainEffect,
   witaHour,
 } from "../../src/web/map/effects.ts";
 
@@ -100,16 +104,61 @@ describe("rain only shows at building zoom", () => {
 });
 
 describe("rain on a light ground (day, dawn)", () => {
-  const light = rainSpec("light", { color: "#4a5262", vignetteColor: "#283040" });
+  const light = rainSpec("light", { color: "#e2e5ea", vignetteColor: "#283040" });
   test("still nothing below building zoom", () => {
     expect(atZoom(light.density, 14.9)).toBe(0);
     expect(atZoom(light.vignette, 14.9)).toBe(0);
   });
-  test("darker, more opaque drops that read on pale buildings, still thin", () => {
-    expect(light.color).toBe("#4a5262");
-    expect(light.opacity).toBeGreaterThanOrEqual(0.7);
-    expect(light["droplet-size"]).toEqual([1.2, 12]);
-    expect(light["distortion-strength"]).toBe(0.5);
+  test("light streaks, like real rain against an overcast sky (dark drops read as needles)", () => {
+    expect(light.color).toBe("#e2e5ea");
+    expect(light.opacity).toBeCloseTo(0.72);
+    expect(light["droplet-size"]).toEqual([1, 12]);
+    expect(light["distortion-strength"]).toBe(0.35);
+    expect(atZoom(light.density, 16.5)).toBe(1);
+  });
+});
+
+describe("rain haze: the overcast drawn inside the map, so light drops show against it", () => {
+  const colors = { color: "#5f6874", highColor: "#4a525e" };
+  const base = {
+    color: ["interpolate", ["exponential", 1.2], ["zoom"], 5, "A5", 7, "A7"],
+    "high-color": "#ffffff",
+    range: ["interpolate", ["linear"], ["zoom"], 13, ["literal", [1, 10]], 15, ["literal", [1, 4]], 22, ["literal", [14, 20]]],
+    "horizon-blend": ["interpolate", ["exponential", 1.2], ["zoom"], 5, 0.01, 7, 0.1],
+    "space-color": "#000000",
+    "star-intensity": 0.2,
+  };
+  const fog = rainFog(base as unknown as FogSpecification, colors);
+
+  test("below building zoom the basemap's own fog is untouched", () => {
+    expect(fog.color).toEqual(["interpolate", ["exponential", 1.2], ["zoom"], 5, "A5", 7, "A7", 15, "A7", 16.5, "#5f6874"]);
+    expect(fog["space-color"]).toBe("#000000");
+    expect(fog["star-intensity"]).toBe(0.2);
+  });
+
+  test("the haze closes in from zoom 15 to 16.5; later basemap stops are dropped", () => {
+    expect(fog.range).toEqual([
+      "interpolate",
+      ["linear"],
+      ["zoom"],
+      13,
+      ["literal", [1, 10]],
+      15,
+      ["literal", [1, 4]],
+      16.5,
+      ["literal", [-1, 2.5]],
+    ]);
+  });
+
+  test("a plain basemap value fades into the rain value", () => {
+    expect(fog["high-color"]).toEqual(["interpolate", ["linear"], ["zoom"], 15, "#ffffff", 16.5, "#4a525e"]);
+    expect(fog["horizon-blend"]).toEqual(["interpolate", ["exponential", 1.2], ["zoom"], 5, 0.01, 7, 0.1, 15, 0.1, 16.5, 0.25]);
+  });
+
+  test("without a basemap fog the rain values apply as they are", () => {
+    const bare = rainFog(null, colors);
+    expect(bare.color).toBe("#5f6874");
+    expect(bare.range).toEqual([-1, 2.5]);
   });
 });
 
@@ -118,9 +167,43 @@ describe("overcast tint while it rains", () => {
     expect(overcastOpacity(false, "light", 17)).toBe(0);
     expect(overcastOpacity(true, "light", 14)).toBe(0);
   });
-  test("fades in with the rain between zoom 15 and 16.5, stronger on a light ground", () => {
-    expect(overcastOpacity(true, "light", 16.5)).toBeCloseTo(0.24);
-    expect(overcastOpacity(true, "light", 18)).toBeCloseTo(0.24);
+  test("fades in with the rain between zoom 15 and 16.5 (the haze carries the daytime gloom)", () => {
+    expect(overcastOpacity(true, "light", 16.5)).toBeCloseTo(0.1);
+    expect(overcastOpacity(true, "light", 18)).toBeCloseTo(0.1);
     expect(overcastOpacity(true, "dark", 15.75)).toBeCloseTo(0.06);
+  });
+});
+
+describe("setRainEffect leaves the basemap fog alone unless the haze was applied", () => {
+  const g = globalThis as unknown as Record<string, unknown>;
+  const saved = { document: g.document, getComputedStyle: g.getComputedStyle };
+  const base = { color: "#ffffff" } as FogSpecification;
+  function fakeMap() {
+    const calls: { fog: unknown[]; rain: unknown[] } = { fog: [], rain: [] };
+    const map = { setFog: (f: unknown) => void calls.fog.push(f), setRain: (r: unknown) => void calls.rain.push(r) };
+    return { map: map as unknown as import("mapbox-gl").Map, calls };
+  }
+  test("rain off, or rain on a dark ground: the fog is never touched", () => {
+    g.document = { documentElement: {} };
+    g.getComputedStyle = () => ({ getPropertyValue: () => "#123456" });
+    const { map, calls } = fakeMap();
+    setRainEffect(map, false, "light", base);
+    setRainEffect(map, true, "dark", base);
+    expect(calls.fog).toEqual([]);
+    Object.assign(g, saved);
+    clearTokenCache();
+  });
+  test("rain on a light ground hazes the fog; turning it off puts the basemap fog back once", () => {
+    g.document = { documentElement: {} };
+    g.getComputedStyle = () => ({ getPropertyValue: () => "#123456" });
+    const { map, calls } = fakeMap();
+    setRainEffect(map, true, "light", base);
+    expect(calls.fog).toHaveLength(1);
+    expect(calls.fog[0]).not.toEqual(base);
+    setRainEffect(map, false, "light", base);
+    setRainEffect(map, false, "light", base);
+    expect(calls.fog).toEqual([calls.fog[0], base]);
+    Object.assign(g, saved);
+    clearTokenCache();
   });
 });

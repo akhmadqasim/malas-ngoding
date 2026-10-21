@@ -74,6 +74,11 @@ export async function listRegions(): Promise<RegionSummary[]> {
  */
 export const DISPLAY_MIN_PART_M2 = 30e6;
 
+/**
+ * Display geometry and a label point for every region. The label point is the centre of the largest
+ * circle that fits inside the region's largest part: unlike the centroid it always lies inside the
+ * region (Mahakam Ulu's centroid does not), and it sits where the region is widest.
+ */
 export async function regionGeoJSON(): Promise<FeatureCollection> {
   const factor = await latestGridFactor();
   const rows = await sql`
@@ -84,13 +89,22 @@ export async function regionGeoJSON(): Promise<FeatureCollection> {
                (SELECT ST_Multi(ST_Collect(d.geom)) FROM ST_Dump(r.geom) d
                 WHERE ST_Area(d.geom::geography) >= ${DISPLAY_MIN_PART_M2}),
                r.geom),
-             6)::text AS geometry
-    FROM regions r ORDER BY name`;
+             6)::text AS geometry,
+           ST_X(lp.center) AS label_lng, ST_Y(lp.center) AS label_lat
+    FROM regions r
+    CROSS JOIN LATERAL (
+      SELECT (ST_MaximumInscribedCircle(d.geom)).center
+      FROM ST_Dump(r.geom) d ORDER BY ST_Area(d.geom) DESC LIMIT 1
+    ) lp
+    ORDER BY name`;
   return {
     type: "FeatureCollection",
     features: rows.map((r: Record<string, unknown>) => ({
       type: "Feature" as const,
-      properties: { ...toSummary(r, factor) },
+      properties: {
+        ...toSummary(r, factor),
+        labelPoint: [Math.round(Number(r.label_lng) * 1e5) / 1e5, Math.round(Number(r.label_lat) * 1e5) / 1e5],
+      },
       geometry: JSON.parse(String(r.geometry)),
     })),
   };

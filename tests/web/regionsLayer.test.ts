@@ -9,8 +9,10 @@ import {
   riseRegions,
   setRegionHover,
   setRegionMetric,
+  setRegionsVisible,
   setSelectedRegion,
 } from "../../src/web/map/regionsLayer.ts";
+import { REGION_LABEL_LAYER } from "../../src/web/map/regionLabels.ts";
 import { clearTokenCache } from "../../src/web/theme.ts";
 import type { RegionSummary } from "../../src/shared/types.ts";
 
@@ -24,12 +26,15 @@ function fakeMap() {
   const specs = new Map<string, { paint?: Record<string, unknown> }>();
   const sources = new Set<string>();
   const featureState = new Map<string, Record<string, unknown>>();
-  const paintCalls: [string, string][] = [];
+  const paintCalls: [string, string, unknown][] = [];
+  const filters = new Map<string, unknown>();
+  const sourceData: unknown[] = [];
+  const visibility = new Map<string, unknown>();
   const canvas = { style: { cursor: "" } };
   const zoom = { value: 6.6 };
   const map = {
     addSource: (id: string) => void sources.add(id),
-    getSource: (id: string) => (sources.has(id) ? {} : undefined),
+    getSource: (id: string) => (sources.has(id) ? { setData: (d: unknown) => void sourceData.push(d) } : undefined),
     removeSource: (id: string) => void sources.delete(id),
     addLayer: (l: { id: string; paint?: Record<string, unknown> }) => {
       layers.add(l.id);
@@ -37,8 +42,11 @@ function fakeMap() {
     },
     getLayer: (id: string) => (layers.has(id) ? {} : undefined),
     removeLayer: (id: string) => void layers.delete(id),
-    setPaintProperty: (layer: string, prop: string) => void paintCalls.push([layer, prop]),
-    setLayoutProperty: () => {},
+    setPaintProperty: (layer: string, prop: string, value: unknown) => void paintCalls.push([layer, prop, value]),
+    setLayoutProperty: (layer: string, prop: string, value: unknown) => {
+      if (prop === "visibility") visibility.set(layer, value);
+    },
+    setFilter: (layer: string, filter: unknown) => void filters.set(layer, filter),
     setFeatureState: (f: { id: string }, s: Record<string, unknown>) =>
       void featureState.set(f.id, { ...featureState.get(f.id), ...s }),
     on: (type: string, fn: Handler) => void (listeners.get(type) ?? listeners.set(type, new Set()).get(type)!).add(fn),
@@ -59,6 +67,12 @@ function fakeMap() {
     paintCalls,
     interactions,
     layers,
+    filters,
+    visibility,
+    /** Data set on a source after it was added (the label heights after a metric switch). */
+    labelData: () => sourceData,
+    /** The last text-opacity set on the label layer: 0 when hidden, an expression when shown. */
+    labelOpacity: () => paintCalls.filter(([l, prop]) => l === REGION_LABEL_LAYER && prop === "text-opacity").at(-1)?.[2],
   };
 }
 
@@ -80,7 +94,7 @@ const fc: RegionCollection = {
     type: "Feature",
     id: properties.id,
     geometry: { type: "Polygon", coordinates: [[[116 + i, 0], [116.5 + i, 0], [116.5 + i, -0.5], [116 + i, 0]]] },
-    properties,
+    properties: { ...properties, labelPoint: [116.25 + i, -0.2] as [number, number] },
   })),
 };
 
@@ -214,6 +228,61 @@ describe("hover after zooming in", () => {
   });
 });
 
+describe("region labels", () => {
+  test("the labels sit on the columns: hidden while the intro flies, shown once the columns have risen", () => {
+    const { map, layers, specs, labelOpacity } = setup();
+    expect(layers.has(REGION_LABEL_LAYER)).toBe(true);
+    expect(specs.get(REGION_LABEL_LAYER)?.paint?.["text-opacity"]).toBe(0);
+    riseRegions(map, fc);
+    expect(labelOpacity()).toBeUndefined();
+    flush();
+    expect(labelOpacity()).not.toBe(0);
+    expect(labelOpacity()).toBeDefined();
+    removeRegions(map);
+  });
+
+  test("a metric switch hides the labels while the columns sink and rise, then shows them again", async () => {
+    const { map, labelOpacity, labelData } = setup();
+    riseRegions(map, fc);
+    flush();
+    setRegionMetric(map, "kwh");
+    expect(labelOpacity()).toBe(0);
+    // The columns have sunk, but the swap to the new metric has not happened yet: still hidden.
+    flush();
+    expect(labelOpacity()).toBe(0);
+    await Bun.sleep(450);
+    flush();
+    expect(labelOpacity()).not.toBe(0);
+    // The labels were moved to the heights of the new metric.
+    expect(labelData().at(-1)).toBeDefined();
+    removeRegions(map);
+  });
+
+  test("selecting a region keeps only its label, once the columns have settled", () => {
+    const { map, filters, labelOpacity } = setup();
+    riseRegions(map, fc);
+    flush();
+    setSelectedRegion(map, "paser");
+    expect(labelOpacity()).toBe(0);
+    flush();
+    expect(filters.get(REGION_LABEL_LAYER)).toEqual(["==", ["get", "id"], "paser"]);
+    expect(labelOpacity()).not.toBe(0);
+    setSelectedRegion(map, null);
+    flush();
+    expect(filters.get(REGION_LABEL_LAYER)).toBeNull();
+    removeRegions(map);
+  });
+
+  test("the labels follow the region layer switch", () => {
+    const { map, visibility } = setup();
+    setRegionsVisible(map, false);
+    expect(visibility.get(REGION_LABEL_LAYER)).toBe("none");
+    setRegionsVisible(map, true);
+    expect(visibility.get(REGION_LABEL_LAYER)).toBe("visible");
+    removeRegions(map);
+  });
+});
+
 describe("cleanup", () => {
   test("removeRegions cancels a pending metric switch and removes everything it added", async () => {
     const { map, paintCalls, interactions, layers } = setup();
@@ -223,5 +292,13 @@ describe("cleanup", () => {
     expect(paintCalls.filter(([layer, prop]) => layer === REGION_LAYER && prop === "fill-extrusion-color")).toEqual([]);
     expect(interactions.size).toBe(0);
     expect(layers.size).toBe(0);
+  });
+
+  test("removeRegions also cancels a pending label reveal", () => {
+    const { map, labelOpacity } = setup();
+    riseRegions(map, fc);
+    removeRegions(map);
+    flush();
+    expect(labelOpacity()).toBeUndefined();
   });
 });

@@ -1,4 +1,4 @@
-import mapboxgl from "mapbox-gl";
+import mapboxgl, { type FogSpecification } from "mapbox-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
 import { useEffect, useRef } from "react";
 import { api, type PlantCollection, type RegionCollection } from "../api.ts";
@@ -15,6 +15,7 @@ import {
   setRainEffect,
 } from "./effects.ts";
 import { addPlants, removePlants, setPlantsVisible } from "./plantsLayer.ts";
+import { basemapLabelConfig, REGION_LABEL_LAYER } from "./regionLabels.ts";
 import {
   addRegions,
   removeRegions,
@@ -52,11 +53,6 @@ const FAILURE = {
 const LOAD_GUARD_MS = 15_000;
 /** The intro waits for the first complete frame, but never longer than this. */
 const IDLE_WAIT_MS = 4_000;
-/**
- * Road names and shields (AH150, 1-74) only add noise at the province view; from city zoom they help.
- * Place names stay on at every zoom for orientation.
- */
-const ROAD_LABEL_ZOOM = 11;
 
 /** Bounding box of a region polygon, used to frame it when selected. */
 function bboxOf(fc: RegionCollection, id: string): [[number, number], [number, number]] | undefined {
@@ -141,7 +137,8 @@ export function MapView({ token, regions, plants, onIntroStart, onIntroEnd, onRe
             show3dLandmarks: false,
             showPointOfInterestLabels: false,
             showTransitLabels: false,
-            showRoadLabels: GLOBE_VIEW.zoom >= ROAD_LABEL_ZOOM,
+            // Our own region labels name the province view; basemap names return closer in.
+            ...basemapLabelConfig(GLOBE_VIEW.zoom),
           },
         },
       });
@@ -178,15 +175,20 @@ export function MapView({ token, regions, plants, onIntroStart, onIntroEnd, onRe
     };
     map.on("zoom", updateOvercast);
 
-    // Road labels follow the zoom; the config only changes when the view crosses the threshold.
-    let roadLabels = GLOBE_VIEW.zoom >= ROAD_LABEL_ZOOM;
-    const updateRoadLabels = () => {
-      const show = map.getZoom() >= ROAD_LABEL_ZOOM;
-      if (show === roadLabels) return;
-      roadLabels = show;
-      map.setConfigProperty("basemap", "showRoadLabels", show);
+    // Basemap labels follow the zoom: place names give way to the region labels at the province view,
+    // road names wait for city zoom. The config only changes when the view crosses a threshold.
+    let basemapLabels = basemapLabelConfig(GLOBE_VIEW.zoom);
+    const updateBasemapLabels = () => {
+      const next = basemapLabelConfig(map.getZoom());
+      for (const key of Object.keys(next) as (keyof typeof next)[]) {
+        if (next[key] !== basemapLabels[key]) map.setConfigProperty("basemap", key, next[key]);
+      }
+      basemapLabels = next;
     };
-    map.on("zoomend", updateRoadLabels);
+    map.on("zoomend", updateBasemapLabels);
+
+    // The basemap's own fog, captured before the rain haze ever replaces it, so it can be put back.
+    let baseFog: FogSpecification | null | undefined;
 
     /** Switches the light and everything that follows the ground tone: ramps, outlines, rain, tint. */
     const applyLight = (next: LightPreset) => {
@@ -195,7 +197,7 @@ export function MapView({ token, regions, plants, onIntroStart, onIntroEnd, onRe
       applyLightPreset(map, next);
       const tone = presetTone(next);
       setRegionTone(map, tone);
-      setRainEffect(map, useAppStore.getState().rain === "on", tone);
+      setRainEffect(map, useAppStore.getState().rain === "on", tone, baseFog ?? null);
       updateOvercast();
       useAppStore.getState().setLightPreset(next);
     };
@@ -212,6 +214,7 @@ export function MapView({ token, regions, plants, onIntroStart, onIntroEnd, onRe
         map.addSource("mapbox-dem", { type: "raster-dem", url: "mapbox://mapbox.mapbox-terrain-dem-v1", tileSize: 512, maxzoom: 14 });
       }
       map.setTerrain({ source: "mapbox-dem", exaggeration: 1.4 });
+      if (baseFog === undefined) baseFog = map.getFog();
 
       const now = useAppStore.getState();
       addRegions(
@@ -225,9 +228,10 @@ export function MapView({ token, regions, plants, onIntroStart, onIntroEnd, onRe
         },
         presetTone(preset),
       );
-      addPlants(map, plants, now.layers.plants);
+      // Plant markers go under the region labels; their invisible hit boxes above keep labels clear.
+      addPlants(map, plants, now.layers.plants, { below: REGION_LABEL_LAYER });
       setRegionsVisible(map, now.layers.regions);
-      setRainEffect(map, now.rain === "on", presetTone(preset));
+      setRainEffect(map, now.rain === "on", presetTone(preset), baseFog ?? null);
       updateOvercast();
       if (now.selectedRegionId) setSelectedRegion(map, now.selectedRegionId);
 
@@ -277,7 +281,7 @@ export function MapView({ token, regions, plants, onIntroStart, onIntroEnd, onRe
       if (s.layers.regions !== prev.layers.regions) setRegionsVisible(map, s.layers.regions);
       if (s.layers.plants !== prev.layers.plants) setPlantsVisible(map, s.layers.plants);
       if (s.rain !== prev.rain) {
-        setRainEffect(map, s.rain === "on", presetTone(preset));
+        setRainEffect(map, s.rain === "on", presetTone(preset), baseFog ?? null);
         updateOvercast();
       }
       if (s.lightMode !== prev.lightMode) applyLight(resolvePreset(s.lightMode, new Date()));

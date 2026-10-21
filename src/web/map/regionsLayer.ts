@@ -2,19 +2,25 @@ import type { ExpressionSpecification, GeoJSONSourceSpecification, Map as Mapbox
 import type { RegionCollection } from "../api.ts";
 import type { Metric } from "../store.ts";
 import { mixColors, rampTokens, token } from "../theme.ts";
+import { columnHeight, columnZoomScale, HIDE_ZOOM, intensities, metricValue } from "./columns.ts";
 import type { Tone } from "./effects.ts";
+import {
+  addRegionLabels,
+  removeRegionLabels,
+  setRegionLabelData,
+  setRegionLabelFocus,
+  setRegionLabelsShown,
+  setRegionLabelsVisible,
+} from "./regionLabels.ts";
 import type { RegionSummary } from "../../shared/types.ts";
+
+export { columnHeight, columnZoomScale, intensities, metricValue };
 
 export const REGION_SOURCE = "regions";
 export const REGION_LAYER = "regions-extrusion";
 const OUTLINE_LAYER = "regions-outline";
 const INTERACTIONS = ["regions-enter", "regions-leave", "regions-click"] as const;
 
-/** Tallest and shortest column at the province view, in metres. Scaled down again as the user zooms in. */
-const MAX_HEIGHT_M = 75_000;
-const MIN_HEIGHT_M = 4_000;
-/** Above this zoom the city and its buildings matter more than the columns, so they flatten out and hide. */
-const HIDE_ZOOM = 12;
 /** By this zoom the columns have all but faded, so a hover on them ends (see `onZoom` in addRegions). */
 const HOVER_END_ZOOM = HIDE_ZOOM - 0.5;
 /** Map motion in ms (docs/research/design/00-direction.md section 6). */
@@ -37,16 +43,6 @@ export interface RegionHandlers {
   /** The pointer moved while over a region: position the tooltip without re-rendering. */
   onPointer?: (point: { x: number; y: number }) => void;
 }
-
-export const metricValue = (r: RegionSummary, metric: Metric) => (metric === "co2" ? r.co2KgYear : r.kwhYear);
-
-/** 0..1 per region. Square root so small regions (Mahakam Ulu) still read, and Samarinda does not dwarf all. */
-export function intensities(regions: RegionSummary[], metric: Metric): Map<string, number> {
-  const max = Math.max(...regions.map((r) => metricValue(r, metric)), 1);
-  return new Map(regions.map((r) => [r.id, Math.sqrt(Math.max(metricValue(r, metric), 0) / max)]));
-}
-
-const heightFor = (t: number) => MIN_HEIGHT_M + (MAX_HEIGHT_M - MIN_HEIGHT_M) * t;
 
 const dimColor = (tone: Tone) => token(tone === "light" ? "--color-dim-light" : "--color-dim-dark");
 
@@ -94,6 +90,11 @@ interface LayerState {
   risen: boolean;
   /** The pending colour swap of a metric switch. */
   metricTimer: ReturnType<typeof setTimeout> | undefined;
+  /** The labels come back once the running height animation has finished... */
+  labelsPending: boolean;
+  /** ...and no metric swap is waiting to start the next one. */
+  swapPending: boolean;
+  fc: RegionCollection;
   onMouseMove: (e: MapMouseEvent) => void;
   onZoom: () => void;
 }
@@ -113,6 +114,18 @@ function tick(now: number) {
     if (p >= 1) s.tweens.delete(id);
   }
   s.frame = s.tweens.size ? requestAnimationFrame(tick) : 0;
+  // Everything stands still: the labels, which float at the resting heights, can show again.
+  if (!s.frame && s.labelsPending && !s.swapPending) {
+    s.labelsPending = false;
+    setRegionLabelsShown(s.map, true);
+  }
+}
+
+/** Hides the labels while columns change height; they return when the animation has settled. */
+function holdLabels(s: LayerState) {
+  if (!s.risen) return;
+  setRegionLabelsShown(s.map, false);
+  s.labelsPending = true;
 }
 
 function animateTo(id: string, to: number, duration: number, delay = 0) {
@@ -126,7 +139,7 @@ function animateTo(id: string, to: number, duration: number, delay = 0) {
 function targetHeight(id: string): number {
   if (!state?.risen) return 0;
   const t = intensities(state.regions, state.metric).get(id) ?? 0;
-  const base = heightFor(t);
+  const base = columnHeight(t);
   if (!state.selected) return state.hovered === id ? base * HOVER_LIFT : base;
   return id === state.selected ? base * 1.1 : base * 0.4;
 }
@@ -181,19 +194,6 @@ export function addRegions(
   removeRegions(map);
   map.addSource(REGION_SOURCE, { type: "geojson", data: fc as unknown as GeoJSONSourceSpecification["data"], promoteId: "id" });
 
-  const zoomScaled = (value: ExpressionSpecification): ExpressionSpecification => [
-    "interpolate",
-    ["linear"],
-    ["zoom"],
-    6.6,
-    value,
-    8,
-    ["*", value, 0.3],
-    9.5,
-    ["*", value, 0.08],
-    HIDE_ZOOM,
-    0,
-  ];
   const height: ExpressionSpecification = ["coalesce", ["feature-state", "h"], 0];
 
   map.addLayer({
@@ -204,7 +204,7 @@ export function addRegions(
     maxzoom: HIDE_ZOOM,
     paint: {
       "fill-extrusion-color": colorExpression(metric, tone),
-      "fill-extrusion-height": zoomScaled(height),
+      "fill-extrusion-height": columnZoomScale(height),
       "fill-extrusion-base": 0,
       // Opaque, so the ground does not tint the data colour; fades out on the way to city zoom.
       "fill-extrusion-opacity": ["interpolate", ["linear"], ["zoom"], 10, 1, HIDE_ZOOM, 0],
@@ -253,10 +253,14 @@ export function addRegions(
     selected: null,
     risen: false,
     metricTimer: undefined,
+    labelsPending: false,
+    swapPending: false,
+    fc,
     onMouseMove,
     onZoom,
   };
   writeIntensity();
+  addRegionLabels(map, fc, metric);
   map.on("mousemove", onMouseMove);
   map.on("zoom", onZoom);
 
@@ -296,10 +300,11 @@ export function addRegions(
   });
 }
 
-/** Grows every column from the ground in a west-to-east wave. */
+/** Grows every column from the ground in a west-to-east wave; the names appear once they stand. */
 export function riseRegions(map: MapboxMap, fc: RegionCollection): void {
   if (!state || state.map !== map || state.risen) return;
   state.risen = true;
+  state.labelsPending = true;
   const west = new Map(fc.features.map((f) => [f.properties.id, firstLng(f.geometry)]));
   const order = [...state.regions].sort((a, b) => (west.get(a.id) ?? 0) - (west.get(b.id) ?? 0));
   order.forEach((r, i) => animateTo(r.id, targetHeight(r.id), MS.rise, i * MS.riseStagger));
@@ -320,9 +325,14 @@ export function setRegionMetric(map: MapboxMap, metric: Metric): void {
   const s = state;
   s.metric = metric;
   clearTimeout(s.metricTimer);
+  holdLabels(s);
+  s.swapPending = true;
   for (const r of s.regions) animateTo(r.id, (s.heights.get(r.id) ?? 0) * 0.3, MS.sink);
   s.metricTimer = setTimeout(() => {
     if (state !== s) return;
+    s.swapPending = false;
+    // The labels follow the new metric's column heights (hidden until the rise below has finished).
+    setRegionLabelData(map, s.fc, s.metric);
     map.setPaintProperty(REGION_LAYER, "fill-extrusion-color", colorExpression(s.metric, s.tone));
     writeIntensity();
     s.regions.forEach((r, i) => animateTo(r.id, targetHeight(r.id), MS.swapRise, i * MS.swapStagger));
@@ -333,6 +343,9 @@ export function setRegionMetric(map: MapboxMap, metric: Metric): void {
 export function setSelectedRegion(map: MapboxMap, id: string | null): void {
   if (!state || state.map !== map || state.selected === id) return;
   state.selected = id;
+  holdLabels(state);
+  // A selection keeps only its own label; the others belong to columns that step back.
+  setRegionLabelFocus(map, id);
   for (const r of state.regions) {
     map.setFeatureState({ source: REGION_SOURCE, id: r.id }, { dim: id !== null && r.id !== id });
     animateTo(r.id, targetHeight(r.id), MS.select);
@@ -361,6 +374,7 @@ export function setRegionsVisible(map: MapboxMap, visible: boolean): void {
   for (const layer of [REGION_LAYER, OUTLINE_LAYER]) {
     if (map.getLayer(layer)) map.setLayoutProperty(layer, "visibility", visible ? "visible" : "none");
   }
+  setRegionLabelsVisible(map, visible);
 }
 
 /** Stops every animation and timer, then removes the layers, source and interactions. */
@@ -372,6 +386,7 @@ export function removeRegions(map: MapboxMap): void {
     map.off("zoom", state.onZoom);
     state = null;
   }
+  removeRegionLabels(map);
   for (const id of INTERACTIONS) map.removeInteraction(id);
   for (const layer of [REGION_LAYER, OUTLINE_LAYER]) if (map.getLayer(layer)) map.removeLayer(layer);
   if (map.getSource(REGION_SOURCE)) map.removeSource(REGION_SOURCE);

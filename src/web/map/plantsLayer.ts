@@ -7,6 +7,12 @@ import { fmtNumber } from "../../shared/format.ts";
 
 const SOURCE = "plants";
 export const PLANT_LAYER = "plants";
+/**
+ * An invisible copy of the markers, above the region labels, with a box the size of the marker itself.
+ * It keeps labels off the markers; the drawn layer cannot, because its box includes the whole pulse.
+ */
+export const PLANT_HIT_LAYER = "plants-hit";
+const HIT_IMAGE = "plant-hit";
 const INTERACTIONS = ["plants-enter", "plants-click", "plants-leave"] as const;
 
 const STATUS_LABEL: Record<string, string> = {
@@ -152,8 +158,11 @@ function markerImage(colors: MarkerColors, phase: number): mapboxgl.StyleImageIn
   };
 }
 
+/** Core, ring and edge of a marker, as a share of the marker image (see markerImage). */
+const MARKER_CORE_SHARE = 0.36;
+
 /** Power plants as pulsing markers coloured by fuel and sized by MW, with a popup on hover or tap. */
-export function addPlants(map: MapboxMap, fc: PlantCollection, visible = true): void {
+export function addPlants(map: MapboxMap, fc: PlantCollection, visible = true, opts: { below?: string } = {}): void {
   removePlants(map);
   pulse.map = map;
   pulse.visible = visible;
@@ -169,28 +178,53 @@ export function addPlants(map: MapboxMap, fc: PlantCollection, visible = true): 
     map.addImage(`plant-${fuel}`, markerImage({ core: token(`--color-fuel-${fuel}`), edge, pulse: paper }, phase), { pixelRatio: 2 });
   });
 
+  // The hit box: transparent, as wide as the core and ring of a marker image at the same icon size.
+  const hitPx = Math.round(IMAGE_PX * MARKER_CORE_SHARE);
+  map.addImage(HIT_IMAGE, { width: hitPx, height: hitPx, data: new Uint8Array(hitPx * hitPx * 4) }, { pixelRatio: 2 });
+
   // Square root of MW so a 2.200 MW site does not swallow a 50 MW one.
   const size = (k: number): ExpressionSpecification => ["*", k, ["+", 0.5, ["*", 0.022, ["sqrt", ["get", "capacityMw"]]]]];
+  const iconSize: ExpressionSpecification = ["interpolate", ["linear"], ["zoom"], 5, size(0.75), 10, size(1.35)];
+  const below = opts.below && map.getLayer(opts.below) ? opts.below : undefined;
+  map.addLayer(
+    {
+      id: PLANT_LAYER,
+      type: "symbol",
+      source: SOURCE,
+      slot: "top",
+      layout: {
+        "icon-image": plantIconExpression(present),
+        "icon-size": iconSize,
+        "icon-allow-overlap": true,
+        "icon-ignore-placement": true,
+        "symbol-sort-key": ["-", 0, ["get", "capacityMw"]],
+        visibility: visible ? "visible" : "none",
+      },
+      paint: {
+        // Planned and unverified sites are drawn fainter than operating ones.
+        "icon-opacity": ["match", ["get", "status"], "operating", 1, 0.6],
+        "icon-emissive-strength": 1,
+        // Draw markers in full even where a region column stands in front of them.
+        "icon-occlusion-opacity": 1,
+      },
+    },
+    // Under the region labels, so a pulse ring passes beneath a name instead of over it.
+    below,
+  );
   map.addLayer({
-    id: PLANT_LAYER,
+    id: PLANT_HIT_LAYER,
     type: "symbol",
     source: SOURCE,
     slot: "top",
     layout: {
-      "icon-image": plantIconExpression(present),
-      "icon-size": ["interpolate", ["linear"], ["zoom"], 5, size(0.75), 10, size(1.35)],
+      "icon-image": HIT_IMAGE,
+      "icon-size": iconSize,
       "icon-allow-overlap": true,
-      "icon-ignore-placement": true,
-      "symbol-sort-key": ["-", 0, ["get", "capacityMw"]],
+      "icon-ignore-placement": false,
+      "icon-padding": 2,
       visibility: visible ? "visible" : "none",
     },
-    paint: {
-      // Planned and unverified sites are drawn fainter than operating ones.
-      "icon-opacity": ["match", ["get", "status"], "operating", 1, 0.6],
-      "icon-emissive-strength": 1,
-      // Draw markers in full even where a region column stands in front of them.
-      "icon-occlusion-opacity": 1,
-    },
+    paint: { "icon-opacity": 0 },
   });
   startPulse();
 
@@ -222,7 +256,9 @@ export function addPlants(map: MapboxMap, fc: PlantCollection, visible = true): 
 export function setPlantsVisible(map: MapboxMap, visible: boolean): void {
   pulse.visible = visible;
   // The layout change makes Mapbox draw a frame, so shown markers report in and the pulse restarts.
-  if (map.getLayer(PLANT_LAYER)) map.setLayoutProperty(PLANT_LAYER, "visibility", visible ? "visible" : "none");
+  for (const layer of [PLANT_LAYER, PLANT_HIT_LAYER]) {
+    if (map.getLayer(layer)) map.setLayoutProperty(layer, "visibility", visible ? "visible" : "none");
+  }
   if (visible) {
     startPulse();
   } else {
@@ -238,7 +274,8 @@ export function removePlants(map: MapboxMap): void {
   popup?.remove();
   popup = null;
   for (const id of INTERACTIONS) map.removeInteraction(id);
-  if (map.getLayer(PLANT_LAYER)) map.removeLayer(PLANT_LAYER);
+  for (const layer of [PLANT_HIT_LAYER, PLANT_LAYER]) if (map.getLayer(layer)) map.removeLayer(layer);
   if (map.getSource(SOURCE)) map.removeSource(SOURCE);
   for (const fuel of FUELS as readonly FuelType[]) if (map.hasImage(`plant-${fuel}`)) map.removeImage(`plant-${fuel}`);
+  if (map.hasImage(HIT_IMAGE)) map.removeImage(HIT_IMAGE);
 }

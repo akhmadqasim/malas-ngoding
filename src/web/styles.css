@@ -71,10 +71,12 @@
   --color-fuel-biomassa: #79a94f;
   --color-fuel-lainnya: #7b8794;
 
-  /* Rain (Mapbox setRain): pale drops on a dark ground, dark drops on a light one, and the slate
-     overcast tint that dims the scene while it rains. */
+  /* Rain (Mapbox setRain): light streaks in every light, the slate haze that the daytime streaks show
+     against (map fog), and the overcast tint that dims the whole scene while it rains. */
   --color-rain: #b4b9c6;
-  --color-rain-day: #4a5262;
+  --color-rain-day: #e2e5ea;
+  --color-rain-haze: #5f6874;
+  --color-rain-haze-high: #4a525e;
   --color-rain-vignette: #283040;
   --color-overcast: #3c4757;
 

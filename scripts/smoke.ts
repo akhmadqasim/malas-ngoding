@@ -55,18 +55,26 @@ async function screen(page: Page, file: string) {
 
 type MapWindow = Window & { __malasMap?: import("mapbox-gl").Map };
 
-/** Hover and recede states of two regions, the basemap light, the rain colour and the overcast tint. */
+/**
+ * Hover and recede states of two regions, the basemap light and labels, the rain colour, whether the rain
+ * haze is in the map's fog, the overcast tint, and which region labels are drawn.
+ */
 const mapState = (page: Page) =>
   page.evaluate(() => {
     const map = (window as MapWindow).__malasMap!;
     const fs = (id: string) => map.getFeatureState({ source: "regions", id }) ?? {};
+    const haze = getComputedStyle(document.documentElement).getPropertyValue("--color-rain-haze").trim();
+    const labels = map.getLayer("region-labels") ? map.queryRenderedFeatures({ layers: ["region-labels"] }) : [];
     return {
       paser: fs("paser"),
       samarinda: fs("samarinda"),
       preset: map.getConfigProperty("basemap", "lightPreset") as string,
       theme: map.getConfigProperty("basemap", "theme") as string,
+      placeLabels: map.getConfigProperty("basemap", "showPlaceLabels") as boolean,
       rainColor: map.getRain()?.color as string | undefined,
+      haze: Boolean(haze) && JSON.stringify(map.getFog() ?? {}).includes(haze),
       overcast: Number(getComputedStyle(document.querySelector(".overcast")!).opacity),
+      regionLabels: new Set(labels.map((f) => (f as unknown as { properties?: { id?: string } }).properties?.id)).size,
     };
   });
 
@@ -146,6 +154,9 @@ try {
   });
   check(columns.regions === 10, `10 regions rendered (got ${columns.regions})`);
   check(columns.plants > 0, `plants rendered (got ${columns.plants})`);
+  const overview = await mapState(page);
+  check(overview.regionLabels === 10, `all 10 region names stand on their columns (got ${overview.regionLabels})`);
+  check(overview.placeLabels === false, "no basemap place names over the columns at the province view");
 
   // Layout: both panels inside the viewport, no overlap, nothing cut off, right edge free for the chat button.
   const layout = await page.evaluate(() => {
@@ -236,10 +247,11 @@ try {
   await page.waitForTimeout(500); // the tint fades in
   const autoRain = await mapState(page);
   check(autoRain.overcast > 0.05, `the overcast tint is on while it rains up close (opacity ${autoRain.overcast.toFixed(2)})`);
+  check(autoRain.placeLabels === true, "basemap place names are back at building zoom");
   await shot(page, "7-rain");
   await screen(page, "rain.png");
 
-  // The Cahaya switch: Siang and Malam pin the light, rain and tint follow; Otomatis goes back to WITA time.
+  // The Cahaya switch: Siang and Malam pin the light, rain, haze and tint follow; Otomatis goes back to WITA time.
   const lightTo = async (label: string) => {
     await page.getByRole("radio", { name: label }).click();
     await waitForMapIdle(page, 12_000);
@@ -251,11 +263,14 @@ try {
   await shot(page, "7-rain-malam");
   const day = await lightTo("Siang");
   check(day.preset === "day" && day.theme === "monochrome", `Siang: day light on the neutral basemap (${day.preset}, ${day.theme})`);
-  check(day.rainColor !== night.rainColor && day.overcast > night.overcast, "Siang: darker drops and a stronger tint than at night");
+  check(day.haze && !night.haze, "Siang: the rain falls through a haze inside the map; Malam: no haze");
+  check(day.rainColor !== night.rainColor, "Siang and Malam use their own drop colour");
   await shot(page, "7-rain-siang");
   const auto = await lightTo("Otomatis");
   check(auto.preset === lightPresetFor(new Date()), `Otomatis follows WITA time (${auto.preset})`);
   await page.getByRole("switch", { name: "Hujan" }).click();
+  await page.waitForTimeout(300);
+  check(!(await mapState(page)).haze, "switching the rain off clears the haze");
   // Close it so its idle orbit does not keep streaming city tiles in the background during the next check.
   await page.close();
 

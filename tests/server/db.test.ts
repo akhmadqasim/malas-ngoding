@@ -114,6 +114,16 @@ describe.skipIf(!reachable)("db", () => {
     }
   });
 
+  test("every region carries a label point inside it (inscribed-circle centre of its largest part)", async () => {
+    const fc = await regionGeoJSON();
+    for (const f of fc.features) {
+      const point = f.properties?.labelPoint as [number, number] | undefined;
+      expect(Array.isArray(point)).toBe(true);
+      const [lng, lat] = point!;
+      expect(await regionAt(lng, lat)).toEqual({ id: f.properties?.id as string, name: f.properties?.name as string });
+    }
+  });
+
   test("getGridMix shares sum to 1 and carry the official factor", async () => {
     const mix = await getGridMix();
     const total = Object.values(mix.shares).reduce((a, b) => a + b, 0);
