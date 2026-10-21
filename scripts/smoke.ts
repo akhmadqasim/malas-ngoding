@@ -1,9 +1,10 @@
 /**
  * Browser smoke check of the running app. Start `bun dev` first, then run `bun run smoke`.
  *
- * It opens the app in Chromium, lets the intro play, checks the regions, plants, layout, hover, click,
- * metric switch, the rain reveal at building zoom and the "Coba lagi" failure path, and exits non-zero
- * on any failed check, console error or console warning.
+ * It opens the app in Chromium, lets the intro play, checks the regions, plants, layout, the hover
+ * preview, click, metric switch, the rain reveal and overcast tint at building zoom, the Cahaya light
+ * switch and the "Coba lagi" failure path, and exits non-zero on any failed check, console error or
+ * console warning (known Mapbox warnings are listed, not counted).
  *
  * Options (env):
  * - BASE_URL (default http://localhost:3000)
