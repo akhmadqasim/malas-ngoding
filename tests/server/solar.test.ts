@@ -67,7 +67,8 @@ describe("POST /api/solar/simulate", () => {
     const { server } = start({ nasa: NASA });
     const out = (await (await post(server, BODY)).json()) as SolarSimulation;
     expect(out.selfUseKwh).toBeLessThanOrEqual(BODY.kwhYear * 0.6 + 1e-6);
-    expect(out.coveragePct).toBeCloseTo(60, 6);
+    // 3.000 kWh by day needs 4,02 panels at 4,77 psh; rounded down to 4, so just under the 60% share.
+    expect(out.coveragePct).toBeCloseTo(59.75, 2);
     expect(out.assumptions[0]).toContain("R-1/TR 1.300 VA");
     expect(out.assumptions[0]).toContain("jenis gedung tidak diketahui");
   });
@@ -101,14 +102,16 @@ describe("POST /api/solar/simulate", () => {
     expect(out.assumptions[0]).not.toContain("golongan R-1");
   });
 
-  test("a house saves only what it uses while the sun shines (about 40%), and the panels are sized to it", async () => {
+  test("a house saves only what it uses while the sun shines (at most 40%), and the panels are sized to it", async () => {
     const { server } = start({ nasa: NASA });
     const house = (await (await post(server, { ...BODY, buildingType: "rumah" })).json()) as SolarSimulation;
     const office = (await (await post(server, { ...BODY, buildingType: "kantor" })).json()) as SolarSimulation;
-    expect(house.coveragePct).toBeCloseTo(40, 6);
-    // An office uses 85% in daylight but only on ~250 working days: 3,3 kWp make 12,28 kWh a day, all used on a
-    // working day (15,90 kWh in daylight), but only 1,40 kWh of it on the 115 other days. 3.231 of 5.000 kWh.
-    expect(office.coveragePct).toBeCloseTo(64.62, 1);
+    // 2.000 kWh by day is 2,68 panels, rounded down to 2 (1,1 kWp): 1.494 kWh, all used, 29,9% of the load.
+    expect(house.coveragePct).toBeCloseTo(29.88, 1);
+    expect(house.coveragePct).toBeLessThanOrEqual(40);
+    // An office uses 85% in daylight but only on ~250 working days: 2,75 kWp make 10,23 kWh a day, all used on a
+    // working day (15,90 kWh in daylight), but only 1,40 kWh of it on the 115 other days. 2.719 of 5.000 kWh.
+    expect(office.coveragePct).toBeCloseTo(54.39, 1);
     expect(house.kWp).toBeLessThan(office.kWp);
     expect(house.assumptions.some((a) => a.includes("40%"))).toBe(true);
   });

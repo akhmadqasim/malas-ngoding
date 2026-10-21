@@ -463,7 +463,8 @@ export function MethodologyContent({ grid }: { grid: GridMix }) {
           kinerja: bagian produksi panel yang tersisa setelah rugi panas, kabel, dan inverter. Panel hanya menghemat listrik yang
           dipakai langsung di gedung, dan listrik ke jaringan PLN tidak mengurangi tagihan (Permen ESDM 2/2024). Karena itu
           kapasitas yang dipasang mengikuti pemakaian listrik siang gedung (porsi siang dan hari pakai menurut jenis gedung, asumsi),
-          dan tidak lebih dari kapasitas atap: luas atap × 0,6 (bagian yang bisa dipakai) ÷ 5,5 m² per kWp.
+          dalam panel utuh 0,55 kWp yang dibulatkan turun (paling sedikit satu panel), dan tidak lebih dari kapasitas atap: luas
+          atap × 0,6 (bagian yang bisa dipakai) ÷ 5,5 m² per kWp.
         </p>
         <p>
           {chem(

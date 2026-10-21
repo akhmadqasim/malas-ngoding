@@ -15,21 +15,39 @@ const input: SolarInput = {
 
 describe("simulateSolar", () => {
   test("100 m2 roof, 3600 kWh/yr, 4.5 psh", () => {
-    // needed = 3600 / (4.5 x 365 x 0.78) = 2.81 kWp = 5.11 panels of 0.55 kWp, so 6 panels = 3.3 kWp. Sized in
-    // whole panels, so kWp is always panels x 0.55. Expected values are pinned literals, worked out by hand.
+    // needed = 3600 / (4.5 x 365 x 0.78) = 2.81 kWp = 5.11 panels of 0.55 kWp. Rounded down (export earns
+    // nothing), so 5 panels = 2.75 kWp. Expected values are pinned literals, worked out by hand.
     const r = simulateSolar(input);
-    expect(r.kWp).toBe(3.3);
-    expect(r.panels).toBe(6);
-    expect(r.kwhYear).toBeCloseTo(4227.795, 6); // 3.3 x 4.5 x 365 x 0.78
-    expect(r.coveragePct).toBe(100);
-    expect(r.selfUseKwh).toBeCloseTo(3600, 6);
-    expect(r.exportKwh).toBeCloseTo(627.795, 6); // made but not used on site: earns nothing
+    expect(r.kWp).toBe(2.75);
+    expect(r.panels).toBe(5);
+    expect(r.kwhYear).toBeCloseTo(3523.1625, 6); // 2.75 x 4.5 x 365 x 0.78
+    expect(r.selfUseKwh).toBeCloseTo(3523.1625, 6); // all of it is used on site
+    expect(r.exportKwh).toBe(0);
+    expect(r.coveragePct).toBeCloseTo(97.865625, 6);
     expect(r.batteryKwh).toBeCloseTo(1.826484, 6); // 3600 / 8760 x 4 h / 0.9
-    expect(r.costRp).toBeCloseTo(58_632_420.09, 2); // 3.3 x 15 000 000 + 1.826484 x 5 000 000
-    expect(r.savingRpYear).toBeCloseTo(5_400_000, 3); // 3600 kWh x Rp 1.500
-    expect(r.paybackYears).toBeCloseTo(10.857856, 6);
-    expect(r.paybackPanelYears).toBeCloseTo(9.166667, 6); // 49 500 000 / 5 400 000, without the battery
-    expect(r.co2AvoidedKgYear).toBeCloseTo(2880, 6); // 3600 x 0.8
+    expect(r.costRp).toBeCloseTo(50_382_420.09, 2); // 2.75 x 15 000 000 + 1.826484 x 5 000 000
+    expect(r.savingRpYear).toBeCloseTo(5_284_743.75, 3); // 3523,1625 kWh x Rp 1.500
+    expect(r.paybackYears).toBeCloseTo(9.53356, 5);
+    expect(r.paybackPanelYears).toBeCloseTo(7.805487, 6); // 41 250 000 / 5 284 743,75, without the battery
+    expect(r.co2AvoidedKgYear).toBeCloseTo(2818.53, 6); // 3523,1625 x 0.8
+  });
+  test("the panel count rounds down, so a part panel never sends unpaid power to the grid", () => {
+    // A house using 2.000 kWh a year, 40% of it by day, needs 1,11 panels at 4,6 psh: one panel, fully used,
+    // not two at about 55% self-use.
+    const r = simulateSolar({ ...input, kwhYear: 2000, peakSunHours: 4.6, daytimeShare: 0.4 });
+    expect(r.panels).toBe(1);
+    expect(r.exportKwh).toBe(0);
+    // A load sized to exactly 4 panels stays at 4 despite float error.
+    const exact = simulateSolar({ ...input, roofAreaM2: 1000, kwhYear: 4 * 0.55 * 4.5 * 365 * 0.78 });
+    expect(exact.panels).toBe(4);
+  });
+  test("a load below one panel still gets one panel", () => {
+    // 500 kWh needs 0,71 panel; one panel is the smallest system, and the part above the load is exported.
+    const r = simulateSolar({ ...input, kwhYear: 500 });
+    expect(r.panels).toBe(1);
+    expect(r.kWp).toBe(0.55);
+    expect(r.selfUseKwh).toBeCloseTo(500, 6);
+    expect(r.exportKwh).toBeCloseTo(204.6325, 6); // 0.55 x 1281,15 - 500
   });
   test("panels and kWp always agree", () => {
     for (const kwhYear of [500, 3600, 12_345, 434_400]) {
@@ -38,27 +56,27 @@ describe("simulateSolar", () => {
     }
   });
   test("only the daytime share of the load is saved, and the panels are sized to it", () => {
-    // A house uses 40% of its power while the sun shines: 1440 kWh -> 1.12 kWp -> 3 panels = 1.65 kWp.
+    // A house uses 40% of its power while the sun shines: 1440 kWh -> 1.12 kWp -> 2 panels = 1.1 kWp.
     const r = simulateSolar({ ...input, daytimeShare: 0.4 });
-    expect(r.kWp).toBe(1.65);
-    expect(r.kwhYear).toBeCloseTo(2113.8975, 6); // 1.65 x 4.5 x 365 x 0.78
-    expect(r.selfUseKwh).toBeCloseTo(1440, 6);
-    expect(r.exportKwh).toBeCloseTo(673.8975, 6);
-    expect(r.coveragePct).toBeCloseTo(40, 9);
-    expect(r.savingRpYear).toBeCloseTo(2_160_000, 3); // 1440 kWh x Rp 1.500, not 3600
-    expect(r.co2AvoidedKgYear).toBeCloseTo(1152, 6); // 1440 x 0.8
+    expect(r.kWp).toBe(1.1);
+    expect(r.kwhYear).toBeCloseTo(1409.265, 6); // 1.1 x 4.5 x 365 x 0.78
+    expect(r.selfUseKwh).toBeCloseTo(1409.265, 6);
+    expect(r.exportKwh).toBe(0);
+    expect(r.coveragePct).toBeCloseTo(39.146250, 6);
+    expect(r.savingRpYear).toBeCloseTo(2_113_897.5, 3); // 1409,265 kWh x Rp 1.500, never more than the 1440 used by day
+    expect(r.co2AvoidedKgYear).toBeCloseTo(1127.412, 6); // 1409,265 x 0.8
   });
   test("a school open 200 days: panels made on closed days serve only the base load", () => {
     // 63.000 kWh a year, 85% of an open day's load in daylight, 15% base load on the 165 closed days.
-    // Sized to the yearly daytime use: 53.550 / 1281.15 / 0.55 = 76 panels = 41.8 kWp, 146,72 kWh a day.
+    // Sized to the yearly daytime use: 53.550 / 1281.15 / 0.55 = 75,99, so 75 panels = 41.25 kWp, 144,79 kWh a day.
     // An open day uses 63.000 / (200 + 0,15 x 165) = 280,31 kWh, 238,26 of it in daylight: all PV is used.
     // A closed day uses 0,15 x 280,31 = 42,05 kWh, half of it in daylight (21,02): the rest goes to the grid.
     const r = simulateSolar({ ...input, roofAreaM2: 10_000, kwhYear: 63_000, daytimeShare: 0.85, openDaysPerYear: 200, closedDayLoadShare: 0.15 });
-    expect(r.kWp).toBe(41.8);
-    expect(r.kwhYear).toBeCloseTo(53_552.07, 1);
-    expect(r.selfUseKwh).toBeCloseTo(32_812.45, 1); // 146,72 x 200 + 21,02 x 165
-    expect(r.exportKwh).toBeCloseTo(20_739.62, 1);
-    expect(r.coveragePct).toBeCloseTo(52.08, 2); // not 85%
+    expect(r.kWp).toBe(41.25);
+    expect(r.kwhYear).toBeCloseTo(52_847.44, 1);
+    expect(r.selfUseKwh).toBeCloseTo(32_426.35, 1); // 144,79 x 200 + 21,02 x 165
+    expect(r.exportKwh).toBeCloseTo(20_421.08, 1);
+    expect(r.coveragePct).toBeCloseTo(51.47, 2); // not 85%
     expect(r.savingRpYear).toBeCloseTo(r.selfUseKwh * 1500, 3);
   });
   test("a roof-limited office uses its weekend output for the base load", () => {
@@ -77,9 +95,9 @@ describe("simulateSolar", () => {
   });
   test("a bad daytime share counts the whole load as daytime use", () => {
     for (const bad of [Number.NaN, 0, -1, Number.POSITIVE_INFINITY]) {
-      expect(simulateSolar({ ...input, daytimeShare: bad }).kWp).toBe(3.3);
+      expect(simulateSolar({ ...input, daytimeShare: bad }).kWp).toBe(2.75);
     }
-    expect(simulateSolar({ ...input, daytimeShare: 1.7 }).selfUseKwh).toBeCloseTo(3600, 6);
+    expect(simulateSolar({ ...input, daytimeShare: 1.7 }).selfUseKwh).toBeCloseTo(3523.1625, 6);
   });
   test("small roof limits capacity", () => {
     // usable 12 m2 -> max 2.18 kWp -> 3 whole panels = 1.65 kWp (never above the roof capacity)
@@ -121,7 +139,7 @@ describe("simulateSolar", () => {
     }
     // A bad optional input (backup hours, tariff, costs) drops only its own term; the sizing stays.
     expect(simulateSolar({ ...input, backupHours: Number.NaN }).batteryKwh).toBe(0);
-    expect(simulateSolar({ ...input, backupHours: Number.NaN }).kWp).toBe(3.3);
+    expect(simulateSolar({ ...input, backupHours: Number.NaN }).kWp).toBe(2.75);
     // Bad roof, load or sun hours: nothing can be sized.
     for (const key of ["roofAreaM2", "kwhYear", "peakSunHours"] as const) {
       expect(simulateSolar({ ...input, [key]: Number.POSITIVE_INFINITY }).kWp).toBe(0);
@@ -132,7 +150,7 @@ describe("simulateSolar", () => {
 describe("yieldPerKwpYear", () => {
   test("is peak sun hours x 365 x the 0.78 performance ratio, and 0 for bad input", () => {
     expect(yieldPerKwpYear(4.5)).toBeCloseTo(4.5 * 365 * 0.78, 9);
-    expect(simulateSolar(input).kwhYear).toBeCloseTo(3.3 * yieldPerKwpYear(4.5), 9);
+    expect(simulateSolar(input).kwhYear).toBeCloseTo(2.75 * yieldPerKwpYear(4.5), 9);
     for (const bad of [0, -1, Number.NaN, Number.POSITIVE_INFINITY]) expect(yieldPerKwpYear(bad)).toBe(0);
   });
 });

@@ -330,7 +330,7 @@ Masukan API: luas atap, konsumsi listrik gedung per tahun, jam cadangan baterai,
 | Jam puncak matahari (PSH) | Rata-rata tahunan `ALLSKY_SFC_SW_DWN` dari NASA POWER di titik gedung (kWh/m²/hari) |
 | Hasil per kWp per tahun | PSH × 365 × 0,78 (rasio kinerja 0,78) |
 | Pemakaian siang | konsumsi setahun × porsi siang jenis gedung (tabel di bawah) |
-| Jumlah panel | pemakaian siang ÷ hasil per kWp ÷ 0,55 kWp per panel, dibulatkan naik, tetapi tidak lebih dari muatan atap |
+| Jumlah panel | pemakaian siang ÷ hasil per kWp ÷ 0,55 kWp per panel, dibulatkan turun (paling sedikit 1 panel, karena listrik ke jaringan tidak dibayar), tetapi tidak lebih dari muatan atap |
 | Muatan atap | luas atap × 0,6 (bagian atap yang bisa dipakai) ÷ 5,5 m² per kWp ÷ 0,55, dibulatkan turun |
 | Kapasitas yang dipasang (kWp) | jumlah panel × 0,55 |
 | Produksi per tahun | kWp × hasil per kWp |

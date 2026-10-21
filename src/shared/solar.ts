@@ -49,8 +49,8 @@ function baseShareOf(n: number | undefined): number {
 }
 
 /**
- * Rooftop PV sized in whole panels to the building's daytime use over the year, never above what the roof
- * holds. Since Permen ESDM 2/2024 power sent to the grid earns no credit, so only self-use saves money and
+ * Rooftop PV sized in whole panels to the building's daytime use over the year (rounded down, at least one
+ * panel), never above what the roof holds. Since Permen ESDM 2/2024 power sent to the grid earns no credit, so only self-use saves money and
  * CO2. Self-use is counted per kind of day, with the year's output spread evenly over the days: on an open
  * day up to its daytime load, on a closed day (a school holiday, an office weekend) only up to the daylight
  * part of the base load. The backup battery adds cost and no saving.
@@ -70,8 +70,10 @@ export function simulateSolar(input: SolarInput): SolarResult {
   // The year's load falls on open days, plus the base load on closed ones.
   const openDayLoad = load / (openDays + baseShare * closedDays);
   const maxPanels = Math.floor((roof * USABLE_ROOF_RATIO) / M2_PER_KWP / PANEL_KWP);
-  const neededPanels = Math.ceil(daytimeLoad / yieldPerKwp / PANEL_KWP);
-  const panels = Math.min(neededPanels, maxPanels);
+  // Rounded down, at least 1: export earns nothing, so a part panel above the daytime use would only add cost.
+  // The epsilon keeps a load sized to exactly n panels at n despite float error.
+  const fittingPanels = Math.max(1, Math.floor(daytimeLoad / yieldPerKwp / PANEL_KWP + 1e-9));
+  const panels = Math.min(fittingPanels, maxPanels);
   if (!(panels > 0)) return { ...ZERO };
   // Rounded to whole watts, so 3 x 0.55 is 1.65 and not 1.6500000000000001.
   const kWp = Math.round(panels * PANEL_KWP * 1000) / 1000;
@@ -81,7 +83,8 @@ export function simulateSolar(input: SolarInput): SolarResult {
   const selfUseKwh =
     openDays * Math.min(pvPerDay, share * openDayLoad) +
     closedDays * Math.min(pvPerDay, BASE_LOAD_DAYTIME_SHARE * baseShare * openDayLoad);
-  const exportKwh = pvKwh - selfUseKwh;
+  // Clamped: when every panel kWh is used, float error can leave a tiny negative remainder.
+  const exportKwh = Math.max(0, pvKwh - selfUseKwh);
   const coveragePct = (selfUseKwh / load) * 100;
 
   const batteryKwh = ((load / 365 / 24) * pos(input.backupHours)) / BATTERY_EFFICIENCY;
