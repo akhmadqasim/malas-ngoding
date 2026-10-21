@@ -38,6 +38,8 @@ interface Props {
   bySource: readonly FuelAmount[];
   /** Name of the bar for screen readers, e.g. "Asal listrik gedung ini". */
   label?: string;
+  /** The list of fuels under the bar (default on); the overview's short form writes them in one line. */
+  legend?: boolean;
 }
 
 /**
@@ -45,7 +47,7 @@ interface Props {
  * with their share (and the CO2 they cause, when given). Grid power is pooled, so this is the mix of the
  * grid, not one plant.
  */
-export function GridMixBar({ bySource, label = "Asal listrik menurut bahan bakar" }: Props) {
+export function GridMixBar({ bySource, label = "Asal listrik menurut bahan bakar", legend = true }: Props) {
   const shares = fuelShares(bySource);
   if (shares.length === 0) return <p className="mix__none">Belum ada data campuran listrik.</p>;
   const withCo2 = shares.some((s) => s.co2Kg !== undefined);
@@ -64,16 +66,18 @@ export function GridMixBar({ bySource, label = "Asal listrik menurut bahan bakar
           ))}
         </motion.div>
       </div>
-      <ul className="mix__list" data-co2={withCo2 || undefined}>
-        {shares.map((s) => (
-          <li key={s.fuel} className="mix__row">
-            <span className="fuel-dot" data-fuel={s.fuel} aria-hidden />
-            <span className="mix__fuel">{FUEL_LABELS[s.fuel]}</span>
-            <span className="mix__share num">{fmtShare(s.share)}</span>
-            {withCo2 && <span className="mix__co2 num">{s.co2Kg === undefined ? "" : chem(`${fmtKg(s.co2Kg)} CO2`)}</span>}
-          </li>
-        ))}
-      </ul>
+      {legend && (
+        <ul className="mix__list" data-co2={withCo2 || undefined}>
+          {shares.map((s) => (
+            <li key={s.fuel} className="mix__row">
+              <span className="fuel-dot" data-fuel={s.fuel} aria-hidden />
+              <span className="mix__fuel">{FUEL_LABELS[s.fuel]}</span>
+              <span className="mix__share num">{fmtShare(s.share)}</span>
+              {withCo2 && <span className="mix__co2 num">{s.co2Kg === undefined ? "" : chem(`${fmtKg(s.co2Kg)} CO2`)}</span>}
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }

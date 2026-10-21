@@ -3,7 +3,7 @@ import { create } from "zustand";
 import { type LightMode, type LightPreset, lightModeFromQuery, resolvePreset } from "./map/effects.ts";
 import type { BuildingEstimate, BuildingInput, BuildingType } from "../shared/types.ts";
 import { api } from "./api.ts";
-import { buildingViewPadding, selectBuildingAt as pickBuildingOnMap } from "./map/buildings.ts";
+import { buildingViewPadding, PLACE_SEARCH_RADIUS_PX, selectBuildingAt as pickBuildingOnMap } from "./map/buildings.ts";
 
 export type Metric = "co2" | "kwh";
 export type LayerKey = "regions" | "plants" | "buildings";
@@ -16,6 +16,11 @@ export type PanelTab = "energi" | "emisi" | "surya" | "cuaca";
 export type BuildingStatus = "idle" | "loading" | "ready" | "error" | "empty";
 /** What the user changed in the building panel: the type and the number of floors. */
 export type BuildingOverride = { typeOverride?: BuildingType; floorsOverride?: number };
+/**
+ * What a place search knows about the building it points at (the chat's find_places): its type, used when
+ * no POI sits at the building itself, and its name, shown in the panel.
+ */
+export type BuildingHint = { type?: BuildingType; name?: string };
 
 /** Where a hover preview comes from: the pointer over a column on the map, or a row of the region list. */
 export type HoverOrigin = "map" | "list";
@@ -37,6 +42,8 @@ export interface AppState {
   buildingUpdating: boolean;
   /** The Indonesian message for the "error" and "empty" states. */
   buildingError: string | null;
+  /** The place name a select-building request came with (BuildingHint), shown as the panel's title. */
+  buildingName: string | null;
   metric: Metric;
   layers: Record<LayerKey, boolean>;
   rain: RainMode;
@@ -61,7 +68,7 @@ export interface AppState {
   endListHover: (id?: string) => void;
   /** Sets the selected building and where it is; `null` clears both. */
   setSelectedBuilding: (building: BuildingEstimate | null, at?: [number, number] | null) => void;
-  /** Opens the panel for a clicked building and fetches its estimate. */
+  /** Opens the panel for a clicked building and fetches its estimate. Clicking the open one again does nothing. */
   openBuilding: (input: BuildingInput) => Promise<void>;
   /** Re-estimates the selected building with the user's type or floors. */
   overrideBuilding: (override: BuildingOverride) => Promise<void>;
@@ -71,9 +78,10 @@ export interface AppState {
   /**
    * Selects the building at a point as a click would (the chat's "select building" action): flies the
    * camera there, opens the panel and fetches the estimate. With no building at the point the panel says
-   * so (status "empty").
+   * so (status "empty"). A `hint` from a place search gives the type when no POI sits at the building and
+   * names the place in the panel. A newer click, select or close during the flight wins.
    */
-  selectBuildingAt: (lngLat: [number, number]) => Promise<void>;
+  selectBuildingAt: (lngLat: [number, number], hint?: BuildingHint) => Promise<void>;
   setMetric: (metric: Metric) => void;
   setLayer: (layer: LayerKey, visible: boolean) => void;
   setRain: (mode: RainMode) => void;
@@ -103,6 +111,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
   buildingStatus: "idle",
   buildingUpdating: false,
   buildingError: null,
+  buildingName: null,
   metric: "co2",
   layers: { regions: true, plants: true, buildings: true },
   rain: "auto",
@@ -124,7 +133,13 @@ export const useAppStore = create<AppState>()((set, get) => ({
       selectedBuilding,
       selectedBuildingAt: selectedBuilding === null ? null : at === undefined ? s.selectedBuildingAt : at,
     })),
-  openBuilding: (input) => estimate(input, false),
+  openBuilding: async (input) => {
+    const { buildingInput, buildingStatus } = get();
+    // The building already open: keep its numbers and the user's changes instead of loading it again.
+    if (buildingInput?.featureId === input.featureId && (buildingStatus === "ready" || buildingStatus === "loading")) return;
+    set({ buildingName: null });
+    await estimate(input, false);
+  },
   overrideBuilding: async (override) => {
     const { buildingInput, selectedBuilding } = get();
     if (!buildingInput) return;
@@ -146,9 +161,10 @@ export const useAppStore = create<AppState>()((set, get) => ({
       buildingStatus: "idle",
       buildingUpdating: false,
       buildingError: null,
+      buildingName: null,
     });
   },
-  selectBuildingAt: async ([lng, lat]) => {
+  selectBuildingAt: async ([lng, lat], hint) => {
     const run = ++buildingRequest;
     set({
       selectedBuilding: null,
@@ -157,12 +173,19 @@ export const useAppStore = create<AppState>()((set, get) => ({
       buildingStatus: "loading",
       buildingUpdating: false,
       buildingError: null,
+      buildingName: hint?.name?.trim() || null,
     });
     const map = get().map;
-    // The map reports the building it finds through openBuilding (enableBuildingInteraction's onSelect).
-    const found = map ? await pickBuildingOnMap(map, lng, lat, buildingViewPadding()) : false;
-    if (found || run !== buildingRequest) return;
-    set({ buildingStatus: "empty", buildingError: map ? NO_BUILDING : NO_MAP });
+    const stale = () => run !== buildingRequest;
+    // A named place from a search may point at its yard or the street: look a little further around it.
+    const searchRadiusPx = hint ? PLACE_SEARCH_RADIUS_PX : undefined;
+    const input = map ? await pickBuildingOnMap(map, lng, lat, { padding: buildingViewPadding(), isStale: stale, searchRadiusPx }) : null;
+    if (stale()) return;
+    if (!input) {
+      set({ buildingStatus: "empty", buildingError: map ? NO_BUILDING : NO_MAP });
+      return;
+    }
+    await estimate(hint?.type ? { ...input, typeHint: hint.type } : input, false);
   },
   setMetric: (metric) => set({ metric }),
   setLayer: (layer, visible) => set((s) => ({ layers: { ...s.layers, [layer]: visible } })),

@@ -7,6 +7,7 @@ import {
   disableBuildingInteraction,
   enableBuildingInteraction,
   footprintOf,
+  polygonContains,
   selectBuildingAt,
   TERRAIN_OFF_ZOOM,
   TERRAIN_ON_ZOOM,
@@ -71,7 +72,7 @@ const saved = { document: g.document, getComputedStyle: g.getComputedStyle, wind
 const TOKENS: Record<string, string> = {
   "--color-ink-faint": "#626973",
   "--color-outline-light": "#1c222c",
-  "--color-paper-muted": "#a7adb5",
+  "--color-paper": "#ece9e2",
   "--color-co2-4": "#ebc082",
 };
 beforeEach(() => {
@@ -90,7 +91,7 @@ afterEach(() => {
 describe("building colours follow the ground tone", () => {
   test("ink on a light ground; on a dark one a paper hover and an amber selection", () => {
     expect(buildingColors("light")).toEqual({ highlight: "#626973", select: "#1c222c" });
-    expect(buildingColors("dark")).toEqual({ highlight: "#a7adb5", select: "#ebc082" });
+    expect(buildingColors("dark")).toEqual({ highlight: "#ece9e2", select: "#ebc082" });
   });
 });
 
@@ -166,25 +167,76 @@ describe("terrain goes off at building zoom", () => {
   });
 });
 
+describe("the building at a point", () => {
+  test("polygonContains: inside, outside, and inside a hole counts as outside", () => {
+    const outer = square(0, 0, 0.002).coordinates[0]!;
+    const hole = square(0.0005, 0.0005, 0.001).coordinates[0]!;
+    expect(polygonContains([outer], [0.001, 0.001])).toBe(true);
+    expect(polygonContains([outer], [0.003, 0.001])).toBe(false);
+    expect(polygonContains([outer, hole], [0.001, 0.001])).toBe(false);
+    expect(polygonContains([outer, hole], [0.0002, 0.0002])).toBe(true);
+    expect(polygonContains([], [0, 0])).toBe(false);
+  });
+});
+
 describe("selectBuildingAt (the chat's select building action)", () => {
-  test("flies there, picks the building under the point and reports it", async () => {
-    const f = fakeMap({ zoom: 8, rendered: [school] });
-    const picked: BuildingInput[] = [];
-    enableBuildingInteraction(f.map, (input) => picked.push(input), "dark");
-    expect(await selectBuildingAt(f.map, 117.1602, -0.4998)).toBe(true);
-    expect(f.map.getZoom()).toBe(17.5);
-    expect(f.states.get(8)?.select).toBe(true);
-    expect(picked[0]?.featureId).toBe("mapbox:8");
-  });
+  // A neighbour whose wall is in front of the point at a pitched camera comes first in the query.
+  const neighbour = { id: 9, geometry: square(117.1606, -0.4999, 0.0003), properties: { height: 12 } };
 
-  test("false when no building is there", async () => {
-    const f = fakeMap({ zoom: 8, rendered: [] });
+  test("flies there and picks the building whose footprint holds the point, not the frontmost one", async () => {
+    const f = fakeMap({ zoom: 8, rendered: [neighbour, school] });
     enableBuildingInteraction(f.map, () => {}, "dark");
-    expect(await selectBuildingAt(f.map, 117.1602, -0.4998)).toBe(false);
+    const input = await selectBuildingAt(f.map, 117.1602, -0.4998);
+    expect(f.map.getZoom()).toBe(17.5);
+    expect(input?.featureId).toBe("mapbox:8");
+    expect(f.states.get(8)?.select).toBe(true);
+    expect(f.states.get(9)?.select).toBeUndefined();
   });
 
-  test("false before the interaction is enabled", async () => {
+  test("with no footprint holding the point, the nearest building centre close by", async () => {
+    const f = fakeMap({ zoom: 8, rendered: [house, school] });
+    enableBuildingInteraction(f.map, () => {}, "dark");
+    expect((await selectBuildingAt(f.map, 117.15995, -0.50005))?.featureId).toBe("mapbox:8");
+  });
+
+  test("null when no building is near the point", async () => {
+    const f = fakeMap({ zoom: 8, rendered: [house] });
+    enableBuildingInteraction(f.map, () => {}, "dark");
+    // The fake map projects 1 degree to 1000 px: the house is 50 px away, past the 28 px search radius.
+    expect(await selectBuildingAt(f.map, 117.2, -0.5)).toBeNull();
+  });
+
+  test("a request that went stale during the flight selects nothing", async () => {
+    const f = fakeMap({ zoom: 8, rendered: [school] });
+    enableBuildingInteraction(f.map, () => {}, "dark");
+    expect(await selectBuildingAt(f.map, 117.1602, -0.4998, { isStale: () => true })).toBeNull();
+    expect(f.states.get(8)).toBeUndefined();
+  });
+
+  test("null before the interaction is enabled", async () => {
     const f = fakeMap();
-    expect(await selectBuildingAt(f.map, 117.1602, -0.4998)).toBe(false);
+    expect(await selectBuildingAt(f.map, 117.1602, -0.4998)).toBeNull();
+  });
+});
+
+describe("a click on empty ground", () => {
+  test("closes the panel at building zoom, not from afar", () => {
+    let closed = 0;
+    const f = fakeMap({ zoom: 16 });
+    enableBuildingInteraction(f.map, () => {}, "dark", () => closed++);
+    f.interactions.get("building-background-click")!({});
+    f.setZoom(12);
+    f.interactions.get("building-background-click")!({});
+    expect(closed).toBe(1);
+  });
+});
+
+describe("a point from a place search", () => {
+  test("may look further for the nearest building than a plain point", async () => {
+    // 0.04 degrees = 40 px in the fake map: past 28 px, inside 80 px.
+    const f = fakeMap({ zoom: 8, rendered: [school] });
+    enableBuildingInteraction(f.map, () => {}, "dark");
+    expect(await selectBuildingAt(f.map, 117.2003, -0.4998)).toBeNull();
+    expect((await selectBuildingAt(f.map, 117.2003, -0.4998, { searchRadiusPx: 80 }))?.featureId).toBe("mapbox:8");
   });
 });

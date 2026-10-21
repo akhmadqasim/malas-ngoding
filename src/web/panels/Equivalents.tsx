@@ -8,6 +8,8 @@ import { AnimatedNumber } from "../components/AnimatedNumber.tsx";
  */
 export function fmtEquivalent(n: number): string {
   const v = Number.isFinite(n) ? Math.max(0, n) : 0;
+  // One decimal in every size of word, so "32,4 miliar" sits next to "279,5 juta" (fmtCompact gives miliar two).
+  if (v >= 1e9) return `${fmtNumber(v / 1e9, 1)} miliar`;
   if (v >= 100_000) return fmtCompact(v);
   if (v >= 9.95) return fmtNumber(v);
   return fmtNumber(v, 1);

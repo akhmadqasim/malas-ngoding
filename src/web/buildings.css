@@ -38,6 +38,7 @@
   pointer-events: auto;
 }
 .building-panel__scroll {
+  position: relative;
   min-height: 0;
   overflow: hidden auto;
   padding: --spacing(4) --spacing(5) --spacing(5);
@@ -60,6 +61,16 @@
 
 .building-panel__head {
   padding-right: --spacing(8);
+}
+
+/* A place the chat found by name (BuildingHint): its name above the type. */
+.building-panel__name {
+  margin: 0 0 --spacing(0.5);
+  padding-right: --spacing(8);
+  font-size: var(--text-lg);
+  line-height: var(--text-lg--line-height);
+  font-weight: var(--font-weight-semibold);
+  letter-spacing: var(--tracking-tight);
 }
 
 /* The type picker looks like the panel's title with a chevron, not like a form field. */
@@ -295,7 +306,7 @@
 /* ---------- Unhappy paths: loading blocks, failure, nothing found ---------- */
 
 .building-panel__state {
-  padding: --spacing(5) --spacing(12) --spacing(5) --spacing(5);
+  padding: --spacing(1) --spacing(8) 0 0;
 }
 .building-panel__state p {
   margin: 0;
@@ -473,5 +484,50 @@
     bottom: var(--layout-inset);
     width: auto;
     max-height: 55vh;
+  }
+}
+
+/* ---------- The province overview: a compact grid mix, only where the sheet has room for it ---------- */
+
+/*
+ * The overview sheet must show all ten regions and its foot without scrolling (smoke), and at 1366x768 it
+ * has 17 px to spare. So the overview gets a compact grid mix, shown only on screens tall enough to hold
+ * it whole (no row cut in half at the sheet's edge), and its equivalent line only where that fits too. The
+ * region detail and the building panel always show the full grid mix and equivalents.
+ */
+.context.context--compact {
+  display: none;
+  margin-top: --spacing(3);
+  padding-top: 0;
+  border-top: 0;
+}
+.context--compact .context__title {
+  margin-bottom: --spacing(1.5);
+}
+.context__legend {
+  margin: --spacing(1.5) 0 0;
+  font-size: var(--text-xs);
+  line-height: var(--text-xs--line-height);
+  color: var(--muted);
+}
+.context__equivalent {
+  display: none;
+  margin: --spacing(1.5) 0 0;
+  font-size: var(--text-xs);
+  line-height: var(--text-xs--line-height);
+  color: var(--muted);
+}
+.context__equivalent .num {
+  color: var(--foreground);
+  font-weight: var(--font-weight-medium);
+}
+@media (min-height: 900px) {
+  .context.context--compact {
+    display: block;
+  }
+}
+@media (min-height: 960px) {
+  .context--compact .context__equivalent {
+    display: block;
   }
 }

@@ -119,6 +119,21 @@ describe("opening a building", () => {
   });
 });
 
+describe("clicking the open building again", () => {
+  test("keeps its numbers and the user's changes instead of loading it again", async () => {
+    const open = state().openBuilding(input("a"));
+    requests[0]!.answer();
+    await open;
+    const floors = state().overrideBuilding({ floorsOverride: 4 });
+    requests[1]!.answer();
+    await floors;
+    await state().openBuilding(input("a"));
+    expect(requests).toHaveLength(2);
+    expect(state().buildingStatus).toBe("ready");
+    expect(state().buildingInput?.floorsOverride).toBe(4);
+  });
+});
+
 describe("the user's type and floors", () => {
   test("an override keeps the numbers up while it loads, then shows the new estimate", async () => {
     const open = state().openBuilding(input("a"));
@@ -159,6 +174,12 @@ describe("selectBuildingAt (the chat's select building action)", () => {
     expect(state().buildingError).toContain("Peta belum siap");
   });
 
+  /** Waits until the store has sent `n` estimate requests. */
+  const requested = async (n: number) => {
+    for (let i = 0; i < 50 && requests.length < n; i++) await flush();
+    expect(requests).toHaveLength(n);
+  };
+
   test("finds the building on the map, opens the panel and fetches its estimate", async () => {
     const f = fakeBuildingMap({ zoom: 8, rendered: [school] });
     enableBuildingInteraction(f.map, (i) => void state().openBuilding(i), "dark");
@@ -166,12 +187,46 @@ describe("selectBuildingAt (the chat's select building action)", () => {
     const done = state().selectBuildingAt([117.1602, -0.4998]);
     expect(state().buildingStatus).toBe("loading");
     expect(state().selectedBuildingAt).toEqual([117.1602, -0.4998]);
-    await done;
+    await requested(1);
     expect(requests[0]!.body.featureId).toBe("mapbox:8");
+    expect(requests[0]!.body.typeHint).toBeUndefined();
     requests[0]!.answer();
-    await flush();
+    await done;
     expect(state().buildingStatus).toBe("ready");
+    expect(state().buildingName).toBeNull();
     expect(state().selectedBuildingAt).toEqual([requests[0]!.body.lng, requests[0]!.body.lat]);
+    disableBuildingInteraction(f.map);
+  });
+
+  test("a place-search hint sends the type as typeHint and names the place", async () => {
+    const f = fakeBuildingMap({ zoom: 8, rendered: [school] });
+    enableBuildingInteraction(f.map, (i) => void state().openBuilding(i), "dark");
+    useAppStore.setState({ map: f.map });
+    const done = state().selectBuildingAt([117.1602, -0.4998], { type: "sekolah", name: " SMA Negeri 1 Samarinda " });
+    expect(state().buildingName).toBe("SMA Negeri 1 Samarinda");
+    await requested(1);
+    expect(requests[0]!.body.typeHint).toBe("sekolah");
+    requests[0]!.answer();
+    await done;
+    expect(state().buildingName).toBe("SMA Negeri 1 Samarinda");
+    // Clicking another building drops the name.
+    const click = state().openBuilding({ featureId: "mapbox:99", lng: 117.1, lat: -0.5, footprintM2: 90, heightM: null });
+    expect(state().buildingName).toBeNull();
+    requests[1]!.answer();
+    await click;
+    disableBuildingInteraction(f.map);
+  });
+
+  test("closing the panel during the flight wins: nothing is selected or fetched", async () => {
+    const f = fakeBuildingMap({ zoom: 8, rendered: [school] });
+    enableBuildingInteraction(f.map, (i) => void state().openBuilding(i), "dark");
+    useAppStore.setState({ map: f.map });
+    const done = state().selectBuildingAt([117.1602, -0.4998]);
+    state().closeBuilding();
+    await done;
+    expect(state().buildingStatus).toBe("idle");
+    expect(requests).toHaveLength(0);
+    expect(f.states.get(8)).toBeUndefined();
     disableBuildingInteraction(f.map);
   });
 

@@ -14,7 +14,7 @@ import {
 } from "../map/buildings.ts";
 import { presetTone } from "../map/effects.ts";
 import { DURATION, EASE_IN, EASE_OUT } from "../motion.ts";
-import { type PanelTab, useAppStore } from "../store.ts";
+import { type BuildingHint, type PanelTab, useAppStore } from "../store.ts";
 import { BUILDING_TYPE_LABELS, BUILDING_TYPES, type BuildingTabProps } from "./buildingTabs.ts";
 import { EmissionTab } from "./EmissionTab.tsx";
 import { EnergyTab } from "./EnergyTab.tsx";
@@ -44,7 +44,14 @@ const TYPE_SOURCE: Record<BuildingEstimate["typeSource"], string> = {
 /** The yearly kWh: whole numbers up to a million, then words ("5,2 juta"), so the readout fits the panel. */
 const kwhReadout = (n: number) => (Math.abs(n) < 1e6 ? fmtNumber(n) : fmtCompact(n));
 
-type TestWindow = Window & { __malasSelectBuildingAt?: (lngLat: [number, number]) => Promise<void> };
+type TestWindow = Window & { __malasSelectBuildingAt?: (lngLat: [number, number], hint?: BuildingHint) => Promise<void> };
+
+/** Closes the panel and gives the keyboard focus back to the map, where the building was picked. */
+function closeToMap() {
+  const { map, closeBuilding } = useAppStore.getState();
+  closeBuilding();
+  map?.getCanvas().focus({ preventScroll: true });
+}
 
 /**
  * Makes the map's buildings clickable while the map is up: a click opens the panel (and brings the
@@ -63,13 +70,17 @@ function useBuildingMap() {
         requestAnimationFrame(() => revealBuilding(map, [input.lng, input.lat], buildingViewPadding()));
       },
       presetTone(useAppStore.getState().lightPreset),
+      // Empty ground at building zoom: close the panel, as a map app does.
+      () => {
+        if (useAppStore.getState().buildingStatus !== "idle") useAppStore.getState().closeBuilding();
+      },
     );
     const unsubscribe = useAppStore.subscribe((s, prev) => {
       if (s.lightPreset !== prev.lightPreset) setBuildingTone(map, presetTone(s.lightPreset));
       if (s.buildingStatus === "idle" && prev.buildingStatus !== "idle") clearBuildingSelection(map);
     });
     // Test hook for scripts/smoke.ts: the chat's select building action.
-    (window as TestWindow).__malasSelectBuildingAt = (lngLat) => useAppStore.getState().selectBuildingAt(lngLat);
+    (window as TestWindow).__malasSelectBuildingAt = (lngLat, hint) => useAppStore.getState().selectBuildingAt(lngLat, hint);
     return () => {
       unsubscribe();
       off();
@@ -103,11 +114,29 @@ function useDockClearance(): number | null {
   return clearance;
 }
 
+/**
+ * Escape closes the open panel when the keyboard is on the panel or the map (right after a click on a
+ * building, focus is on the map). Inside a popover (the type list) or another panel, Escape is theirs.
+ */
+function useEscapeToClose(open: boolean) {
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || e.defaultPrevented) return;
+      const at = document.activeElement;
+      const ours = !at || at === document.body || at.closest(".building-panel, .mapboxgl-canvas-container") !== null;
+      if (ours) closeToMap();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open]);
+}
+
 /** The building panel on the right: slides in when a building is picked, out when closed. */
 export function BuildingPanel() {
   useBuildingMap();
   const status = useAppStore((s) => s.buildingStatus);
-  const close = useAppStore((s) => s.closeBuilding);
+  useEscapeToClose(status !== "idle");
   const clearance = useDockClearance();
   const style = clearance === null ? undefined : ({ "--dock-clear": `${clearance}px` } as CSSProperties);
 
@@ -122,16 +151,12 @@ export function BuildingPanel() {
             animate={{ opacity: 1, x: 0, transition: { duration: DURATION.panel, ease: EASE_OUT } }}
             exit={{ opacity: 0, x: 16, transition: { duration: DURATION.exit, ease: EASE_IN } }}
           >
-            <Card
-              className="building-panel"
-              role="region"
-              aria-label="Data gedung"
-              onKeyDown={(e) => {
-                if (e.key === "Escape" && !e.defaultPrevented) close();
-              }}
-            >
-              <PanelBody />
-              <CloseButton className="building-panel__close" aria-label="Tutup panel gedung" onPress={close} />
+            <Card className="building-panel" role="region" aria-label="Data gedung">
+              <div className="building-panel__scroll">
+                {/* First in tab order, top right; it scrolls away with the header, so it never covers a row. */}
+                <CloseButton className="building-panel__close" aria-label="Tutup panel gedung" onPress={closeToMap} />
+                <PanelBody />
+              </div>
             </Card>
           </motion.div>
         )}
@@ -146,6 +171,7 @@ function PanelBody() {
   const at = useAppStore((s) => s.selectedBuildingAt);
   const message = useAppStore((s) => s.buildingError);
   const retry = useAppStore((s) => s.retryBuilding);
+  const name = useAppStore((s) => s.buildingName);
 
   if (status === "error") {
     return (
@@ -161,6 +187,7 @@ function PanelBody() {
   if (status === "empty") {
     return (
       <div className="building-panel__state" role="status">
+        {name && <h2 className="building-panel__name">{name}</h2>}
         <p className="building-panel__state-title">Gedung tidak ditemukan</p>
         <p className="building-panel__state-text">{message}</p>
       </div>
@@ -172,6 +199,7 @@ function PanelBody() {
 
 function BuildingView({ building, at }: BuildingTabProps) {
   const updating = useAppStore((s) => s.buildingUpdating);
+  const name = useAppStore((s) => s.buildingName);
   const panelTab = useAppStore((s) => s.panelTab);
   const setPanelTab = useAppStore((s) => s.setPanelTab);
   const override = useAppStore((s) => s.overrideBuilding);
@@ -179,8 +207,13 @@ function BuildingView({ building, at }: BuildingTabProps) {
   const Panel = tab.Panel!;
 
   return (
-    <div className="building-panel__scroll" aria-busy={updating || undefined}>
+    <div className="building-view" aria-busy={updating || undefined}>
       <header className="building-panel__head">
+        {name ? (
+          <h2 className="building-panel__name">{name}</h2>
+        ) : (
+          <h2 className="sr-only">Gedung terpilih: {BUILDING_TYPE_LABELS[building.type]}</h2>
+        )}
         <Select
           className="building-type"
           aria-label="Jenis gedung"
@@ -278,8 +311,11 @@ function FloorsField({ floors, onCommit }: { floors: number; onCommit: (floors: 
 
 /** Loading: flat blocks in the shape of the panel (no shimmer), so nothing jumps when the numbers come. */
 function PanelSkeleton() {
+  // A place the chat named is known before its numbers are: show the name while they load.
+  const name = useAppStore((s) => s.buildingName);
   return (
-    <div className="building-panel__scroll building-skeleton" aria-busy="true" aria-label="Memuat perkiraan gedung">
+    <div className="building-skeleton" aria-busy="true" aria-label="Memuat perkiraan gedung">
+      {name && <h2 className="building-panel__name">{name}</h2>}
       <Skeleton animationType="none" className="building-skeleton__title" />
       <Skeleton animationType="none" className="building-skeleton__line" />
       <Skeleton animationType="none" className="building-skeleton__field" />

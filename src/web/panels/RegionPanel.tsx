@@ -11,10 +11,10 @@ import { presetTone } from "../map/effects.ts";
 import { intensities } from "../map/regionsLayer.ts";
 import { METRIC_TEXT } from "../metrics.ts";
 import { DURATION, EASE_IN, EASE_OUT, stagger } from "../motion.ts";
-import { EmissionContext } from "./EmissionContext.tsx";
 import { type Metric, useAppStore } from "../store.ts";
 import { mixRamp, rampTokens } from "../theme.ts";
 import { RecommendationPanel } from "./RecommendationPanel.tsx";
+import { EmissionContext } from "./EmissionContext.tsx";
 
 interface Props {
   regions: RegionSummary[];
@@ -184,7 +184,7 @@ function Overview({
         <p className="sheet__note">Pilih wilayah untuk melihat rinciannya.</p>
         <p className="sheet__source">Sumber: BPS Kalimantan Timur dan Kementerian ESDM.</p>
       </footer>
-      <EmissionContext co2KgYear={regions.reduce((sum, r) => sum + r.co2KgYear, 0)} />
+      <EmissionContext co2KgYear={regions.reduce((sum, r) => sum + r.co2KgYear, 0)} compact />
     </div>
   );
 }

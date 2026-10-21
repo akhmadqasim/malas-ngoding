@@ -6,6 +6,7 @@ import { co2Figure, EmissionTab } from "../../src/web/panels/EmissionTab.tsx";
 import { EnergyTab } from "../../src/web/panels/EnergyTab.tsx";
 import { Equivalents, fmtEquivalent } from "../../src/web/panels/Equivalents.tsx";
 import { fmtShare, fuelShares, GridMixBar } from "../../src/web/panels/GridMixBar.tsx";
+import { mixSummary } from "../../src/web/panels/EmissionContext.tsx";
 
 /** Text of rendered markup, tags dropped. */
 const text = (html: string) => html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
@@ -73,6 +74,8 @@ describe("equivalents", () => {
     expect(fmtEquivalent(9131.4)).toBe("9.131");
     expect(fmtEquivalent(4.27)).toBe("4,3");
     expect(fmtEquivalent(Number.NaN)).toBe("0,0");
+    // One decimal in every word size, so miliar sits next to juta without a second decimal.
+    expect(fmtEquivalent(32_360_000_000)).toBe("32,4 miliar");
   });
   test("rows come in reading order: trees, car, motorbike, phone, flight", () => {
     const html = renderToStaticMarkup(<Equivalents items={building.equivalents} />);
@@ -113,5 +116,22 @@ describe("the tabs", () => {
   test("every building type has an Indonesian name", () => {
     expect(BUILDING_TYPES).toHaveLength(12);
     for (const t of BUILDING_TYPES) expect(BUILDING_TYPE_LABELS[t].length).toBeGreaterThan(2);
+  });
+});
+
+describe("the overview's one-line grid mix", () => {
+  test("the three largest fuels, the rest summed as lainnya", () => {
+    const shares = fuelShares([
+      { fuel: "batubara", kwh: 0.66 },
+      { fuel: "gas", kwh: 0.25 },
+      { fuel: "diesel", kwh: 0.07 },
+      { fuel: "surya", kwh: 0.01 },
+      { fuel: "biomassa", kwh: 0.01 },
+    ]);
+    expect(mixSummary(shares)).toBe("Batu bara 66%, gas 25%, diesel 7%, lainnya 2%");
+    expect(mixSummary(shares.slice(0, 2))).toBe("Batu bara 66%, gas 25%");
+  });
+  test("the bar can leave out its list", () => {
+    expect(renderToStaticMarkup(<GridMixBar bySource={building.bySource} legend={false} />)).not.toContain("mix__list");
   });
 });

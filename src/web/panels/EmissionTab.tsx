@@ -42,7 +42,7 @@ export function EmissionTab({ building }: BuildingTabProps) {
       </p>
 
       <h3 className="group-label tab-body__title">
-        {chem("Emisi CO2 setahun setara dengan")}, <Estimate />
+        {chem("Emisi CO2 setahun setara dengan")} (<Estimate />)
       </h3>
       <Equivalents items={building.equivalents} />
 

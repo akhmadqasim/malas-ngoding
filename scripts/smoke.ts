@@ -1043,7 +1043,7 @@ function buildingState(page: Page, id: number) {
   );
 }
 
-type SelectWindow = Window & { __malasSelectBuildingAt: (lngLat: [number, number]) => Promise<void> };
+type SelectWindow = Window & { __malasSelectBuildingAt: (lngLat: [number, number], hint?: { type?: string; name?: string }) => Promise<void> };
 
 async function panelText(page: Page) {
   return (await page.locator(".building-panel").innerText()).replace(/\s+/g, " ");
@@ -1084,6 +1084,9 @@ async function buildingChecks(page: Page) {
   check(found.length >= 3, `buildings to click in the middle of Samarinda (${found.length})`);
   if (found.length < 3) return;
   const picks = [found[0]!, found[Math.floor(found.length / 2)]!, found.at(-1)!];
+  // Known points for selectBuildingAt: buildings whose centre lies inside their own footprint, whether or
+  // not a taller neighbour hides that point at this pitch (which is what the footprint test is for).
+  const known = await knownBuildingPoints(page);
   // A spot with no building near it (a road, a field), for the "no building there" case.
   const empty = await page.evaluate(
     ([target, w, h]) => {
@@ -1181,11 +1184,16 @@ async function buildingChecks(page: Page) {
   await shot(page, "9-building-emisi");
   await page.getByRole("tab", { name: "Energi" }).click();
 
-  // Escape closes the panel and clears the selection on the map.
-  await page.locator(".building-panel__close").focus();
+  // Clicking the open building again keeps it (no reload, the user's changes stay), and leaves the
+  // keyboard on the map, where Escape closes the panel and clears the selection.
+  const kept = await readoutKwh(page);
+  await page.mouse.click(picks.at(-1)!.x, picks.at(-1)!.y);
+  await page.waitForTimeout(300);
+  const reloaded = await page.locator(".building-skeleton").count();
+  check(reloaded === 0 && (await readoutKwh(page)) === kept, `clicking the open building again keeps it and the user's changes (${kept} kWh per tahun)`);
   await page.keyboard.press("Escape");
   await page.locator(".building-panel").waitFor({ state: "detached", timeout: 3000 });
-  check((await buildingState(page, picks.at(-1)!.id)).selected === 0, "Escape closes the panel and clears the selection on the map");
+  check((await buildingState(page, picks.at(-1)!.id)).selected === 0, "Escape on the map closes the panel and clears the selection");
 
   // The chat's select building action, from the province view: fly in, select, open.
   await page.evaluate((view) => (window as MapWindow).__malasMap!.jumpTo(view), KALTIM_VIEW);
@@ -1197,22 +1205,93 @@ async function buildingChecks(page: Page) {
   const chosen = await buildingState(page, target.id);
   check(Math.abs(landed - 17.5) < 0.05 && chosen.state?.select === true, `selectBuildingAt flies in (zoom ${landed.toFixed(2)}) and selects that building`);
   await shot(page, "9-building-chat");
+  // The close button gives the keyboard back to the map.
+  await page.locator(".building-panel__close").click();
+  await page.locator(".building-panel").waitFor({ state: "detached", timeout: 3000 });
+  const focus = await page.evaluate(() => document.activeElement?.classList.contains("mapboxgl-canvas") === true);
+  check(focus, "closing the panel puts the keyboard focus back on the map");
+
+  // Known points: each selects the building whose footprint holds it.
+  const hits: string[] = [];
+  for (const k of known) {
+    await page.evaluate((view) => (window as MapWindow).__malasMap!.jumpTo(view), KALTIM_VIEW);
+    await page.evaluate(([lng, lat]) => (window as unknown as SelectWindow).__malasSelectBuildingAt([lng, lat]), [k.lng, k.lat] as const);
+    const got = await buildingState(page, k.id);
+    hits.push(got.state?.select === true && got.selected === 1 ? "ok" : `miss ${k.id}`);
+  }
+  check(known.length >= 4 && hits.every((h) => h === "ok"), `selectBuildingAt picks the building under each of ${known.length} known points (${hits.join(", ")})`);
+
+  // A place-search hint names the place and gives the type when no POI sits at the building.
+  await page.evaluate(
+    ([lng, lat]) => (window as unknown as SelectWindow).__malasSelectBuildingAt([lng, lat], { type: "sekolah", name: "Sekolah uji smoke" }),
+    [picks[2]!.lng, picks[2]!.lat] as const,
+  );
+  await waitForPanelReady(page);
+  const hinted = await panelText(page);
+  const named = await page.locator(".building-panel__name").innerText().catch(() => "");
+  check(named === "Sekolah uji smoke" && hinted.includes("Jenis dari data tempat di peta."), `a place-search hint names the place and types it (${named}, ${(await page.locator(".building-type__trigger").innerText()).trim()})`);
+  await shot(page, "9-building-hint");
+
   // A point with no building says so instead of showing a blank panel.
   if (empty) {
     await page.evaluate((p) => (window as unknown as SelectWindow).__malasSelectBuildingAt(p), empty);
     const none = await page.locator(".building-panel").getByText("Gedung tidak ditemukan").isVisible();
     check(none, `selectBuildingAt where there is no building says so (${empty.map((v) => v.toFixed(4)).join(", ")})`);
     await shot(page, "9-building-none");
+    // A click on empty ground at building zoom closes the panel.
+    const spot = await page.evaluate((p) => (window as MapWindow).__malasMap!.project(p), empty);
+    await page.mouse.click(spot.x, spot.y);
+    await page.locator(".building-panel").waitFor({ state: "detached", timeout: 3000 });
+    check(true, "a click on empty ground at building zoom closes the panel");
   } else {
     check(false, "a spot with no building near it in the middle of Samarinda");
+    await page.locator(".building-panel__close").click();
+    await page.locator(".building-panel").waitFor({ state: "detached", timeout: 3000 });
   }
-  await page.locator(".building-panel__close").click();
-  await page.locator(".building-panel").waitFor({ state: "detached", timeout: 3000 });
+}
+
+/** Up to six buildings on screen whose centre lies inside their own footprint, spread over sizes. */
+function knownBuildingPoints(page: Page) {
+  return page.evaluate(
+    ([target, w, h]) => {
+      const map = (window as MapWindow).__malasMap!;
+      const inside = (pt: [number, number], ring: [number, number][]) => {
+        let c = false;
+        for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+          const [xi, yi] = ring[i]!;
+          const [xj, yj] = ring[j]!;
+          if (yi > pt[1] !== yj > pt[1] && pt[0] < ((xj - xi) * (pt[1] - yi)) / (yj - yi) + xi) c = !c;
+        }
+        return c;
+      };
+      const features = map.queryRenderedFeatures(
+        [
+          [w * 0.35, h * 0.3],
+          [w * 0.6, h * 0.6],
+        ],
+        { target },
+      );
+      const seen = new Set<unknown>();
+      const out: { id: number; lng: number; lat: number }[] = [];
+      for (const f of features) {
+        if (f.id === undefined || seen.has(f.id) || f.geometry.type !== "Polygon") continue;
+        seen.add(f.id);
+        const ring = f.geometry.coordinates[0] as [number, number][];
+        const pts = ring.slice(0, -1);
+        const c: [number, number] = [pts.reduce((a, p) => a + p[0], 0) / pts.length, pts.reduce((a, p) => a + p[1], 0) / pts.length];
+        if (inside(c, ring)) out.push({ id: Number(f.id), lng: c[0], lat: c[1] });
+      }
+      const step = Math.max(1, Math.floor(out.length / 6));
+      return out.filter((_, i) => i % step === 0).slice(0, 6);
+    },
+    [buildingsTarget(), VIEW_W, VIEW_H] as const,
+  );
 }
 
 /**
- * Pans and zooms around Samarinda at building zoom for about a minute and checks the JS heap stays
- * bounded (with terrain on at this zoom the page once went to about 1 GB).
+ * Pans and zooms around Samarinda at building zoom for about a minute and checks the page's JS heap stays
+ * bounded. This is the JS heap only: the renderer and GPU processes (about 2 GB together at building zoom,
+ * flat, measured in the Task 7 review; terrain off saves about 150 MB of it) are not visible from here.
  */
 async function buildingHeapSoak(page: Page) {
   const cdp = await page.context().newCDPSession(page);
@@ -1250,7 +1329,7 @@ async function buildingHeapSoak(page: Page) {
   const terrain = await page.evaluate(() => Boolean((window as MapWindow).__malasMap!.getTerrain()));
   check(
     end < 400 && end - start < 150 && !terrain,
-    `heap soak: ${step} moves at building zoom over ${Math.round((Date.now() - t0) / 1000)} s, JS heap ${start.toFixed(0)} → ${end.toFixed(0)} MB (peak ${peak.toFixed(0)} MB), terrain ${terrain ? "on" : "off"}`,
+    `JS heap soak (not GPU or renderer memory): ${step} moves at building zoom over ${Math.round((Date.now() - t0) / 1000)} s, JS heap ${start.toFixed(0)} → ${end.toFixed(0)} MB (peak ${peak.toFixed(0)} MB), terrain ${terrain ? "on" : "off"}`,
   );
   await cdp.detach();
 }

@@ -13,8 +13,13 @@ export const BUILDING_ZOOM = 17.5;
 const BUILDING_PITCH = 60;
 /** How long `selectBuildingAt` waits for the tiles after the flight before it looks for the building. */
 const SETTLE_CAP_MS = 8000;
-/** Half the side of the screen box `selectBuildingAt` searches when no building sits right on the point. */
+/** Half the side of the screen box searched around a point for the building that holds it, in px. */
 const SEARCH_RADIUS_PX = 28;
+/**
+ * The same for a point from a place search (a POI often sits in the yard or on the street in front of its
+ * building): about 35 m at building zoom.
+ */
+export const PLACE_SEARCH_RADIUS_PX = 80;
 
 /**
  * Terrain is switched off at building zoom, with hysteresis so a zoom hovering around the line does not
@@ -85,22 +90,23 @@ export function buildingInputFrom(feature: BuildingFeature): BuildingInput | nul
     featureId: id !== undefined && id !== null && String(id) !== "" ? `mapbox:${id}` : `at:${lng.toFixed(5)},${lat.toFixed(5)}`,
     lng,
     lat,
-    footprintM2: Math.round(footprintOf(feature.geometry) * 10) / 10,
+    // Whole m2, so the panel's "footprint × floors" adds up to the floor area it shows.
+    footprintM2: Math.round(footprintOf(feature.geometry)),
     heightM: Number.isFinite(rawHeight) && rawHeight > 0 ? rawHeight : null,
   };
 }
 
 /**
  * Building hover and select colours (00-direction section 8). On a light ground: ink, the selection darker
- * than the hover. On a dark ground the hover is paper-muted, but the selection is the light CO2 amber:
- * rendered, the night basemap theme (`faded`) grades light neutrals down to the colour of the other
- * buildings, so a paper-bright selection all but vanished, while the amber stays clear in every light
- * (at dusk, under `monochrome`, it reads as a light tint). It is the colour of what the panel measures.
+ * than the hover. On a dark ground the hover is paper and the selection the light CO2 amber: rendered, the
+ * night basemap theme (`faded`) grades light neutrals down toward the other buildings, so a paper-bright
+ * selection all but vanished and a paper-muted hover was hard to see, while the amber stays clear. It is
+ * the colour of what the panel measures.
  */
 export function buildingColors(tone: Tone): { highlight: string; select: string } {
   return tone === "light"
     ? { highlight: token("--color-ink-faint"), select: token("--color-outline-light") }
-    : { highlight: token("--color-paper-muted"), select: token("--color-co2-4") };
+    : { highlight: token("--color-paper"), select: token("--color-co2-4") };
 }
 
 /** Sets the basemap's building hover and select colours for the ground tone. */
@@ -122,52 +128,30 @@ interface BuildingState {
 }
 
 const states = new WeakMap<MapboxMap, BuildingState>();
-const INTERACTIONS = ["building-enter", "building-leave", "building-click"] as const;
+const INTERACTIONS = ["building-enter", "building-leave", "building-click", "building-background-click"] as const;
+/** From this zoom a click on empty ground (no building, no other layer) closes the building panel. */
+export const BACKGROUND_CLOSE_ZOOM = 14;
 
-/** The largest piece of the same building around a clicked one: a building cut by a tile edge comes in pieces. */
-function wholestPiece(map: MapboxMap, feature: TargetFeature): TargetFeature {
-  if (feature.id === undefined) return feature;
-  const points = polygonsOf(feature.geometry).flatMap((p) => p[0] ?? []);
-  if (points.length === 0) return feature;
-  const screen = points.map(([lng = 0, lat = 0]) => map.project([lng, lat]));
-  const xs = screen.map((p) => p.x);
-  const ys = screen.map((p) => p.y);
-  const pad = 4;
-  const pieces = map
-    .queryRenderedFeatures(
-      [
-        [Math.min(...xs) - pad, Math.min(...ys) - pad],
-        [Math.max(...xs) + pad, Math.max(...ys) + pad],
-      ],
-      { target: BUILDINGS },
-    )
-    .filter((f) => f.id === feature.id) as TargetFeature[];
-  let best = feature;
-  let bestArea = footprintOf(feature.geometry);
-  for (const piece of pieces) {
-    const area = footprintOf(piece.geometry);
-    if (area > bestArea) [best, bestArea] = [piece, area];
-  }
-  return best;
-}
-
-/** Marks `feature` as the selected building (and only it) and reports it. */
-function select(map: MapboxMap, s: BuildingState, feature: TargetFeature): boolean {
-  const input = buildingInputFrom(wholestPiece(map, feature));
-  if (!input) return false;
+/**
+ * Marks `feature` as the selected building (and only it) and returns its estimate request. The featureset
+ * returns whole footprints (checked over about 11,600 building views: none came in pieces at a tile edge).
+ */
+function select(map: MapboxMap, s: BuildingState, feature: TargetFeature): BuildingInput | null {
+  const input = buildingInputFrom(feature);
+  if (!input) return null;
   if (s.selected) map.setFeatureState(s.selected, { select: false });
   s.selected = feature;
   map.setFeatureState(feature, { select: true });
-  s.onSelect(input);
-  return true;
+  return input;
 }
 
 /**
  * Makes the basemap buildings hoverable and clickable (Standard `buildings` featureset): hover lights a
- * building, a click selects it and calls `onSelect` with the estimate request. Also switches terrain off
- * at building zoom. Returns a function that undoes all of it.
+ * building, a click selects it and calls `onSelect` with the estimate request, and a click on empty ground
+ * at building zoom calls `onBackground`. Also switches terrain off at building zoom. Returns a function
+ * that undoes all of it.
  */
-export function enableBuildingInteraction(map: MapboxMap, onSelect: OnSelect, tone: Tone): () => void {
+export function enableBuildingInteraction(map: MapboxMap, onSelect: OnSelect, tone: Tone, onBackground?: () => void): () => void {
   disableBuildingInteraction(map);
   const s: BuildingState = {
     onSelect,
@@ -207,7 +191,15 @@ export function enableBuildingInteraction(map: MapboxMap, onSelect: OnSelect, to
     type: "click",
     target: BUILDINGS,
     handler: (e) => {
-      if (e.feature) select(map, s, e.feature);
+      const input = e.feature ? select(map, s, e.feature) : null;
+      if (input) s.onSelect(input);
+    },
+  });
+  // A click no other interaction took: empty ground. At building zoom it closes the panel.
+  map.addInteraction("building-background-click", {
+    type: "click",
+    handler: () => {
+      if (onBackground && map.getZoom() >= BACKGROUND_CLOSE_ZOOM) onBackground();
     },
   });
 
@@ -286,7 +278,8 @@ const PANEL_GAP = 24;
 
 /**
  * Screen padding that keeps a building clear of the open panels: the region sheet on the left, the
- * building panel on the right, or the building panel as a bottom sheet on a phone.
+ * building panel and the chat panel (when open) on the right, or the building panel as a bottom sheet on
+ * a phone.
  */
 export function buildingViewPadding(): Padding {
   const pad: Padding = { top: PANEL_GAP, bottom: PANEL_GAP, left: PANEL_GAP, right: PANEL_GAP };
@@ -295,9 +288,12 @@ export function buildingViewPadding(): Padding {
   const h = window.innerHeight;
   const sheet = document.querySelector(".sheet-slot")?.getBoundingClientRect();
   const panel = document.querySelector(".building-slot")?.getBoundingClientRect();
+  const chat = document.querySelector(".chat")?.getBoundingClientRect();
   if (sheet && sheet.width < w / 2) pad.left = Math.max(pad.left, sheet.right + PANEL_GAP);
   if (panel && panel.width < w / 2) pad.right = Math.max(pad.right, w - panel.left + PANEL_GAP);
   else if (panel && panel.height > 0) pad.bottom = Math.max(pad.bottom, h - panel.top + PANEL_GAP);
+  // The chat panel sits left of the building panel when both are open.
+  if (chat && chat.width > 0 && chat.width < w / 2 && chat.left > w / 2) pad.right = Math.max(pad.right, w - chat.left + PANEL_GAP);
   // Never pad the view away entirely (very narrow windows).
   if (pad.left + pad.right > w * 0.8) [pad.left, pad.right] = [PANEL_GAP, PANEL_GAP];
   if (pad.top + pad.bottom > h * 0.8) [pad.top, pad.bottom] = [PANEL_GAP, PANEL_GAP];
@@ -307,14 +303,72 @@ export function buildingViewPadding(): Padding {
 const prefersReducedMotion = () =>
   typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
+/** Whether [lng, lat] lies inside a polygon (ray casting on the outer ring, outside every hole). */
+export function polygonContains(polygon: number[][][], [x, y]: [number, number]): boolean {
+  const inRing = (ring: number[][]) => {
+    let inside = false;
+    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+      const [xi = 0, yi = 0] = ring[i]!;
+      const [xj = 0, yj = 0] = ring[j]!;
+      if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside;
+    }
+    return inside;
+  };
+  const [outer, ...holes] = polygon;
+  return Boolean(outer && inRing(outer) && !holes.some(inRing));
+}
+
+/** Whether a building's footprint (Polygon or MultiPolygon) holds [lng, lat]. */
+export function footprintContains(geometry: Geometry, point: [number, number]): boolean {
+  return polygonsOf(geometry).some((p) => polygonContains(p, point));
+}
+
 /**
- * Selects the building at a point, as a click would (the chat's "select building" action): flies there at
- * building zoom, waits for the tiles, picks the building under the point (or the nearest one within a few
- * metres), selects it and calls the `onSelect` of `enableBuildingInteraction`. False when there is no
- * building there or the interaction is not enabled.
+ * The building at [lng, lat] on the current view: the one whose footprint holds the point, else the one
+ * whose centre is nearest within `radius` px. At a pitched camera a neighbour's wall often covers the
+ * projected ground point, so the frontmost feature there is not enough.
  */
-export async function selectBuildingAt(map: MapboxMap, lng: number, lat: number, padding?: Padding): Promise<boolean> {
-  if (!states.get(map)) return false;
+export function buildingAt(map: MapboxMap, lng: number, lat: number, radius = SEARCH_RADIUS_PX): TargetFeature | null {
+  const p = map.project([lng, lat]);
+  const r = radius;
+  const near = map.queryRenderedFeatures(
+    [
+      [p.x - r, p.y - r],
+      [p.x + r, p.y + r],
+    ],
+    { target: BUILDINGS },
+  ) as TargetFeature[];
+  const holding = near.find((f) => footprintContains(f.geometry, [lng, lat]));
+  if (holding) return holding;
+  let nearest: TargetFeature | null = null;
+  let best = Number.POSITIVE_INFINITY;
+  for (const f of near) {
+    const c = centroidOf(f.geometry);
+    if (!c) continue;
+    const q = map.project(c);
+    const d = Math.hypot(q.x - p.x, q.y - p.y);
+    if (d <= r && d < best) [nearest, best] = [f, d];
+  }
+  return nearest;
+}
+
+export interface SelectAtOptions {
+  /** Screen padding that keeps the building clear of the panels. */
+  padding?: Padding;
+  /** True once the request is out of date (the user clicked another building or closed the panel). */
+  isStale?: () => boolean;
+  /** How far from the point a building centre may be, in px at building zoom (default 28). */
+  searchRadiusPx?: number;
+}
+
+/**
+ * Selects the building at a point (the chat's "select building" action): flies there at building zoom,
+ * waits for the tiles, picks the building whose footprint holds the point (or the nearest one within a
+ * few metres) and marks it selected. Returns its estimate request, or null when there is no building there,
+ * the interaction is not enabled, or the request went stale during the flight (then nothing is selected).
+ */
+export async function selectBuildingAt(map: MapboxMap, lng: number, lat: number, opts: SelectAtOptions = {}): Promise<BuildingInput | null> {
+  if (!states.get(map)) return null;
   map.stop();
   // Listen before the flight starts (a flight without duration ends at once), and for the first idle
   // right at its end: that is when the tiles of the new view are in and drawn.
@@ -332,34 +386,14 @@ export async function selectBuildingAt(map: MapboxMap, lng: number, lat: number,
     zoom: BUILDING_ZOOM,
     pitch: BUILDING_PITCH,
     bearing: map.getBearing(),
-    ...(padding ? { padding } : {}),
+    ...(opts.padding ? { padding: opts.padding } : {}),
     duration: prefersReducedMotion() ? 0 : FLY_MS,
     curve: 1.2,
     essential: true,
   });
   await ready;
   const s = states.get(map);
-  if (!s) return false;
-  const p = map.project([lng, lat]);
-  const exact = map.queryRenderedFeatures(p, { target: BUILDINGS }) as TargetFeature[];
-  let feature: TargetFeature | undefined = exact[0];
-  if (!feature) {
-    const r = SEARCH_RADIUS_PX;
-    const near = map.queryRenderedFeatures(
-      [
-        [p.x - r, p.y - r],
-        [p.x + r, p.y + r],
-      ],
-      { target: BUILDINGS },
-    ) as TargetFeature[];
-    let best = Number.POSITIVE_INFINITY;
-    for (const f of near) {
-      const c = centroidOf(f.geometry);
-      if (!c) continue;
-      const q = map.project(c);
-      const d = Math.hypot(q.x - p.x, q.y - p.y);
-      if (d < best) [feature, best] = [f, d];
-    }
-  }
-  return feature ? select(map, s, feature) : false;
+  if (!s || opts.isStale?.()) return null;
+  const feature = buildingAt(map, lng, lat, opts.searchRadiusPx);
+  return feature ? select(map, s, feature) : null;
 }
