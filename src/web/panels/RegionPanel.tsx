@@ -250,6 +250,7 @@ function RegionDetail({
           {region.villagesNoPln === null ? null : <AnimatedNumber value={region.villagesNoPln} format={whole} />}
         </Fact>
       </dl>
+      <EmissionContext co2KgYear={region.co2KgYear} />
       <RecommendationPanel regionId={region.id} regionName={region.name} kind={region.kind} />
       <footer className="sheet__foot">
         <p className="sheet__note">
@@ -258,7 +259,6 @@ function RegionDetail({
           )}
         </p>
       </footer>
-      <EmissionContext co2KgYear={region.co2KgYear} />
     </div>
   );
 }

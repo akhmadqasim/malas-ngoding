@@ -975,6 +975,8 @@ async function recommendationsFailure() {
   check(true, "recommendations: 'Coba lagi' loads the items");
   check(errors.length === 0, `recommendations: no uncaught errors on the failure path (${errors.join("; ") || "none"})`);
   await p.close();
+}
+
 // ---------- Buildings (Task 7): clickable buildings, the building panel, terrain and memory at building zoom ----------
 
 // Functions, not constants: the checks run from the main block above, before constants down here exist.
