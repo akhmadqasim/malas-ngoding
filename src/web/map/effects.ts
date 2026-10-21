@@ -38,6 +38,26 @@ export function resolvePreset(mode: LightMode, date: Date): LightPreset {
   return mode === "auto" ? lightPresetFor(date) : mode;
 }
 
+/** The buttons of the Cahaya switch in the legend. */
+export type LightOption = "auto" | "day" | "night";
+
+/**
+ * The Cahaya button shown as chosen for a light mode. Dawn and dusk have no button of their own: they come
+ * from the clock or from a `?cahaya=dawn` link, and both count as Otomatis (the light the page chose).
+ */
+export function lightOption(mode: LightMode): LightOption {
+  return mode === "day" || mode === "night" ? mode : "auto";
+}
+
+/** The light mode a Cahaya button sets. Otomatis goes back to the clock, or to the dawn or dusk of the link. */
+export function lightModeFor(option: LightOption, linked: LightMode): LightMode {
+  if (option !== "auto") return option;
+  return linked === "dawn" || linked === "dusk" ? linked : "auto";
+}
+
+/** The legend names the light when no button does: "Cahaya fajar", "Cahaya senja". */
+export const LIGHT_NOTE: Partial<Record<LightPreset, string>> = { dawn: "fajar", dusk: "senja" };
+
 /**
  * Ground tone per preset, measured from the render: the land is near white at day and dawn, dark grey at
  * dusk and navy at night (values in docs/research/design/00-direction.md section 4).

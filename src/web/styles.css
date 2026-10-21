@@ -21,6 +21,9 @@
   --color-rule: #283040;
   --color-rule-strong: #384255;
   --color-scrim: rgb(16 20 27 / 0.86);
+  /* By day the intro sits on a white globe: a paper haze (the day ground) under ink type instead. */
+  --color-scrim-day: rgb(248 248 248 / 0.94);
+  --color-scrim-day-mid: rgb(248 248 248 / 0.78);
 
   /* Text: paper on ink. */
   --color-paper: #ece9e2;
@@ -892,6 +895,19 @@ button {
   position: absolute;
   inset: 0;
   background: linear-gradient(to top, var(--color-scrim), transparent 55%);
+}
+/* By day an ink scrim over the white globe turns into a muddy grey band, so the intro reads as ink on a
+   paper haze instead, like the title of a printed map. */
+.app[data-tone="light"] .intro__scrim {
+  background: linear-gradient(to top, var(--color-scrim-day), var(--color-scrim-day-mid) 32%, transparent 62%);
+}
+.app[data-tone="light"] .intro__title,
+.app[data-tone="light"] .intro__lede,
+.app[data-tone="light"] .intro__status {
+  color: var(--color-ink);
+}
+.app[data-tone="light"] .intro__progress {
+  background: var(--color-ink);
 }
 .intro__copy {
   position: relative;

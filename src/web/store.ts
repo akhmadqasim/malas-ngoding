@@ -50,7 +50,8 @@ export interface AppState {
   setChatOpen: (open: boolean) => void;
 }
 
-const initialLightMode: LightMode = typeof window === "undefined" ? "auto" : lightModeFromQuery(window.location.search);
+/** The light a `?cahaya=` link asked for ("auto" without one). The Cahaya switch's Otomatis returns to it. */
+export const linkedLightMode: LightMode = typeof window === "undefined" ? "auto" : lightModeFromQuery(window.location.search);
 
 export const useAppStore = create<AppState>()((set) => ({
   map: null,
@@ -61,8 +62,8 @@ export const useAppStore = create<AppState>()((set) => ({
   metric: "co2",
   layers: { regions: true, plants: true, buildings: true },
   rain: "auto",
-  lightMode: initialLightMode,
-  lightPreset: resolvePreset(initialLightMode, new Date()),
+  lightMode: linkedLightMode,
+  lightPreset: resolvePreset(linkedLightMode, new Date()),
   panelTab: "energi",
   chatOpen: false,
 

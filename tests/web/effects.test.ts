@@ -3,7 +3,11 @@ import type { FogSpecification } from "mapbox-gl";
 import { clearTokenCache } from "../../src/web/theme.ts";
 import {
   basemapTheme,
+  LIGHT_NOTE,
+  type LightMode,
+  lightModeFor,
   lightModeFromQuery,
+  lightOption,
   lightPresetFor,
   overcastOpacity,
   presetTone,
@@ -61,6 +65,36 @@ describe("light mode (the Cahaya control and ?cahaya=)", () => {
     expect(resolvePreset("auto", wita(22))).toBe("night");
     expect(resolvePreset("night", wita(12))).toBe("night");
     expect(resolvePreset("day", wita(22))).toBe("day");
+  });
+});
+
+describe("the Cahaya switch always shows one choice", () => {
+  const modes: LightMode[] = ["auto", "dawn", "day", "dusk", "night"];
+
+  test("dawn and dusk have no button: a link that pins one shows as Otomatis", () => {
+    expect(lightOption("dawn")).toBe("auto");
+    expect(lightOption("dusk")).toBe("auto");
+    expect(lightOption("auto")).toBe("auto");
+    expect(lightOption("day")).toBe("day");
+    expect(lightOption("night")).toBe("night");
+  });
+
+  test("pressing the option already shown never changes the light, whatever the link asked for", () => {
+    for (const linked of modes) expect(lightModeFor(lightOption(linked), linked)).toBe(linked);
+  });
+
+  test("Otomatis goes back to the clock, or to the dawn or dusk of the link", () => {
+    expect(lightModeFor("auto", "auto")).toBe("auto");
+    expect(lightModeFor("auto", "night")).toBe("auto");
+    expect(lightModeFor("auto", "dusk")).toBe("dusk");
+    expect(lightModeFor("day", "dusk")).toBe("day");
+  });
+
+  test("the legend names the light when no button does", () => {
+    expect(LIGHT_NOTE.dawn).toBe("fajar");
+    expect(LIGHT_NOTE.dusk).toBe("senja");
+    expect(LIGHT_NOTE.day).toBeUndefined();
+    expect(LIGHT_NOTE.night).toBeUndefined();
   });
 });
 

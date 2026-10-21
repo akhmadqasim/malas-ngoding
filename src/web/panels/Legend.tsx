@@ -6,24 +6,30 @@ import type { RegionSummary } from "../../shared/types.ts";
 import type { PlantCollection } from "../api.ts";
 import { chem } from "../components/Chem.tsx";
 import { Estimate } from "../components/Estimate.tsx";
-import { type LightMode, RAIN_MIN_ZOOM } from "../map/effects.ts";
+import { LIGHT_NOTE, type LightOption, lightModeFor, lightOption, RAIN_MIN_ZOOM } from "../map/effects.ts";
 import { FUEL_LABELS, fuelsPresent } from "../map/fuels.ts";
 import { intensities } from "../map/regionsLayer.ts";
 import { METRIC_TEXT } from "../metrics.ts";
 import { DURATION, SPRING } from "../motion.ts";
-import { type Metric, useAppStore } from "../store.ts";
+import { linkedLightMode, type Metric, useAppStore } from "../store.ts";
 
 const METRICS: { key: Metric; label: string }[] = [
   { key: "co2", label: "Emisi CO2" },
   { key: "kwh", label: "Listrik" },
 ];
 
-/** The presenter's light switch. Otomatis follows the time of day in WITA. */
-const LIGHTS: { key: LightMode; label: string; title?: string }[] = [
-  { key: "auto", label: "Otomatis", title: "Mengikuti jam di Kalimantan Timur (WITA)" },
+/**
+ * The presenter's light switch. Otomatis is the light the page chooses itself: the time of day in WITA, or
+ * the dawn or dusk a `?cahaya=` link asked for (they have no button of their own).
+ */
+const LIGHTS: { key: LightOption; label: string }[] = [
+  { key: "auto", label: "Otomatis" },
   { key: "day", label: "Siang" },
   { key: "night", label: "Malam" },
 ];
+const linkedNote = linkedLightMode === "auto" ? undefined : LIGHT_NOTE[linkedLightMode];
+/** What Otomatis follows, as its hover title. */
+const AUTO_TITLE = linkedNote ? `Cahaya ${linkedNote}, sesuai tautan` : "Mengikuti jam di Kalimantan Timur (WITA)";
 
 /** The map's zoom, updated when a zoom gesture or camera move ends. */
 function useMapZoom(map: MapboxMap | null): number {
@@ -48,7 +54,9 @@ export function Legend({ plants, regions }: { plants: PlantCollection; regions: 
   const setLayer = useAppStore((s) => s.setLayer);
   const rain = useAppStore((s) => s.rain);
   const setRain = useAppStore((s) => s.setRain);
-  const lightMode = useAppStore((s) => s.lightMode);
+  const chosenLight = useAppStore((s) => lightOption(s.lightMode));
+  // Dawn and dusk show as Otomatis; the label then names the light: "Cahaya fajar", "Cahaya senja".
+  const lightNote = useAppStore((s) => LIGHT_NOTE[s.lightPreset]);
   const setLightMode = useAppStore((s) => s.setLightMode);
   const map = useAppStore((s) => s.map);
   const zoom = useMapZoom(map);
@@ -100,7 +108,7 @@ export function Legend({ plants, regions }: { plants: PlantCollection; regions: 
       {/* The scene's atmosphere: light and rain. */}
       <div className="legend__scene" role="group" aria-label="Suasana peta">
         <span className="legend__label" id="legend-light">
-          Cahaya
+          {lightNote ? `Cahaya ${lightNote}` : "Cahaya"}
         </span>
         <div className="segmented" role="radiogroup" aria-labelledby="legend-light">
           {LIGHTS.map((l) => (
@@ -108,12 +116,12 @@ export function Legend({ plants, regions }: { plants: PlantCollection; regions: 
               key={l.key}
               type="button"
               role="radio"
-              aria-checked={lightMode === l.key}
+              aria-checked={chosenLight === l.key}
               className="segmented__option"
-              title={l.title}
-              onClick={() => setLightMode(l.key)}
+              title={l.key === "auto" ? AUTO_TITLE : undefined}
+              onClick={() => setLightMode(lightModeFor(l.key, linkedLightMode))}
             >
-              {lightMode === l.key && <motion.span layoutId="light-indicator" className="segmented__indicator" transition={SPRING.control} />}
+              {chosenLight === l.key && <motion.span layoutId="light-indicator" className="segmented__indicator" transition={SPRING.control} />}
               <span className="segmented__label">{l.label}</span>
             </button>
           ))}

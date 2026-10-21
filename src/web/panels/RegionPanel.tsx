@@ -43,7 +43,9 @@ export function RegionPanel({ regions }: Props) {
     <section className="sheet" aria-label="Data wilayah">
       <header className="sheet__masthead">
         <span className="sheet__brand">Malas Ngoding</span>
-        <span className="sheet__edition">Data 2024</span>
+        {/* The span of the figures shown: emission factor 2019 data, PLN sales 2024, population projection
+            2025, villages without PLN 2026. The detail view names the year of each figure. */}
+        <span className="sheet__edition">Data 2019–2026</span>
       </header>
       <div className="sheet__scroll">
         <AnimatePresence mode="wait" initial={false}>
@@ -145,7 +147,7 @@ function Overview({
         </ol>
       </div>
       <p className="sheet__note">Pilih wilayah untuk melihat rinciannya.</p>
-      <p className="sheet__source">Sumber: BPS Kalimantan Timur 2024 dan Kementerian ESDM.</p>
+      <p className="sheet__source">Sumber: BPS Kalimantan Timur dan Kementerian ESDM.</p>
     </div>
   );
 }
@@ -200,22 +202,22 @@ function RegionDetail({
         <Fact label="Listrik per orang" unit="kWh/tahun" estimate>
           {perPerson === null ? null : <AnimatedNumber value={perPerson} format={whole} />}
         </Fact>
-        <Fact label="Penduduk" unit="jiwa">
+        <Fact label="Penduduk" unit="jiwa, proyeksi 2025">
           {region.population === null ? null : <AnimatedNumber value={region.population} format={whole} />}
         </Fact>
-        <Fact label="Pelanggan PLN">
+        <Fact label="Pelanggan PLN" unit="data 2024">
           {region.customers === null ? null : <AnimatedNumber value={region.customers} format={whole} />}
         </Fact>
-        <Fact label="Rasio elektrifikasi">
+        <Fact label="Rasio elektrifikasi" unit="data 2024">
           {region.electrificationPct === null ? null : <AnimatedNumber value={region.electrificationPct} format={pct} />}
         </Fact>
-        <Fact label="Desa belum dilayani PLN">
+        <Fact label="Desa belum dilayani PLN" unit="data 2026">
           {region.villagesNoPln === null ? null : <AnimatedNumber value={region.villagesNoPln} format={whole} />}
         </Fact>
       </dl>
       <p className="sheet__note">
         {chem(
-          "Listrik terpakai diperkirakan dari penjualan PLN 2024 per cabang, dibagi menurut jumlah pelanggan. Emisi CO2 = kWh dikali faktor emisi jaringan Kaltim.",
+          "Listrik terpakai diperkirakan dari penjualan PLN 2024 per cabang, dibagi menurut jumlah pelanggan. Emisi CO2 = kWh dikali faktor emisi jaringan Kaltim (Kementerian ESDM, data 2019).",
         )}
       </p>
     </div>
