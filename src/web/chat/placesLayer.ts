@@ -1,22 +1,28 @@
 import type { GeoJSONSource, GeoJSONSourceSpecification, Map as MapboxMap } from "mapbox-gl";
+import type { BuildingType } from "../../shared/types.ts";
 import { token } from "../theme.ts";
 
 // The places the AI chat found (find_places), marked on the map: numbered ink pins with a paper edge, as
 // the chat lists them, with their names beside them. Pins, not dots, so they never read as the round
-// plant cluster markers. Shown from city zoom only: at the province view they would be clutter. A click on
-// one selects the building there.
+// plant cluster markers. Hidden at the province overview, where they would be clutter. A click on one
+// selects the building there.
 
 export interface MarkedPlace {
   name: string;
   lng: number;
   lat: number;
+  /** The building type find_places' category stands for (a school is "sekolah"). */
+  type?: BuildingType;
 }
 
 export const PLACES_SOURCE = "chat-places";
 export const PLACES_LAYER = "chat-places";
 export const PLACES_NAMES_LAYER = "chat-place-names";
-/** Below this zoom (the province and region views) the pins are hidden. */
-export const PLACES_MIN_ZOOM = 10;
+/**
+ * Below this zoom (the province overview) the pins are hidden; from a regency's view (Kukar lands at about
+ * zoom 8) they show.
+ */
+export const PLACES_MIN_ZOOM = 7.5;
 const FONT = ["DIN Pro Medium", "Arial Unicode MS Bold"];
 const PIN_IMAGE = "chat-place-pin";
 const INTERACTIONS = ["chat-places-click", "chat-places-enter", "chat-places-leave"] as const;

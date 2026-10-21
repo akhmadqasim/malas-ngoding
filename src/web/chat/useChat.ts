@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { KALTIM_VIEW } from "../map/camera.ts";
-import { runAction } from "../map/actions.ts";
+import { type ActionOutcome, actionQueue, fitMarkedPlaces, forgetMarkedPlaces, needsPlacesFit, runAction } from "../map/actions.ts";
 import { type AppState, useAppStore } from "../store.ts";
 import { clearPlaces } from "./placesLayer.ts";
 import { browserStorage, type ChatMessage, loadChat, newChat, saveChat, type StoredChat } from "./session.ts";
@@ -34,17 +34,19 @@ export interface UseChat {
   retry: (answerId: string) => void;
   /** Starts a new conversation (new session id) and clears the places marked on the map. */
   reset: () => void;
-  /** Runs an answer's map action again (the action buttons). */
-  replay: (action: ChatAction) => void;
+  /** Runs an answer's map action again (the action buttons) and records what it did this time. */
+  replay: (answerId: string, index: number) => void;
 }
 
 const newId = () => crypto.randomUUID();
+
 
 export function useChat(opts: { fetch?: typeof fetch } = {}): UseChat {
   const storage = browserStorage();
   const [chat, setChat] = useState<StoredChat>(() => loadChat(storage));
   const [enabled, setEnabled] = useState<boolean | null>(null);
   const running = useRef<AbortController | null>(null);
+  const queue = useRef(actionQueue());
   const fetcher = opts.fetch;
   const busy = chat.messages.at(-1)?.status === "streaming";
 
@@ -72,13 +74,23 @@ export function useChat(opts: { fetch?: typeof fetch } = {}): UseChat {
   const update = useCallback((id: string, change: (m: ChatMessage) => ChatMessage) => {
     setChat((c) => ({ ...c, messages: c.messages.map((m) => (m.id === id ? change(m) : m)) }));
   }, []);
+  /** What action `index` of an answer did, so its button only claims what happened. */
+  const record = useCallback(
+    (id: string, index: number, outcome: ActionOutcome) =>
+      update(id, (m) => {
+        const outcomes = [...(m.outcomes ?? [])];
+        outcomes[index] = outcome;
+        return { ...m, outcomes };
+      }),
+    [update],
+  );
 
   const ask = useCallback(
     (text: string, sessionId: string) => {
       const message = text.trim();
       if (!message || running.current) return;
       const question: ChatMessage = { id: newId(), role: "user", text: message, actions: [], status: "done" };
-      const answer: ChatMessage = { id: newId(), role: "assistant", text: "", actions: [], status: "streaming" };
+      const answer: ChatMessage = { id: newId(), role: "assistant", text: "", actions: [], outcomes: [], status: "streaming" };
       setChat((c) => ({ ...c, messages: [...c.messages, question, answer] }));
 
       const controller = new AbortController();
@@ -86,11 +98,16 @@ export function useChat(opts: { fetch?: typeof fetch } = {}): UseChat {
       const onEvent = (event: StreamEvent) => {
         if (event.type === "text") update(answer.id, (m) => ({ ...m, text: m.text + event.delta }));
         else if (event.type === "action") {
+          const index = actions.push(event.action) - 1;
           update(answer.id, (m) => ({ ...m, actions: [...m.actions, event.action] }));
-          void runAction(event.action);
-        } else if (event.type === "done") update(answer.id, (m) => ({ ...m, status: "done" }));
-        else update(answer.id, (m) => ({ ...m, status: "error", error: event.message }));
+          void queue.current(() => runAction(event.action)).then((outcome) => record(answer.id, index, outcome));
+        } else if (event.type === "done") {
+          update(answer.id, (m) => ({ ...m, status: "done" }));
+          // Places were marked but the camera never went to one: bring them into view.
+          if (needsPlacesFit(actions)) void queue.current(async () => fitMarkedPlaces());
+        } else update(answer.id, (m) => ({ ...m, status: "error", error: event.message }));
       };
+      const actions: ChatAction[] = [];
       const request: ChatRequest = { sessionId, message, context: chatContext(useAppStore.getState()) };
       void streamChat(request, { signal: controller.signal, onEvent, fetch: fetcher }).finally(() => {
         if (running.current === controller) running.current = null;
@@ -98,7 +115,7 @@ export function useChat(opts: { fetch?: typeof fetch } = {}): UseChat {
         update(answer.id, (m) => (m.status === "streaming" ? { ...m, status: "stopped" } : m));
       });
     },
-    [fetcher, update],
+    [fetcher, update, record],
   );
 
   const send = useCallback((text: string) => ask(text, chat.sessionId), [ask, chat.sessionId]);
@@ -123,10 +140,18 @@ export function useChat(opts: { fetch?: typeof fetch } = {}): UseChat {
     running.current = null;
     const map = useAppStore.getState().map;
     if (map) clearPlaces(map);
+    forgetMarkedPlaces();
     setChat(newChat());
   }, []);
 
-  const replay = useCallback((action: ChatAction) => void runAction(action), []);
+  const replay = useCallback(
+    (answerId: string, index: number) => {
+      const action = chat.messages.find((m) => m.id === answerId)?.actions[index];
+      if (!action) return;
+      void queue.current(() => runAction(action, undefined, { replay: true })).then((outcome) => record(answerId, index, outcome));
+    },
+    [chat.messages, record],
+  );
 
   return { messages: chat.messages, busy, enabled, send, stop, retry, reset, replay };
 }

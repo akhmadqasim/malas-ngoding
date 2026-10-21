@@ -51,13 +51,41 @@ export function actionLabel(action: ChatAction): string | null {
   }
 }
 
-/** The labels of an answer's actions, one per distinct label, in order (two moves to the same region show once). */
-export function actionChips(actions: ChatAction[]): { label: string; action: ChatAction }[] {
-  const seen = new Map<string, ChatAction>();
-  for (const action of actions) {
-    const label = actionLabel(action);
-    // Keeps the place of the first, the input of the latest: replaying it shows the final state.
-    if (label) seen.set(label, action);
-  }
-  return [...seen].map(([label, action]) => ({ label, action }));
+/** One action button under an answer. `failed`: the action ran but did not get there. */
+export interface ActionChip {
+  label: string;
+  /** The action's index in the answer, to run it again. */
+  index: number;
+  failed: boolean;
+}
+
+/** What a failed action's button says instead of its usual label. */
+const FAILED_LABELS: Partial<Record<ChatAction["name"], string>> = {
+  select_building_at: "Gedung tidak ditemukan",
+};
+/** What an action's button says while it is still running, when its usual label would claim too much. */
+const PENDING_LABELS: Partial<Record<ChatAction["name"], string>> = {
+  select_building_at: "Mencari gedung…",
+};
+
+/**
+ * The buttons of an answer's actions, one per distinct label, in order (two moves to the same region show
+ * once; the button runs the latest). A button only claims what happened: an action that was skipped has
+ * none, a failed one says so, and one still running says what it is doing. `outcomes` is missing for
+ * answers kept from before outcomes were recorded; their actions count as done.
+ */
+export function actionChips(actions: ChatAction[], outcomes?: (string | undefined)[]): ActionChip[] {
+  const seen = new Map<string, ActionChip>();
+  actions.forEach((action, index) => {
+    const outcome = outcomes ? outcomes[index] : "ok";
+    if (outcome === "skipped") return;
+    const failed = outcome === "failed";
+    const label =
+      (failed && FAILED_LABELS[action.name]) || (outcome === undefined && PENDING_LABELS[action.name]) || actionLabel(action);
+    if (!label) return;
+    // A later success replaces an earlier failure of the same kind (and the other way round).
+    const key = action.name === "select_building_at" ? "select_building_at" : label;
+    seen.set(key, { label, index, failed });
+  });
+  return [...seen.values()];
 }

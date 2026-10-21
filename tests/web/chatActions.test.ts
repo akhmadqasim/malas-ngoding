@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, test } from "bun:test";
 import type { Map as MapboxMap } from "mapbox-gl";
 import { actionChips, actionLabel, regionName } from "../../src/web/chat/actionLabels.ts";
 import type { MarkedPlace } from "../../src/web/chat/placesLayer.ts";
-import { type ActionTarget, runAction } from "../../src/web/map/actions.ts";
+import { type ActionTarget, actionQueue, fitMarkedPlaces, needsPlacesFit, runAction } from "../../src/web/map/actions.ts";
 import { useAppStore } from "../../src/web/store.ts";
 import type { BuildingEstimate } from "../../src/shared/types.ts";
 
@@ -83,7 +83,7 @@ const state = () => useAppStore.getState();
 describe("runAction", () => {
   test("fly_to_region selects the region (MapView flies) and closes the building panel", async () => {
     useAppStore.setState({ selectedBuilding: BUILDING, selectedBuildingAt: [117.1, -0.5], buildingStatus: "ready" });
-    expect(await runAction({ name: "fly_to_region", input: { region: "samarinda" } }, target)).toBe(true);
+    expect(await runAction({ name: "fly_to_region", input: { region: "samarinda" } }, target)).toBe("ok");
     expect(state().selectedRegionId).toBe("samarinda");
     expect(state().selectedBuilding).toBeNull();
     expect(state().buildingStatus).toBe("idle");
@@ -92,7 +92,7 @@ describe("runAction", () => {
 
   test("fly_to_region for the region already selected flies there again", async () => {
     useAppStore.setState({ selectedRegionId: "samarinda" });
-    expect(await runAction({ name: "fly_to_region", input: { region: "samarinda" } }, target)).toBe(true);
+    expect(await runAction({ name: "fly_to_region", input: { region: "samarinda" } }, target)).toBe("ok");
     expect(centroids).toEqual(["samarinda"]);
     expect(flights[0]?.center).toEqual([117.15, -0.5]);
   });
@@ -109,21 +109,90 @@ describe("runAction", () => {
     expect(picked).toEqual([[117.1, -0.5]]);
   });
 
+  test("with the region already open, a building picked right after re-flying there takes the camera over", async () => {
+    // The review's repro: Samarinda open, then "Tunjukkan gedung sekolah di Samarinda".
+    useAppStore.setState({ selectedRegionId: "samarinda" });
+    let release: () => void = () => {};
+    const slowCentroid = new Promise<[number, number]>((r) => (release = () => r([117.15, -0.5])));
+    const t: ActionTarget = { ...target, regionCentroid: () => slowCentroid };
+    const queue = actionQueue();
+    const region = queue(() => runAction({ name: "fly_to_region", input: { region: "samarinda" } }, t));
+    const building = queue(() => runAction({ name: "select_building_at", input: { lng: 117.1, lat: -0.5 } }, t));
+    await Bun.sleep(20);
+    expect(picked).toEqual([]); // waits for the region flight to start
+    release();
+    expect(await region).toBe("ok");
+    expect(await building).toBe("ok");
+    expect(flights.map((f) => f.center)).toEqual([[117.15, -0.5]]); // the region flight, then the pick
+    expect(picked).toEqual([[117.1, -0.5]]);
+  });
+
+  test("a pick that a flight cut short is tried once more", async () => {
+    let calls = 0;
+    useAppStore.setState({
+      selectBuildingAt: async (at) => {
+        calls++;
+        picked.push(at);
+        useAppStore.setState({ buildingStatus: calls === 1 ? "empty" : "loading" });
+      },
+    });
+    expect(await runAction({ name: "select_building_at", input: { lng: 117.1, lat: -0.5 } }, target)).toBe("ok");
+    expect(picked).toHaveLength(2);
+  });
+
+  test("a place the chat found is selected with its type and name", async () => {
+    const hints: unknown[] = [];
+    useAppStore.setState({ selectBuildingAt: (async (_at: [number, number], hint?: unknown) => void hints.push(hint)) as never });
+    const places = [{ name: "SMA Negeri 1", lng: 117.151, lat: -0.501, type: "sekolah" }];
+    await runAction({ name: "mark_places", input: { label: "sekolah", places } }, target);
+    await runAction({ name: "select_building_at", input: { lng: 117.151, lat: -0.501 } }, target);
+    await runAction({ name: "select_building_at", input: { lng: 117.2, lat: -0.5 } }, target);
+    expect(hints).toEqual([{ type: "sekolah", name: "SMA Negeri 1" }, undefined]);
+  });
+
+  test("marked places come into view when their button is pressed, or when the answer never went to one", async () => {
+    const places = [
+      { name: "RS A", lng: 117.0, lat: -0.4 },
+      { name: "RS B", lng: 117.2, lat: -0.6 },
+    ];
+    const fit = { ...target };
+    const cameras: unknown[] = [];
+    useAppStore.setState({
+      map: {
+        ...(useAppStore.getState().map as object),
+        cameraForBounds: (b: unknown) => (cameras.push(b), { center: [117.1, -0.5], zoom: 11 }),
+      } as never,
+    });
+    await runAction({ name: "mark_places", input: { label: "rumah sakit", places } }, fit);
+    expect(cameras).toHaveLength(0); // during the answer the camera is left alone
+    await runAction({ name: "mark_places", input: { label: "rumah sakit", places } }, fit, { replay: true });
+    expect(cameras).toEqual([
+      [
+        [117.0, -0.6],
+        [117.2, -0.4],
+      ],
+    ]);
+    expect(fitMarkedPlaces(fit)).toBe(true);
+    expect(needsPlacesFit([{ name: "fly_to_region", input: {} }, { name: "mark_places", input: {} }])).toBe(true);
+    expect(needsPlacesFit([{ name: "mark_places", input: {} }, { name: "select_building_at", input: {} }])).toBe(false);
+    expect(needsPlacesFit([{ name: "set_metric", input: {} }])).toBe(false);
+  });
+
   test("show_all_regions goes back to the province with nothing selected", async () => {
     useAppStore.setState({ selectedRegionId: "samarinda", selectedBuilding: BUILDING, buildingStatus: "ready" });
-    expect(await runAction({ name: "show_all_regions", input: {} }, target)).toBe(true);
+    expect(await runAction({ name: "show_all_regions", input: {} }, target)).toBe("ok");
     expect(state().selectedRegionId).toBeNull();
     expect(state().selectedBuilding).toBeNull();
     expect(state().buildingStatus).toBe("idle");
   });
 
   test("show_all_regions with nothing selected flies back to the overview", async () => {
-    expect(await runAction({ name: "show_all_regions", input: {} }, target)).toBe(true);
+    expect(await runAction({ name: "show_all_regions", input: {} }, target)).toBe("ok");
     expect(flights[0]).toMatchObject({ zoom: 6.55, bearing: -14 });
   });
 
   test("fly_to flies to the point, tilted at building zoom", async () => {
-    expect(await runAction({ name: "fly_to", input: { lng: 117.1, lat: -0.5, zoom: 17 } }, target)).toBe(true);
+    expect(await runAction({ name: "fly_to", input: { lng: 117.1, lat: -0.5, zoom: 17 } }, target)).toBe("ok");
     expect(flights[0]).toMatchObject({ center: [117.1, -0.5], zoom: 17, pitch: 60, duration: 2000 });
   });
 
@@ -139,13 +208,13 @@ describe("runAction", () => {
   });
 
   test("select_building_at selects the building through the store (it flies and opens the panel)", async () => {
-    expect(await runAction({ name: "select_building_at", input: { lng: 117.151, lat: -0.501 } }, target)).toBe(true);
+    expect(await runAction({ name: "select_building_at", input: { lng: 117.151, lat: -0.501 } }, target)).toBe("ok");
     expect(picked).toEqual([[117.151, -0.501]]);
   });
 
   test("when no building could be picked far from the point, it still flies there", async () => {
     useAppStore.setState({ selectBuildingAt: async () => useAppStore.setState({ buildingStatus: "empty" }) });
-    expect(await runAction({ name: "select_building_at", input: { lng: 117.151, lat: -0.501 } }, target)).toBe(true);
+    expect(await runAction({ name: "select_building_at", input: { lng: 117.151, lat: -0.501 } }, target)).toBe("failed");
     expect(flights[0]).toMatchObject({ center: [117.151, -0.501], zoom: 17.5, pitch: 60 });
   });
 
@@ -169,7 +238,7 @@ describe("runAction", () => {
         throw new Error("estimate failed");
       },
     });
-    expect(await runAction({ name: "select_building_at", input: { lng: 117.1, lat: -0.5 } }, target)).toBe(false);
+    expect(await runAction({ name: "select_building_at", input: { lng: 117.1, lat: -0.5 } }, target)).toBe("failed");
   });
 
   test("toggle_layer, set_metric, set_rain and open_tab go to the store", async () => {
@@ -188,7 +257,7 @@ describe("runAction", () => {
       { name: "SMA Negeri 1", lng: 117.151, lat: -0.501 },
       { name: "SD Negeri 2", lng: 117.16, lat: -0.49 },
     ];
-    expect(await runAction({ name: "mark_places", input: { label: "sekolah", places } }, target)).toBe(true);
+    expect(await runAction({ name: "mark_places", input: { label: "sekolah", places } }, target)).toBe("ok");
     expect(marked?.places).toEqual(places);
     marked?.pick([117.16, -0.49]);
     await Bun.sleep(0);
@@ -204,7 +273,7 @@ describe("runAction", () => {
     [{ name: "launch_rocket", input: {} }],
   ])("an unusable action %j does nothing", async (action) => {
     const before = { ...state() };
-    expect(await runAction(action as never, target)).toBe(false);
+    expect(await runAction(action as never, target)).toBe("skipped");
     expect(flights).toHaveLength(0);
     expect(state().metric).toBe(before.metric);
     expect(state().layers).toEqual(before.layers);
@@ -212,7 +281,7 @@ describe("runAction", () => {
 
   test("without a map, camera actions report that nothing happened", async () => {
     useAppStore.setState({ map: null });
-    expect(await runAction({ name: "fly_to", input: { lng: 117, lat: 0, zoom: 9 } }, target)).toBe(false);
+    expect(await runAction({ name: "fly_to", input: { lng: 117, lat: 0, zoom: 9 } }, target)).toBe("skipped");
   });
 });
 
@@ -240,6 +309,24 @@ describe("action labels", () => {
       { name: "select_building_at", input: { lng: 2, lat: 2 } },
     ]);
     expect(chips.map((c) => c.label)).toEqual(["Samarinda", "Warna menurut emisi CO2", "Gedung dipilih"]);
-    expect(chips[2]?.action.input).toEqual({ lng: 2, lat: 2 });
+    expect(chips[2]?.index).toBe(3);
+  });
+
+  test("a button only claims what happened: a failed pick says so, a skipped action has no button", () => {
+    const actions = [
+      { name: "fly_to_region", input: { region: "samarinda" } },
+      { name: "mark_places", input: { label: "sekolah", places: [{}, {}] } },
+      { name: "select_building_at", input: { lng: 1, lat: 1 } },
+    ] as const;
+    expect(actionChips([...actions], ["ok", "skipped", "failed"])).toEqual([
+      { label: "Samarinda", index: 0, failed: false },
+      { label: "Gedung tidak ditemukan", index: 2, failed: true },
+    ]);
+    // Tried again from its button, and this time it worked.
+    expect(actionChips([...actions], ["ok", "ok", "ok"]).map((c) => c.label)).toEqual(["Samarinda", "2 sekolah ditandai", "Gedung dipilih"]);
+    // Still running: the button says what it is doing, not that it worked.
+    expect(actionChips([...actions], ["ok", "ok"]).at(-1)).toEqual({ label: "Mencari gedung…", index: 2, failed: false });
+    // Kept from before outcomes were recorded: counts as done.
+    expect(actionChips([...actions]).at(-1)).toEqual({ label: "Gedung dipilih", index: 2, failed: false });
   });
 });

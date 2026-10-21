@@ -10,6 +10,8 @@ export interface ChatMessage {
   text: string;
   /** Map actions of an answer, in the order they ran. */
   actions: ChatAction[];
+  /** What each action did, by its index in `actions` ("failed": it ran but did not get there). */
+  outcomes?: ("ok" | "failed" | "skipped")[];
   /** streaming: the answer is arriving; stopped: the user stopped it; error: it failed with `error`. */
   status: "streaming" | "done" | "stopped" | "error";
   error?: string;
@@ -51,7 +53,12 @@ export function loadChat(storage: Pick<Storage, "getItem"> | null, makeId: () =>
     if (!raw) return newChat(makeId);
     const v = JSON.parse(raw) as { sessionId?: unknown; messages?: unknown };
     if (typeof v.sessionId !== "string" || !UUID.test(v.sessionId) || !Array.isArray(v.messages)) return newChat(makeId);
-    return { sessionId: v.sessionId, messages: v.messages.filter(isMessage).slice(-MAX_KEPT_MESSAGES) };
+    const messages = v.messages
+      .filter(isMessage)
+      .slice(-MAX_KEPT_MESSAGES)
+      // Outcomes come back as JSON (a hole is null); anything else is dropped.
+      .map(({ outcomes, ...m }): ChatMessage => (Array.isArray(outcomes) ? { ...m, outcomes } : m));
+    return { sessionId: v.sessionId, messages };
   } catch {
     return newChat(makeId);
   }

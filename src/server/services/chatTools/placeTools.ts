@@ -1,4 +1,5 @@
 import { fmtNumber } from "../../../shared/format.ts";
+import type { BuildingType } from "../../../shared/types.ts";
 import { inRange, kaltimPoint, latParam, lngParam, point, REGION_PARAM, region, type ServerTool } from "./common.ts";
 import type { PlaceHit } from "./placeSearch.ts";
 
@@ -13,22 +14,26 @@ interface Category {
   label: string;
   /** Mapbox categories that share the id but are not what people mean (a driving school is no school building). */
   exclude?: string[];
+  /** Our building type for such a place, passed to the building panel so a school opens as a school. */
+  type?: BuildingType;
 }
 
 const CATEGORIES = {
-  school: { id: "school", label: "sekolah", exclude: ["driving_school", "language_school", "music_school"] },
-  university: { id: "university", label: "kampus" },
-  hospital: { id: "hospital", label: "rumah sakit" },
-  government_office: { id: "government", label: "kantor pemerintahan" },
-  office: { id: "office", label: "kantor" },
-  mosque: { id: "mosque", label: "masjid" },
-  church: { id: "church", label: "gereja" },
-  place_of_worship: { id: "place_of_worship", label: "tempat ibadah" },
-  hotel: { id: "hotel", label: "hotel" },
-  shopping_mall: { id: "shopping_mall", label: "mal" },
-  market: { id: "market", label: "pasar" },
-  factory: { id: "factory", label: "pabrik" },
-  warehouse: { id: "warehouse", label: "gudang" },
+  school: { id: "school", label: "sekolah", type: "sekolah", exclude: ["driving_school", "language_school", "music_school"] },
+  university: { id: "university", label: "kampus", type: "kampus" },
+  hospital: { id: "hospital", label: "rumah sakit", type: "rumah_sakit" },
+  government_office: { id: "government", label: "kantor pemerintahan", type: "pemerintahan" },
+  office: { id: "office", label: "kantor", type: "kantor" },
+  mosque: { id: "mosque", label: "masjid", type: "ibadah" },
+  church: { id: "church", label: "gereja", type: "ibadah" },
+  place_of_worship: { id: "place_of_worship", label: "tempat ibadah", type: "ibadah" },
+  hotel: { id: "hotel", label: "hotel", type: "hotel" },
+  shopping_mall: { id: "shopping_mall", label: "mal", type: "mal" },
+  // A market hall is a row of shops; "ruko" has the closest electricity use.
+  market: { id: "market", label: "pasar", type: "ruko" },
+  factory: { id: "factory", label: "pabrik", type: "industri" },
+  warehouse: { id: "warehouse", label: "gudang", type: "gudang" },
+  // A fuel station has no type of its own; the building panel guesses it from the footprint.
   gas_station: { id: "gas_station", label: "SPBU" },
 } satisfies Record<string, Category>;
 type CategoryKey = keyof typeof CATEGORIES;
@@ -123,7 +128,10 @@ export const findPlaces: ServerTool = {
     }));
     emit({
       name: "mark_places",
-      input: { label: category.label, places: places.map((p) => ({ name: p.name, lng: p.lng, lat: p.lat })) },
+      input: {
+        label: category.label,
+        places: places.map((p) => ({ name: p.name, lng: p.lng, lat: p.lat, ...(category.type ? { type: category.type } : {}) })),
+      },
     });
     return {
       result: {
