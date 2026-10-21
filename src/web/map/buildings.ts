@@ -359,27 +359,48 @@ export interface SelectAtOptions {
   isStale?: () => boolean;
   /** How far from the point a building centre may be, in px at building zoom (default 28). */
   searchRadiusPx?: number;
+  /**
+   * Called when the user moves the camera during the flight (drag, wheel, keyboard: a camera move that
+   * carries an `originalEvent`). The pick then gives up at once and selects nothing.
+   */
+  onUserMove?: () => void;
 }
 
 /**
  * Selects the building at a point (the chat's "select building" action): flies there at building zoom,
  * waits for the tiles, picks the building whose footprint holds the point (or the nearest one within a
  * few metres) and marks it selected. Returns its estimate request, or null when there is no building there,
- * the interaction is not enabled, or the request went stale during the flight (then nothing is selected).
+ * the interaction is not enabled, the user moved the camera, or the request went stale during the flight
+ * (then nothing is selected).
  */
 export async function selectBuildingAt(map: MapboxMap, lng: number, lat: number, opts: SelectAtOptions = {}): Promise<BuildingInput | null> {
   if (!states.get(map)) return null;
   map.stop();
+  let userMoved = false;
   // Listen before the flight starts (a flight without duration ends at once), and for the first idle
-  // right at its end: that is when the tiles of the new view are in and drawn.
+  // right at its end: that is when the tiles of the new view are in and drawn. A camera move by the user
+  // ends the wait at once: the presenter has taken the camera, and the pick must not fight them for it.
   const ready = new Promise<void>((resolve) => {
-    const timer = setTimeout(resolve, FLY_MS + SETTLE_CAP_MS);
-    map.once("moveend", () => {
-      map.once("idle", () => {
-        clearTimeout(timer);
-        resolve();
-      });
-    });
+    const finish = () => {
+      clearTimeout(timer);
+      map.off("moveend", onMoveEnd);
+      map.off("idle", finish);
+      map.off("movestart", onMoveStart);
+      resolve();
+    };
+    const onMoveEnd = () => {
+      map.off("moveend", onMoveEnd);
+      map.on("idle", finish);
+    };
+    const onMoveStart = (e?: { originalEvent?: unknown }) => {
+      if (!e?.originalEvent) return;
+      userMoved = true;
+      opts.onUserMove?.();
+      finish();
+    };
+    const timer = setTimeout(finish, FLY_MS + SETTLE_CAP_MS);
+    map.on("moveend", onMoveEnd);
+    map.on("movestart", onMoveStart);
   });
   map.flyTo({
     center: [lng, lat],
@@ -393,7 +414,7 @@ export async function selectBuildingAt(map: MapboxMap, lng: number, lat: number,
   });
   await ready;
   const s = states.get(map);
-  if (!s || opts.isStale?.()) return null;
+  if (!s || userMoved || opts.isStale?.()) return null;
   const feature = buildingAt(map, lng, lat, opts.searchRadiusPx);
   return feature ? select(map, s, feature) : null;
 }

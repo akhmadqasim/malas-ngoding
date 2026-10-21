@@ -85,6 +85,37 @@ export interface FlyOptions {
   padding?: { top: number; bottom: number; left: number; right: number };
 }
 
+/** How many region flights each map has started, and who waits for the next one (map/actions.ts). */
+const regionFlights = new WeakMap<MapboxMap, { count: number; waiters: Set<() => void> }>();
+
+function regionFlightsOf(map: MapboxMap) {
+  let entry = regionFlights.get(map);
+  if (!entry) {
+    entry = { count: 0, waiters: new Set() };
+    regionFlights.set(map, entry);
+  }
+  return entry;
+}
+
+/** How many region flights `flyToRegion` has started on this map. */
+export function regionFlightCount(map: MapboxMap): number {
+  return regionFlights.get(map)?.count ?? 0;
+}
+
+/**
+ * Calls `fn` once, when `flyToRegion` next starts a flight on this map. Unlike `movestart`, the idle sway's
+ * bearing frames and the user's gestures do not count. Returns a function that cancels the wait.
+ */
+export function onNextRegionFlight(map: MapboxMap, fn: () => void): () => void {
+  const { waiters } = regionFlightsOf(map);
+  const once = () => {
+    waiters.delete(once);
+    fn();
+  };
+  waiters.add(once);
+  return () => void waiters.delete(once);
+}
+
 /** Smooth camera move centred on a region. */
 export function flyToRegion(map: MapboxMap, centroid: [number, number], opts: FlyOptions = {}): void {
   const pitch = opts.pitch ?? 58;
@@ -108,6 +139,9 @@ export function flyToRegion(map: MapboxMap, centroid: [number, number], opts: Fl
     curve: 1.2,
     essential: true,
   });
+  const flights = regionFlightsOf(map);
+  flights.count++;
+  for (const fn of [...flights.waiters]) fn();
 }
 
 const IDLE_MS = 20_000;

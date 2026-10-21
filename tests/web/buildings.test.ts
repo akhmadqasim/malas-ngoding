@@ -217,6 +217,32 @@ describe("selectBuildingAt (the chat's select building action)", () => {
     const f = fakeMap();
     expect(await selectBuildingAt(f.map, 117.1602, -0.4998)).toBeNull();
   });
+
+  test("a drag, wheel or key during the flight ends the pick at once: nothing is selected", async () => {
+    const f = fakeMap({ zoom: 8, rendered: [school], holdFlights: true });
+    enableBuildingInteraction(f.map, () => {}, "dark");
+    let told = 0;
+    const picking = selectBuildingAt(f.map, 117.1602, -0.4998, { onUserMove: () => told++ });
+    // Mapbox stops the flight (moveend), then the gesture's own move starts with its originalEvent.
+    f.fire("moveend");
+    f.fire("movestart", { originalEvent: { type: "wheel" } });
+    expect(await picking).toBeNull();
+    expect(told).toBe(1);
+    expect(f.states.get(8)).toBeUndefined();
+    // Every listener of the wait is gone, so a later idle or move does nothing.
+    for (const type of ["movestart", "moveend", "idle"]) expect(f.listenerCount(type)).toBe(0);
+  });
+
+  test("a camera move without an originalEvent (the flight itself, a program) is not the user", async () => {
+    const f = fakeMap({ zoom: 8, rendered: [school], holdFlights: true });
+    enableBuildingInteraction(f.map, () => {}, "dark");
+    let told = 0;
+    const picking = selectBuildingAt(f.map, 117.1602, -0.4998, { onUserMove: () => told++ });
+    f.fire("movestart", {});
+    f.land();
+    expect((await picking)?.featureId).toBe("mapbox:8");
+    expect(told).toBe(0);
+  });
 });
 
 describe("a click on empty ground", () => {

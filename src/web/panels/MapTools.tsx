@@ -3,7 +3,7 @@ import { Button, Popover, Separator, Toolbar, Tooltip } from "@heroui/react";
 import type { Map as MapboxMap } from "mapbox-gl";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { flyToProvince } from "../map/camera.ts";
-import { useAppStore } from "../store.ts";
+import { claimCamera, useAppStore } from "../store.ts";
 import { MethodologyPanel } from "./MethodologyPanel.tsx";
 
 /**
@@ -66,19 +66,28 @@ export function MapTools() {
     const store = useAppStore.getState();
     // With a region open, closing it flies back (MapView); otherwise fly back from wherever the view is.
     if (store.selectedRegionId) store.selectRegion(null);
-    else if (map) flyToProvince(map);
+    else if (map) {
+      claimCamera();
+      flyToProvince(map);
+    }
+  };
+  /** A tool moves the camera for the presenter: a chat building pick in flight gives up (store.ts). */
+  const move = (fn: (m: MapboxMap) => void) => () => {
+    if (!map) return;
+    claimCamera();
+    fn(map);
   };
 
   return (
     <Toolbar aria-label="Alat peta" orientation={orientation} className="map-tools">
-      <Tool label="Perbesar" onPress={() => map?.zoomIn()}>
+      <Tool label="Perbesar" onPress={move((m) => m.zoomIn())}>
         <Plus aria-hidden />
       </Tool>
-      <Tool label="Perkecil" onPress={() => map?.zoomOut()}>
+      <Tool label="Perkecil" onPress={move((m) => m.zoomOut())}>
         <Minus aria-hidden />
       </Tool>
       <Separator className="map-tools__rule" />
-      <Tool label="Hadapkan ke utara" onPress={() => map?.resetNorth()}>
+      <Tool label="Hadapkan ke utara" onPress={move((m) => m.resetNorth())}>
         <Compass aria-hidden ref={needle} />
       </Tool>
       <Tool label="Kembali ke seluruh Kalimantan Timur" onPress={backToProvince}>

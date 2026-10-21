@@ -3,6 +3,7 @@ import type { Map as MapboxMap } from "mapbox-gl";
 import { actionChips, actionLabel, regionName } from "../../src/web/chat/actionLabels.ts";
 import type { MarkedPlace } from "../../src/web/chat/placesLayer.ts";
 import { type ActionTarget, actionQueue, fitMarkedPlaces, needsPlacesFit, runAction } from "../../src/web/map/actions.ts";
+import { flyToRegion } from "../../src/web/map/camera.ts";
 import { useAppStore } from "../../src/web/store.ts";
 import type { BuildingEstimate } from "../../src/shared/types.ts";
 
@@ -19,10 +20,11 @@ function fakeMap() {
   const map = {
     flyTo: (o: Flight) => flights.push(o),
     isMoving: () => false,
-    once: (_type: string, f: () => void) => void moveStart.push(f),
+    on: (type: string, f: () => void) => void (type === "movestart" && moveStart.push(f)),
+    once: (type: string, f: () => void) => void (type === "movestart" && moveStart.push(f)),
     off: () => {},
-    /** MapView starting its region flight. */
-    startMoving: () => moveStart.splice(0).forEach((f) => f()),
+    /** A camera move that is not a region flight: the idle sway turning the bearing one frame. */
+    swayFrame: () => moveStart.splice(0).forEach((f) => f()),
     getPitch: () => 55,
     getBearing: () => -14,
     getZoom: () => 6.55,
@@ -32,14 +34,16 @@ function fakeMap() {
     easeTo: (o: Flight) => flights.push(o),
     cameraForBounds: () => undefined,
   };
-  return { map: map as unknown as MapboxMap, flights, startMoving: map.startMoving };
+  return { map: map as unknown as MapboxMap, flights, swayFrame: map.swayFrame };
 }
 
 const BUILDING = { featureId: "b1", type: "sekolah" } as unknown as BuildingEstimate;
 
 let flights: Flight[];
 let picked: [number, number][];
-let startMoving: () => void;
+/** MapView starting its region flight (on the map in the store now). */
+const startMoving = () => flyToRegion(useAppStore.getState().map!, [117.15, -0.5]);
+let swayFrame: () => void;
 let marked: { places: MarkedPlace[]; pick: (lngLat: [number, number]) => void } | null;
 let centroids: string[];
 let target: ActionTarget;
@@ -47,7 +51,7 @@ let target: ActionTarget;
 beforeEach(() => {
   const fake = fakeMap();
   flights = fake.flights;
-  startMoving = fake.startMoving;
+  swayFrame = fake.swayFrame;
   marked = null;
   centroids = [];
   useAppStore.setState({
@@ -63,7 +67,12 @@ beforeEach(() => {
   });
   picked = [];
   // The building lookup itself is lane buildings' (tests/web/buildingStore.test.ts); here it only records.
-  useAppStore.setState({ selectBuildingAt: async (at: [number, number]) => void picked.push(at) });
+  useAppStore.setState({
+    selectBuildingAt: async (at: [number, number]) => {
+      picked.push(at);
+      useAppStore.setState({ buildingStatus: "loading" });
+    },
+  });
   target = {
     getState: () => useAppStore.getState(),
     regionCentroid: async (id) => {
@@ -110,6 +119,18 @@ describe("runAction", () => {
     expect(picked).toEqual([[117.1, -0.5]]);
   });
 
+  test("an idle sway frame during that wait does not count as the region flight", async () => {
+    await runAction({ name: "fly_to_region", input: { region: "kutai-kartanegara" } }, target);
+    const picking = runAction({ name: "select_building_at", input: { lng: 117.1, lat: -0.5 } }, target);
+    await Bun.sleep(10);
+    swayFrame();
+    await Bun.sleep(10);
+    expect(picked).toEqual([]);
+    startMoving();
+    await picking;
+    expect(picked).toEqual([[117.1, -0.5]]);
+  });
+
   test("with the region already open, a building picked right after re-flying there takes the camera over", async () => {
     // The review's repro: Samarinda open, then "Tunjukkan gedung sekolah di Samarinda".
     useAppStore.setState({ selectedRegionId: "samarinda" });
@@ -139,6 +160,19 @@ describe("runAction", () => {
     });
     expect(await runAction({ name: "select_building_at", input: { lng: 117.1, lat: -0.5 } }, target)).toBe("ok");
     expect(picked).toHaveLength(2);
+  });
+
+  test("a pick the presenter interrupted is not tried again and leaves the camera alone", async () => {
+    // The store gave up (a drag, wheel, key, region click or map tool during the flight) and closed the panel.
+    useAppStore.setState({
+      selectBuildingAt: async (at) => {
+        picked.push(at);
+        useAppStore.setState({ buildingStatus: "idle" });
+      },
+    });
+    expect(await runAction({ name: "select_building_at", input: { lng: 117.1, lat: -0.5 } }, target)).toBe("failed");
+    expect(picked).toHaveLength(1);
+    expect(flights).toHaveLength(0);
   });
 
   test("a place the chat found is selected with its type and name", async () => {

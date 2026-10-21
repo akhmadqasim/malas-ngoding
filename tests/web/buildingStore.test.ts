@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import type { BuildingEstimate, BuildingInput } from "../../src/shared/types.ts";
 import { disableBuildingInteraction, enableBuildingInteraction } from "../../src/web/map/buildings.ts";
-import { useAppStore } from "../../src/web/store.ts";
+import { claimCamera, useAppStore } from "../../src/web/store.ts";
 import { clearTokenCache } from "../../src/web/theme.ts";
 import { fakeBuildingMap, square } from "./fakeBuildingMap.ts";
 
@@ -227,6 +227,51 @@ describe("selectBuildingAt (the chat's select building action)", () => {
     expect(state().buildingStatus).toBe("idle");
     expect(requests).toHaveLength(0);
     expect(f.states.get(8)).toBeUndefined();
+    disableBuildingInteraction(f.map);
+  });
+
+  test("a gesture on the map during the flight closes the panel; nothing is selected or fetched", async () => {
+    const f = fakeBuildingMap({ zoom: 8, rendered: [school], holdFlights: true });
+    enableBuildingInteraction(f.map, (i) => void state().openBuilding(i), "dark");
+    useAppStore.setState({ map: f.map });
+    const done = state().selectBuildingAt([117.1602, -0.4998]);
+    expect(state().buildingStatus).toBe("loading");
+    f.fire("movestart", { originalEvent: { type: "mousedown" } });
+    await done;
+    expect(state().buildingStatus).toBe("idle");
+    expect(state().selectedBuildingAt).toBeNull();
+    expect(requests).toHaveLength(0);
+    expect(f.states.get(8)).toBeUndefined();
+    disableBuildingInteraction(f.map);
+  });
+
+  test("a region click or a map tool during the flight gives the camera to the presenter", async () => {
+    for (const takeOver of [() => state().selectRegion("samarinda"), () => claimCamera()]) {
+      const f = fakeBuildingMap({ zoom: 8, rendered: [school], holdFlights: true });
+      enableBuildingInteraction(f.map, (i) => void state().openBuilding(i), "dark");
+      useAppStore.setState({ map: f.map, selectedRegionId: null });
+      const done = state().selectBuildingAt([117.1602, -0.4998]);
+      takeOver();
+      // The region flight (or the tool's zoom) cuts the building flight short; the map then settles.
+      f.land();
+      await done;
+      expect(state().buildingStatus).toBe("idle");
+      expect(requests).toHaveLength(0);
+      expect(f.states.get(8)).toBeUndefined();
+      disableBuildingInteraction(f.map);
+    }
+  });
+
+  test("a region selected before the pick starts (the same answer's fly_to_region) does not stop it", async () => {
+    const f = fakeBuildingMap({ zoom: 8, rendered: [school] });
+    enableBuildingInteraction(f.map, (i) => void state().openBuilding(i), "dark");
+    useAppStore.setState({ map: f.map });
+    state().selectRegion("samarinda");
+    const done = state().selectBuildingAt([117.1602, -0.4998]);
+    await requested(1);
+    requests[0]!.answer();
+    await done;
+    expect(state().buildingStatus).toBe("ready");
     disableBuildingInteraction(f.map);
   });
 

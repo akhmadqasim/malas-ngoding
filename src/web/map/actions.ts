@@ -5,7 +5,7 @@ import { type MarkedPlace, showPlaces } from "../chat/placesLayer.ts";
 import type { ChatAction } from "../chat/sse.ts";
 import { type AppState, type BuildingHint, type LayerKey, type Metric, type PanelTab, type RainMode, useAppStore } from "../store.ts";
 import { BUILDING_ZOOM, buildingViewPadding, type Padding, revealBuilding } from "./buildings.ts";
-import { FLY_MS, flyToProvince, flyToRegion } from "./camera.ts";
+import { FLY_MS, flyToProvince, flyToRegion, onNextRegionFlight, regionFlightCount } from "./camera.ts";
 
 // Turns the map actions of the AI chat (server `action` events) into store and camera calls.
 
@@ -117,33 +117,37 @@ function flyTo(map: MapboxMap, target: ActionTarget, center: [number, number], z
   });
 }
 
-/** When the chat last selected a region on a map; MapView starts that flight once the region's centre has loaded. */
-const regionAskedAt = new WeakMap<MapboxMap, number>();
+/**
+ * When the chat last selected a region on a map, and how many region flights had started by then; MapView
+ * starts that flight once the region's centre has loaded.
+ */
+const regionAskedAt = new WeakMap<MapboxMap, { at: number; flights: number }>();
 /** How long a region flight may take to start after the selection (the region detail request). */
 export const REGION_FLIGHT_WAIT_MS = 2500;
 
 /**
  * A camera move right after a region selection waits until MapView's region flight has started (or the
  * wait is over), so it takes over that flight instead of being overridden by it when the region's centre
- * arrives a moment later.
+ * arrives a moment later. It waits for the region flight itself (`flyToRegion`), not any `movestart`: the
+ * idle sway turns the camera every frame and would end the wait too early.
  */
 function afterRegionFlightStarts(map: MapboxMap): Promise<void> {
   const asked = regionAskedAt.get(map);
   if (asked === undefined) return Promise.resolve();
-  const since = Date.now() - asked;
-  if (since > REGION_FLIGHT_WAIT_MS || map.isMoving()) {
+  const since = Date.now() - asked.at;
+  if (since > REGION_FLIGHT_WAIT_MS || regionFlightCount(map) > asked.flights) {
     regionAskedAt.delete(map);
     return Promise.resolve();
   }
   return new Promise((resolve) => {
     const done = () => {
       clearTimeout(timer);
-      map.off("movestart", done);
+      cancel();
       regionAskedAt.delete(map);
       resolve();
     };
     const timer = setTimeout(done, REGION_FLIGHT_WAIT_MS - since);
-    map.once("movestart", done);
+    const cancel = onNextRegionFlight(map, done);
   });
 }
 
@@ -206,7 +210,8 @@ export async function fitMarkedPlaces(target: ActionTarget = appTarget): Promise
  * Selects the building at a point as a click would: the camera flies there and the building panel opens.
  * A place the chat found passes its type and name along, so a school opens as a school. If the pick found
  * nothing because a region flight cut in, it tries once more; if there is still no building, the camera at
- * least goes there. Returns "failed" when no building was selected.
+ * least goes there. A pick the presenter interrupted (the store closed the panel) is not retried. Returns
+ * "failed" when no building was selected.
  */
 async function selectBuilding(target: ActionTarget, lngLat: [number, number]): Promise<ActionOutcome> {
   const map = target.getState().map;
@@ -221,6 +226,8 @@ async function selectBuilding(target: ActionTarget, lngLat: [number, number]): P
     await select();
     after = target.getState();
   }
+  // The presenter moved the camera during the flight: the pick gave up and closed the panel. Leave the camera.
+  if (after.buildingStatus === "idle") return "failed";
   if (!after.map) return after.buildingStatus === "empty" ? "failed" : "ok";
   if (after.buildingStatus === "empty") {
     if (after.map.getZoom() < CITY_ZOOM) flyTo(after.map, target, lngLat, BUILDING_ZOOM);
@@ -229,7 +236,7 @@ async function selectBuilding(target: ActionTarget, lngLat: [number, number]): P
   // Lane buildings frames the building beside its panel; the chat panel sits there too, so slide the
   // building (and the name of a marked place) out from under it when needed.
   const padding = target.viewPadding();
-  if (padding && after.buildingStatus !== "idle") {
+  if (padding) {
     const w = after.map.getCanvas().clientWidth;
     const withLabel = place && w - padding.left - padding.right - LABEL_ROOM > 2 * PANEL_GAP ? { ...padding, right: padding.right + LABEL_ROOM } : padding;
     revealBuilding(after.map, after.selectedBuildingAt ?? lngLat, withLabel);
@@ -270,7 +277,7 @@ export async function runAction(
         // A region is the province-level view: the building panel steps aside.
         if (state.buildingStatus !== "idle") state.closeBuilding();
         if (state.selectedRegionId !== id) {
-          if (state.map) regionAskedAt.set(state.map, Date.now());
+          if (state.map) regionAskedAt.set(state.map, { at: Date.now(), flights: regionFlightCount(state.map) });
           state.selectRegion(id); // MapView flies to a newly selected region.
           return "ok";
         }

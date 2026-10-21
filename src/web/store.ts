@@ -92,7 +92,8 @@ export interface AppState {
    * Selects the building at a point as a click would (the chat's "select building" action): flies the
    * camera there, opens the panel and fetches the estimate. With no building at the point the panel says
    * so (status "empty"). A `hint` from a place search gives the type when no POI sits at the building and
-   * names the place in the panel. A newer click, select or close during the flight wins.
+   * names the place in the panel. A newer click, select or close during the flight wins; so does a camera
+   * move by the user (a gesture on the map, a region selection, a map tool), which closes the panel.
    */
   selectBuildingAt: (lngLat: [number, number], hint?: BuildingHint) => Promise<void>;
   setMetric: (metric: Metric) => void;
@@ -111,6 +112,16 @@ export const linkedLightMode: LightMode = typeof window === "undefined" ? "auto"
 
 /** Only the newest building request may update the panel; an older one that answers late is dropped. */
 let buildingRequest = 0;
+/**
+ * Counts region selections and map tool moves. A chat building pick that sees it change during its flight
+ * gives up: the presenter (or a newer answer) has sent the camera elsewhere.
+ */
+let cameraClaims = 0;
+
+/** The user moved the camera with a map tool: a chat building pick in flight gives up. */
+export function claimCamera(): void {
+  cameraClaims++;
+}
 
 const NO_BUILDING = "Tidak ada gedung di titik itu. Coba perbesar peta lalu klik gedungnya langsung.";
 const NO_MAP = "Peta belum siap. Tunggu sebentar lalu coba lagi.";
@@ -138,7 +149,10 @@ export const useAppStore = create<AppState>()((set, get) => ({
   solarSizing: null,
 
   setMap: (map) => set({ map }),
-  selectRegion: (selectedRegionId) => set({ selectedRegionId, hoveredRegionId: null, hoverOrigin: null }),
+  selectRegion: (selectedRegionId) => {
+    cameraClaims++;
+    set({ selectedRegionId, hoveredRegionId: null, hoverOrigin: null });
+  },
   setHoveredRegion: (hoveredRegionId: string | null, origin?: HoverOrigin) =>
     set({ hoveredRegionId, hoverOrigin: hoveredRegionId === null ? null : (origin ?? null) }),
   endListHover: (id) =>
@@ -193,11 +207,27 @@ export const useAppStore = create<AppState>()((set, get) => ({
       buildingName: hint?.name?.trim() || null,
     });
     const map = get().map;
-    const stale = () => run !== buildingRequest;
+    const claims = cameraClaims;
+    let userMoved = false;
+    // A drag, wheel or key on the map, a region click or a map tool during the flight: the presenter has the
+    // camera now, so the pick gives up and the panel closes instead of flying back to the building.
+    const tookOver = () => userMoved || claims !== cameraClaims;
+    const stale = () => run !== buildingRequest || tookOver();
     // A named place from a search may point at its yard or the street: look a little further around it.
     const searchRadiusPx = hint ? PLACE_SEARCH_RADIUS_PX : undefined;
-    const input = map ? await pickBuildingOnMap(map, lng, lat, { padding: buildingViewPadding(), isStale: stale, searchRadiusPx }) : null;
-    if (stale()) return;
+    const input = map
+      ? await pickBuildingOnMap(map, lng, lat, {
+          padding: buildingViewPadding(),
+          isStale: stale,
+          searchRadiusPx,
+          onUserMove: () => (userMoved = true),
+        })
+      : null;
+    if (run !== buildingRequest) return;
+    if (tookOver()) {
+      get().closeBuilding();
+      return;
+    }
     if (!input) {
       set({ buildingStatus: "empty", buildingError: map ? NO_BUILDING : NO_MAP });
       return;
