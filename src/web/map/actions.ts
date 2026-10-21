@@ -161,10 +161,14 @@ export function forgetMarkedPlaces(): void {
   marked = [];
 }
 
-/** Moves the camera so every marked place is in view, clear of the panels. False when nothing is marked. */
-export function fitMarkedPlaces(target: ActionTarget = appTarget): boolean {
+/**
+ * Moves the camera so every marked place is in view, clear of the panels. A region flight the same answer
+ * asked for starts first, so it cannot override the fit. False when nothing is marked.
+ */
+export async function fitMarkedPlaces(target: ActionTarget = appTarget): Promise<boolean> {
   const map = target.getState().map;
   if (!map || marked.length === 0) return false;
+  await afterRegionFlightStarts(map);
   if (marked.length === 1) {
     const only = marked[0]!;
     flyTo(map, target, [only.lng, only.lat], PLACES_MAX_ZOOM);
@@ -330,10 +334,7 @@ export async function runAction(
         target.showPlaces(state.map, places, (lngLat) => {
           void selectBuilding(target, lngLat).catch(() => {});
         });
-        if (opts.replay) {
-          await afterRegionFlightStarts(state.map);
-          fitMarkedPlaces(target);
-        }
+        if (opts.replay) await fitMarkedPlaces(target);
         return "ok";
       }
       default:

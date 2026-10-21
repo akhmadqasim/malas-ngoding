@@ -104,7 +104,7 @@ export function useChat(opts: { fetch?: typeof fetch } = {}): UseChat {
         } else if (event.type === "done") {
           update(answer.id, (m) => ({ ...m, status: "done" }));
           // Places were marked but the camera never went to one: bring them into view.
-          if (needsPlacesFit(actions)) void queue.current(async () => fitMarkedPlaces());
+          if (needsPlacesFit(actions)) void queue.current(() => fitMarkedPlaces());
         } else update(answer.id, (m) => ({ ...m, status: "error", error: event.message }));
       };
       const actions: ChatAction[] = [];

@@ -151,6 +151,25 @@ describe("runAction", () => {
     expect(hints).toEqual([{ type: "sekolah", name: "SMA Negeri 1" }, undefined]);
   });
 
+  test("the fit after an answer waits for the region flight that answer started", async () => {
+    const places = [
+      { name: "RS A", lng: 117.0, lat: -0.4 },
+      { name: "RS B", lng: 117.2, lat: -0.6 },
+    ];
+    const cameras: unknown[] = [];
+    useAppStore.setState({
+      map: { ...(useAppStore.getState().map as object), cameraForBounds: (b: unknown) => (cameras.push(b), { center: [117.1, -0.5], zoom: 11 }) } as never,
+    });
+    await runAction({ name: "fly_to_region", input: { region: "kutai-kartanegara" } }, target);
+    await runAction({ name: "mark_places", input: { label: "rumah sakit", places } }, target);
+    const fit = fitMarkedPlaces(target);
+    await Bun.sleep(20);
+    expect(cameras).toHaveLength(0); // MapView's region flight has not started yet
+    startMoving();
+    expect(await fit).toBe(true);
+    expect(cameras).toHaveLength(1);
+  });
+
   test("marked places come into view when their button is pressed, or when the answer never went to one", async () => {
     const places = [
       { name: "RS A", lng: 117.0, lat: -0.4 },
@@ -173,7 +192,7 @@ describe("runAction", () => {
         [117.2, -0.4],
       ],
     ]);
-    expect(fitMarkedPlaces(fit)).toBe(true);
+    expect(await fitMarkedPlaces(fit)).toBe(true);
     expect(needsPlacesFit([{ name: "fly_to_region", input: {} }, { name: "mark_places", input: {} }])).toBe(true);
     expect(needsPlacesFit([{ name: "mark_places", input: {} }, { name: "select_building_at", input: {} }])).toBe(false);
     expect(needsPlacesFit([{ name: "set_metric", input: {} }])).toBe(false);
