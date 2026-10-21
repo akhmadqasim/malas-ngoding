@@ -3,7 +3,7 @@ import { Clouds, Droplet, Sun } from "@gravity-ui/icons";
 import { motion } from "motion/react";
 import { type PointerEvent, useEffect, useMemo, useRef, useState } from "react";
 import { fmtNumber } from "../../shared/format.ts";
-import { isRainyHour } from "../../shared/pvForecast.ts";
+import { dropSentence, isRainyHour, NEAR_CLEAR_PCT } from "../../shared/pvForecast.ts";
 import type { PvHour } from "../../shared/types.ts";
 import { api, type WeatherResponse } from "../api.ts";
 import { Estimate } from "../components/Estimate.tsx";
@@ -29,8 +29,6 @@ import {
 /** Panel size used when the building has no simulated size (simulation failed, or the roof is too small). */
 const SAMPLE_KWP = 1;
 
-/** Below this drop a day reads "hampir sama dengan langit cerah". */
-const NEAR_CLEAR_PCT = 5;
 
 const SKY_TEXT: Record<Sky, string> = { cerah: "Cerah", berawan: "Berawan", hujan: "Hujan" };
 const SKY_ICON = { cerah: Sun, berawan: Clouds, hujan: Droplet } as const;
@@ -40,7 +38,7 @@ type Sizing = { kWp: number; sample: boolean };
 /**
  * The Cuaca tab: the Open-Meteo forecast for this building, turned into panel output. The panels are the
  * size the Surya tab simulated (or the default simulation); the hourly chart covers 72 hours with the rain
- * hours shaded, and each day says how much rain costs against the best clear day.
+ * hours shaded, and each day says how far it falls below a clear sky at this spot (model) and why.
  */
 export function WeatherTab(props: BuildingTabProps) {
   return <WeatherForecast key={props.building.featureId} {...props} />;
@@ -314,7 +312,7 @@ function DayList({ rows }: { rows: DayRow[] }) {
                       produksi turun <span className="num">{r.dropPct}%</span> karena {r.cause}
                     </>
                   ) : (
-                    "hampir sama dengan langit cerah"
+                    dropSentence(r)
                   )}
                 </span>
               )}
@@ -323,7 +321,7 @@ function DayList({ rows }: { rows: DayRow[] }) {
         })}
       </ol>
       <p className="sw-chart__unit">
-        Turunnya dibanding langit cerah di titik ini, untuk panel yang sama, <Estimate />
+        Turunnya dibanding langit cerah (model) di titik ini, untuk panel yang sama, <Estimate />
       </p>
     </section>
   );

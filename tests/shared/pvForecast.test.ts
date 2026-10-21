@@ -1,5 +1,15 @@
 import { describe, expect, test } from "bun:test";
-import { clearSkyDayKwh, clearSkyGhi, isRainyHour, nearestHourGapMs, pvFromForecast, summariseDays, witaMs } from "../../src/shared/pvForecast.ts";
+import {
+  clearSkyDayKwh,
+  clearSkyGhi,
+  dayAgainstClearSky,
+  dropSentence,
+  isRainyHour,
+  nearestHourGapMs,
+  pvFromForecast,
+  summariseDays,
+  witaMs,
+} from "../../src/shared/pvForecast.ts";
 
 const h = (time: string, ghiWm2: number, precipMm = 0, weatherCode = 0) => ({ time, ghiWm2, cloudPct: 10, precipMm, weatherCode });
 
@@ -66,5 +76,24 @@ describe("one rain rule and one clock", () => {
     expect(witaMs("2026-10-21T08:00")).toBe(Date.UTC(2026, 9, 21, 0, 0));
     expect(nearestHourGapMs([{ time: "2026-10-21T08:00" }, { time: "2026-10-21T10:00" }], Date.UTC(2026, 9, 21, 1, 30))).toBe(30 * 60_000);
     expect(nearestHourGapMs([], 0)).toBe(Number.POSITIVE_INFINITY);
+  });
+});
+
+describe("one clear-sky verdict per day, shared by the Cuaca tab and the chat", () => {
+  const site = { lat: -0.5, lng: 117.15, kWp: 1 };
+  const clear = clearSkyDayKwh("2026-10-22", site.lat, site.lng, 1);
+  const hour = (hh: number, precipMm = 0) => ({ time: `2026-10-22T${String(hh).padStart(2, "0")}:00`, precipMm, weatherCode: precipMm ? 61 : 1, cloudPct: 30 });
+  test("a day half as good as a clear sky with afternoon rain: turun 50% karena hujan", () => {
+    const hours = [hour(10), hour(14, 0.6), hour(15, 0.6), hour(16)];
+    const v = dayAgainstClearSky({ date: "2026-10-22", pvKwh: clear * 0.5, rainy: true }, hours, site);
+    expect(v).toMatchObject({ sky: "hujan", cause: "hujan", dropPct: 50 });
+    expect(dropSentence(v)).toBe("produksi turun 50% karena hujan");
+  });
+  test("a gap under 10% is not blamed on cloud: the model has no haze term", () => {
+    const v = dayAgainstClearSky({ date: "2026-10-22", pvKwh: clear * 0.92, rainy: false }, [hour(12)], site);
+    expect(v.dropPct).toBe(8);
+    expect(dropSentence(v)).toBe("hampir sama dengan langit cerah (model)");
+    expect(dropSentence({ ...v, dropPct: 10 })).toBe("produksi turun 10% karena awan");
+    expect(dropSentence({ ...v, dropPct: null })).toBeNull();
   });
 });

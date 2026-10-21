@@ -1,5 +1,5 @@
 import { fmtNumber } from "../../shared/format.ts";
-import { clearSkyDayKwh, clearSkyGhi, isRainyHour, type summariseDays, witaMs } from "../../shared/pvForecast.ts";
+import { dayAgainstClearSky, type DayVerdict, isRainyHour, type PanelSite, type summariseDays, witaMs } from "../../shared/pvForecast.ts";
 import type { BuildingEstimate, PvHour } from "../../shared/types.ts";
 import type { SolarRequest } from "../api.ts";
 
@@ -15,8 +15,6 @@ export const ROOF_MAX_M2 = 50_000;
 export const BACKUP = { min: 0, max: 12, step: 1, initial: 4 } as const;
 /** The hourly chart covers this many hours from now. */
 export const WINDOW_HOURS = 72;
-/** A dry day whose daylight hours average this much cloud reads "berawan". */
-const CLOUDY_PCT = 60;
 
 const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n));
 
@@ -74,62 +72,25 @@ export function hourLabel(time: string): string {
   return time.slice(11, 16).replace(":", ".");
 }
 
-export type Sky = "cerah" | "berawan" | "hujan";
-/** What the drop is put down to: rain that mattered, a little daylight rain, or cloud alone. */
-export type DropCause = "hujan" | "awan dan hujan" | "awan";
+export type { DropCause, PanelSite, Sky } from "../../shared/pvForecast.ts";
 
-export interface DayRow {
+export interface DayRow extends DayVerdict {
   date: string;
   label: string;
   pvKwh: number;
-  /** What the same panels would make under a clear sky here on that date. */
-  clearKwh: number;
-  sky: Sky;
-  cause: DropCause;
-  /** 1 - output / clear sky, in whole %, never below 0; null without panels. */
-  dropPct: number | null;
 }
 
 type Day = ReturnType<typeof summariseDays>[number];
 
-/** Daylight rain that counts as a rainy day: this many rain hours, or this much rain. */
-const RAIN_DAY_HOURS = 2;
-const RAIN_DAY_MM = 1;
-
-/** Where the panels are and how big they are, for the clear-sky reference. */
-export interface PanelSite {
-  lat: number;
-  lng: number;
-  kWp: number;
-}
-
 /**
  * One row per forecast day from today: label, output, sky, and how far the day falls below what the same
- * panels make under a clear sky at this spot ("produksi turun X% karena ..."). Rain and cloud are read in
- * daylight only (rain at night costs no output); a day is "hujan" from 2 daylight rain hours or 1 mm.
+ * panels make under a clear sky at this spot (`dayAgainstClearSky`, shared with the chat).
  */
 export function dayRows(days: Day[], hours: PvHour[], nowMs: number, site: PanelSite): DayRow[] {
   const today = witaDate(nowMs);
   return days
     .filter((d) => d.date >= today)
-    .map((d) => {
-      // Daylight: the sun is up during the hour before the label (Open-Meteo hours are means of that hour).
-      const light = hours.filter((h) => h.time.startsWith(d.date) && clearSkyGhi(witaMs(h.time) - 30 * 60_000, site.lat, site.lng) > 0);
-      const rainHours = light.filter(isRainyHour);
-      const rainMm = rainHours.reduce((s, h) => s + h.precipMm, 0);
-      const cloud = light.length ? light.reduce((s, h) => s + h.cloudPct, 0) / light.length : 0;
-      const wet = light.length ? rainHours.length >= RAIN_DAY_HOURS || rainMm >= RAIN_DAY_MM : d.rainy;
-      const clearKwh = clearSkyDayKwh(d.date, site.lat, site.lng, site.kWp);
-      return {
-        date: d.date,
-        label: dayLabel(d.date, today),
-        pvKwh: d.pvKwh,
-        clearKwh,
-        sky: wet ? "hujan" : cloud >= CLOUDY_PCT ? "berawan" : "cerah",
-        cause: wet ? "hujan" : rainHours.length > 0 ? "awan dan hujan" : "awan",
-        dropPct: clearKwh > 0 ? Math.max(0, Math.round((1 - d.pvKwh / clearKwh) * 100)) : null,
-      };
-    });
+    .map((d) => ({ date: d.date, label: dayLabel(d.date, today), pvKwh: d.pvKwh, ...dayAgainstClearSky(d, hours, site) }));
 }
 
 /** A clean axis top at or above `value`, with three ticks (0, middle, top). */

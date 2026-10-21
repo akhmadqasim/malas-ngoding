@@ -94,3 +94,66 @@ export function clearSkyDayKwh(date: string, lat: number, lng: number, kWp: numb
   }
   return (size * wh * pr) / 1000;
 }
+
+export type Sky = "cerah" | "berawan" | "hujan";
+/** What a day's drop is put down to: rain that mattered, a little daylight rain, or cloud alone. */
+export type DropCause = "hujan" | "awan dan hujan" | "awan";
+
+/** Where the panels are and how big they are, for the clear-sky reference. */
+export interface PanelSite {
+  lat: number;
+  lng: number;
+  kWp: number;
+}
+
+export interface DayVerdict {
+  /** What the same panels would make under a clear sky here on that date (model). */
+  clearKwh: number;
+  sky: Sky;
+  cause: DropCause;
+  /** 1 - output / clear sky, in whole %, never below 0; null without panels. */
+  dropPct: number | null;
+}
+
+/** Daylight rain that makes a rainy day: this many rain hours, or this much rain. */
+const RAIN_DAY_HOURS = 2;
+const RAIN_DAY_MM = 1;
+/** A dry day whose daylight hours average this much cloud reads "berawan". */
+const CLOUDY_PCT = 60;
+/**
+ * Below this gap a day is "hampir sama dengan langit cerah (model)": the clear-sky model has no haze or
+ * humidity term, so a small gap on a cloudless tropical day is not cloud.
+ */
+export const NEAR_CLEAR_PCT = 10;
+
+/**
+ * How one forecast day compares with a clear sky at the panels' spot: the sky, what the drop is put down to,
+ * and the drop in %. Rain and cloud count in daylight only (rain at night costs no output); a day is "hujan"
+ * from 2 daylight rain hours or 1 mm. Without hours for the date it falls back to `day.rainy`. The Cuaca tab
+ * and the chat use this, so both give the same numbers.
+ */
+export function dayAgainstClearSky(
+  day: { date: string; pvKwh: number; rainy: boolean },
+  hours: { time: string; precipMm: number; weatherCode: number; cloudPct: number }[],
+  site: PanelSite,
+): DayVerdict {
+  // Daylight: the sun is up during the hour before the label (Open-Meteo hours are means of that hour).
+  const light = hours.filter((h) => h.time.startsWith(day.date) && clearSkyGhi(witaMs(h.time) - 30 * 60_000, site.lat, site.lng) > 0);
+  const rainHours = light.filter(isRainyHour);
+  const rainMm = rainHours.reduce((s, h) => s + h.precipMm, 0);
+  const cloud = light.length ? light.reduce((s, h) => s + h.cloudPct, 0) / light.length : 0;
+  const wet = light.length ? rainHours.length >= RAIN_DAY_HOURS || rainMm >= RAIN_DAY_MM : day.rainy;
+  const clearKwh = clearSkyDayKwh(day.date, site.lat, site.lng, site.kWp);
+  return {
+    clearKwh,
+    sky: wet ? "hujan" : cloud >= CLOUDY_PCT ? "berawan" : "cerah",
+    cause: wet ? "hujan" : rainHours.length > 0 ? "awan dan hujan" : "awan",
+    dropPct: clearKwh > 0 ? Math.max(0, Math.round((1 - day.pvKwh / clearKwh) * 100)) : null,
+  };
+}
+
+/** The sentence for a day: "produksi turun 35% karena hujan", or "hampir sama dengan langit cerah (model)". */
+export function dropSentence(v: Pick<DayVerdict, "dropPct" | "cause">): string | null {
+  if (v.dropPct === null) return null;
+  return v.dropPct < NEAR_CLEAR_PCT ? "hampir sama dengan langit cerah (model)" : `produksi turun ${v.dropPct}% karena ${v.cause}`;
+}
