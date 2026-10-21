@@ -48,6 +48,33 @@ describe("simulateSolar", () => {
     expect(r.savingRpYear).toBeCloseTo(2_160_000, 3); // 1440 kWh x Rp 1.500, not 3600
     expect(r.co2AvoidedKgYear).toBeCloseTo(1152, 6); // 1440 x 0.8
   });
+  test("a school open 200 days: panels made on closed days serve only the base load", () => {
+    // 63.000 kWh a year, 85% of an open day's load in daylight, 15% base load on the 165 closed days.
+    // Sized to the yearly daytime use: 53.550 / 1281.15 / 0.55 = 76 panels = 41.8 kWp, 146,72 kWh a day.
+    // An open day uses 63.000 / (200 + 0,15 x 165) = 280,31 kWh, 238,26 of it in daylight: all PV is used.
+    // A closed day uses 0,15 x 280,31 = 42,05 kWh, half of it in daylight (21,02): the rest goes to the grid.
+    const r = simulateSolar({ ...input, roofAreaM2: 10_000, kwhYear: 63_000, daytimeShare: 0.85, openDaysPerYear: 200, closedDayLoadShare: 0.15 });
+    expect(r.kWp).toBe(41.8);
+    expect(r.kwhYear).toBeCloseTo(53_552.07, 1);
+    expect(r.selfUseKwh).toBeCloseTo(32_812.45, 1); // 146,72 x 200 + 21,02 x 165
+    expect(r.exportKwh).toBeCloseTo(20_739.62, 1);
+    expect(r.coveragePct).toBeCloseTo(52.08, 2); // not 85%
+    expect(r.savingRpYear).toBeCloseTo(r.selfUseKwh * 1500, 3);
+  });
+  test("a roof-limited office uses its weekend output for the base load", () => {
+    // 19 panels on a 100 m2 roof make 36,68 kWh a day; even a closed day's daylight base load (121,9) takes it all.
+    const r = simulateSolar({ ...input, kwhYear: 434_400, daytimeShare: 0.85, openDaysPerYear: 250, closedDayLoadShare: 0.15 });
+    expect(r.kWp).toBe(10.45);
+    expect(r.selfUseKwh).toBeCloseTo(r.kwhYear, 6);
+    expect(r.exportKwh).toBeCloseTo(0, 6);
+  });
+  test("open every day is the plain daytime-share model, and bad operating days count as every day", () => {
+    const plain = simulateSolar({ ...input, daytimeShare: 0.4 });
+    expect(simulateSolar({ ...input, daytimeShare: 0.4, openDaysPerYear: 365, closedDayLoadShare: 0.15 })).toEqual(plain);
+    for (const bad of [Number.NaN, 0, -5, 400]) {
+      expect(simulateSolar({ ...input, daytimeShare: 0.4, openDaysPerYear: bad }).selfUseKwh).toBeCloseTo(plain.selfUseKwh, 9);
+    }
+  });
   test("a bad daytime share counts the whole load as daytime use", () => {
     for (const bad of [Number.NaN, 0, -1, Number.POSITIVE_INFINITY]) {
       expect(simulateSolar({ ...input, daytimeShare: bad }).kWp).toBe(3.3);

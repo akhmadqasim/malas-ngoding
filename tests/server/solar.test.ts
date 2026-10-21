@@ -79,6 +79,7 @@ describe("POST /api/solar/simulate", () => {
     ["mal", 900_000, "B-3/TM di atas 200 kVA", 1114.74],
     ["hotel", 700_000, "B-3/TM di atas 200 kVA", 1114.74],
     ["pemerintahan", 100_000, "P-1/TR 6.600 VA–200 kVA", 1699.53],
+    ["pemerintahan", 900_000, "P-2/TM di atas 200 kVA", 1522.88],
     ["industri", 900_000, "I-3/TM di atas 200 kVA", 1114.74],
   ])("a %s using %d kWh a year is priced as %s", async (buildingType, kwhYear, golongan, rp) => {
     const { server } = start({ nasa: NASA });
@@ -87,7 +88,8 @@ describe("POST /api/solar/simulate", () => {
     const out = (await res.json()) as SolarSimulation;
     expect(out.savingRpYear).toBeCloseTo(out.selfUseKwh * rp, 3);
     expect(out.assumptions[0]).toContain(`golongan ${golongan}`);
-    expect(out.assumptions[0]).toContain(rp.toLocaleString("id-ID"));
+    // Written as PLN writes it: two decimals ("Rp 1.444,70").
+    expect(out.assumptions[0]).toContain(`Rp ${rp.toLocaleString("id-ID", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} per kWh`);
   });
 
   test.each(["sekolah", "ibadah", "rumah_sakit"])("a %s says plainly that the social tariff is not modelled", async (buildingType) => {
@@ -104,9 +106,32 @@ describe("POST /api/solar/simulate", () => {
     const house = (await (await post(server, { ...BODY, buildingType: "rumah" })).json()) as SolarSimulation;
     const office = (await (await post(server, { ...BODY, buildingType: "kantor" })).json()) as SolarSimulation;
     expect(house.coveragePct).toBeCloseTo(40, 6);
-    expect(office.coveragePct).toBeCloseTo(85, 6);
+    // An office uses 85% in daylight but only on ~250 working days: 3,3 kWp make 12,28 kWh a day, all used on a
+    // working day (15,90 kWh in daylight), but only 1,40 kWh of it on the 115 other days. 3.231 of 5.000 kWh.
+    expect(office.coveragePct).toBeCloseTo(64.62, 1);
     expect(house.kWp).toBeLessThan(office.kWp);
     expect(house.assumptions.some((a) => a.includes("40%"))).toBe(true);
+  });
+
+  test("a school is open about 200 days: its ring shows about half, not the 85% daytime share", async () => {
+    const { server } = start({ nasa: NASA });
+    // 900 m2 footprint, 2 floors, 63.000 kWh a year.
+    const school = (await (await post(server, { ...BODY, roofAreaM2: 900, kwhYear: 63_000, buildingType: "sekolah" })).json()) as SolarSimulation;
+    expect(school.coveragePct).toBeGreaterThan(45);
+    expect(school.coveragePct).toBeLessThan(56);
+    expect(school.exportKwh).toBeGreaterThan(0.3 * school.kwhYear);
+    const days = school.assumptions.find((a) => a.includes("hari setahun"));
+    expect(days).toContain("sekitar 200 hari setahun");
+    expect(days).toContain("15%");
+  });
+
+  test("each type names its operating days", async () => {
+    const { server } = start({ nasa: NASA });
+    const line = async (buildingType: string) =>
+      ((await (await post(server, { ...BODY, buildingType })).json()) as SolarSimulation).assumptions.find((a) => a.includes("hari setahun"));
+    expect(await line("kantor")).toContain("sekitar 250 hari setahun");
+    expect(await line("rumah")).toContain("setiap hari");
+    expect(await line("mal")).toContain("setiap hari");
   });
 
   test("names the missing export credit and what the battery does", async () => {

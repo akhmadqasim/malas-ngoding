@@ -5,7 +5,7 @@ import costs from "../../../data/seed/solar-costs.json";
 import type { AppDeps } from "../index.ts";
 import { type RouteTable, error, json, safe } from "../http.ts";
 import { cachedClimatology } from "../services/cache.ts";
-import { chooseTariff, daytimeShareFor, isBuildingType } from "../services/solarTariff.ts";
+import { chooseTariff, isBuildingType, usePatternFor } from "../services/solarTariff.ts";
 
 const MAX_ROOF_M2 = 50_000;
 const MAX_BACKUP_HOURS = 72;
@@ -66,7 +66,7 @@ export async function simulateSolarAt(
 ): Promise<SolarSimulation> {
   const climate = await cachedClimatology(deps, lat, lng);
   const tariff = chooseTariff(buildingType, kwhYear);
-  const daytime = daytimeShareFor(buildingType);
+  const use = usePatternFor(buildingType);
   const result = simulateSolar({
     roofAreaM2,
     kwhYear,
@@ -76,11 +76,13 @@ export async function simulateSolarAt(
     costRpPerKwp: costs.costRpPerKwp,
     batteryRpPerKwh: costs.batteryRpPerKwh,
     gridFactorKgPerKwh: costs.solarFactorKgPerKwh,
-    daytimeShare: daytime.share,
+    daytimeShare: use.share,
+    openDaysPerYear: use.openDays,
+    closedDayLoadShare: use.closedDayLoadShare,
   });
   const assumptions = [
     tariff.note,
-    daytime.note,
+    ...use.notes,
     NO_EXPORT_NOTE,
     `Biaya panel Rp ${costs.costRpPerKwp.toLocaleString("id-ID")} per kWp dan baterai Rp ${costs.batteryRpPerKwh.toLocaleString("id-ID")} per kWh (perkiraan).`,
   ];

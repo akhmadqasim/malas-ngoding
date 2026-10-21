@@ -7,6 +7,7 @@
     "B2": 1444.7,
     "B3": 1114.74,
     "P1": 1699.53,
+    "P2": 1522.88,
     "I3": 1114.74
   },
   "tariffLabels": {
@@ -14,6 +15,7 @@
     "B2": "B-2/TR 6.600 VA–200 kVA",
     "B3": "B-3/TM di atas 200 kVA",
     "P1": "P-1/TR 6.600 VA–200 kVA",
+    "P2": "P-2/TM di atas 200 kVA",
     "I3": "I-3/TM di atas 200 kVA"
   },
   "largeKwhYear": 600000,
@@ -32,6 +34,21 @@
     "industri": 0.6
   },
   "daytimeShareUnknown": 0.6,
+  "openDaysPerYear": {
+    "rumah": 365,
+    "ruko": 330,
+    "kantor": 250,
+    "pemerintahan": 250,
+    "sekolah": 200,
+    "kampus": 220,
+    "rumah_sakit": 365,
+    "hotel": 365,
+    "mal": 365,
+    "ibadah": 365,
+    "gudang": 300,
+    "industri": 300
+  },
+  "closedDayLoadShare": 0.15,
   "solarFactorKgPerKwh": 1.13,
-  "source": "PV: Rp14-17 million/kWp on-grid (sobatbangun.com Apr 2026, vendor blogs; PLN 2022 figure Rp15 million). Battery: marketplace LiFePO4 listings 2026, Rp1.8-3.3 million/kWh. Tariffs: the 13 non-subsidised classes held unchanged for Q4 2026 (Oct-Dec) at the Q3 2026 rates (news reports of the ESDM decision, not the official table: investortrust.id 'PLN Bikin Tenang, Tarif Listrik Triwulan IV Enggak Naik', journalarta.com 6 and 12 Oct 2026, fortuneidn.com 1 Oct 2026; I-3 and I-4 from investortrust.id Jan-Mar 2026 list, unchanged since): R-1/TR 1.300 VA and B-2/TR 6.600 VA-200 kVA Rp1.444,70; B-3/TM and I-3/TM above 200 kVA Rp1.114,74 (LWBP); P-1/TR 6.600 VA-200 kVA Rp1.699,53. Social (S) classes for schools, places of worship and hospitals are subsidised and were not verified from an official source, so they are not modelled. largeKwhYear: asumsi (above about 600 MWh a year a building needs more than 200 kVA at load factor 0.4 and power factor 0.85). daytimeShare: asumsi (share of the yearly load used while the sun shines, by building type; perkiraan). solarFactorKgPerKwh: Kepmen ESDM 163.K/HK.02/MEM.S/2021 Lampiran no. 73 Mahakam (Kalimantan Timur), 1.13 t CO2/MWh for PLTS/PLTB (2019 data), see data/seed/grid.json."
+  "source": "PV: Rp14-17 million/kWp on-grid (sobatbangun.com Apr 2026, vendor blogs; PLN 2022 figure Rp15 million). Battery: marketplace LiFePO4 listings 2026, Rp1.8-3.3 million/kWh. Tariffs: the 13 non-subsidised classes held unchanged for Q4 2026 (Oct-Dec) at the Q3 2026 rates (news reports of the ESDM decision, not the official table: investortrust.id 'PLN Bikin Tenang, Tarif Listrik Triwulan IV Enggak Naik', journalarta.com 6 and 12 Oct 2026, fortuneidn.com 1 Oct 2026; I-3 and I-4 from investortrust.id Jan-Mar 2026 list, unchanged since): R-1/TR 1.300 VA and B-2/TR 6.600 VA-200 kVA Rp1.444,70; B-3/TM and I-3/TM above 200 kVA Rp1.114,74 (LWBP); P-1/TR 6.600 VA-200 kVA Rp1.699,53; P-2/TM above 200 kVA Rp1.522,88 (metrotvnews.com tariff list 19-25 Oct 2026, investortrust.id Jan-Mar 2026 list). Social (S) classes for schools, places of worship and hospitals are subsidised and were not verified from an official source, so they are not modelled. largeKwhYear: asumsi (above about 600 MWh a year a building needs more than 200 kVA at load factor 0.4 and power factor 0.85). daytimeShare: asumsi (share of an open day's load used while the sun shines, by building type; perkiraan). openDaysPerYear: asumsi (days a building is in use: schools about 200 as in building-types.json, campuses 220, offices 250 working days, shops 330, warehouses and factories 300 (six-day weeks), homes, malls, hotels, hospitals and places of worship every day). closedDayLoadShare: asumsi (on a closed day a building draws about 15% of an open day's load as base load). solarFactorKgPerKwh: Kepmen ESDM 163.K/HK.02/MEM.S/2021 Lampiran no. 73 Mahakam (Kalimantan Timur), 1.13 t CO2/MWh for PLTS/PLTB (2019 data), see data/seed/grid.json."
 }

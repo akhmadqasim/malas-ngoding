@@ -42,7 +42,8 @@ export interface TariffChoice {
   note: string;
 }
 
-const rp = (n: number) => `Rp ${n.toLocaleString("id-ID")} per kWh`;
+/** Written as PLN writes its tariffs: two decimals ("Rp 1.444,70 per kWh"). */
+const rp = (n: number) => `Rp ${n.toLocaleString("id-ID", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} per kWh`;
 const upper = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
 /**
@@ -56,8 +57,10 @@ export function chooseTariff(type: BuildingType | undefined, kwhYear: number): T
   };
   if (type === undefined) return pick("R1_1300", "jenis gedung tidak diketahui");
   if (type === "rumah") return pick("R1_1300", "rumah tangga");
-  if (type === "pemerintahan") return pick("P1", "kantor pemerintah");
   const large = kwhYear > costs.largeKwhYear;
+  if (type === "pemerintahan") {
+    return large ? pick("P2", "kantor pemerintah dengan pemakaian di atas 600 MWh per tahun") : pick("P1", "kantor pemerintah");
+  }
   const offPeak = "harga di luar beban puncak (LWBP), jam kerja panel";
   // Industry below 200 kVA (I-2) is a subsidised class; a building drawn as industri is taken as I-3.
   if (type === "industri") return pick("I3", `industri, dianggap industri menengah; ${offPeak}`);
@@ -73,12 +76,32 @@ export function chooseTariff(type: BuildingType | undefined, kwhYear: number): T
   };
 }
 
-/** The part of the yearly load used while the sun shines (perkiraan), and the sentence that says so. */
-export function daytimeShareFor(type: BuildingType | undefined): { share: number; note: string } {
+/** How a building type uses power over the day and the year (perkiraan), with the sentences that say so. */
+export interface UsePattern {
+  /** Share of an open day's load used while the sun shines. */
+  share: number;
+  /** Days a year the building is in use; on the others it draws `closedDayLoadShare` of an open day's load. */
+  openDays: number;
+  closedDayLoadShare: number;
+  notes: string[];
+}
+
+export function usePatternFor(type: BuildingType | undefined): UsePattern {
   const share = type === undefined ? costs.daytimeShareUnknown : costs.daytimeShare[type];
+  const openDays = type === undefined ? 365 : costs.openDaysPerYear[type];
   const who = type === undefined ? "gedung yang jenisnya tidak diketahui" : NAME[type];
+  const base = costs.closedDayLoadShare;
+  const daysNote =
+    openDays >= 365
+      ? `${upper(who)} dianggap dipakai setiap hari, 365 hari setahun (perkiraan).`
+      : `${upper(who)} dipakai sekitar ${openDays} hari setahun (perkiraan); di hari lain gedung hanya memakai beban dasar sekitar ${fmtNumber(base * 100)}% dari hari biasa, jadi listrik panel hari itu sebagian besar masuk jaringan tanpa imbalan.`;
   return {
     share,
-    note: `Panel hanya menghemat listrik yang dipakai saat matahari bersinar: untuk ${who} sekitar ${fmtNumber(share * 100)}% dari pemakaian setahun (perkiraan). Ukuran panel mengikuti bagian itu.`,
+    openDays,
+    closedDayLoadShare: base,
+    notes: [
+      `Panel hanya menghemat listrik yang dipakai saat matahari bersinar: untuk ${who} sekitar ${fmtNumber(share * 100)}% dari pemakaian sehari (perkiraan). Ukuran panel mengikuti pemakaian siang setahun.`,
+      daysNote,
+    ],
   };
 }
