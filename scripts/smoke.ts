@@ -527,9 +527,12 @@ try {
         const el = document.querySelector<HTMLElement>(sel);
         return el ? { sel, ...box(el), overflow: el.scrollWidth - el.clientWidth } : { sel, missing: true as const };
       }),
+      // How far the ten regions and the sheet's foot reach below the visible part of the sheet. The grid
+      // mix and equivalents (EmissionContext) come after the foot and may scroll.
       sheetScroll: (() => {
         const el = document.querySelector<HTMLElement>(".sheet__scroll")!;
-        return el.scrollHeight - el.clientHeight;
+        const foot = el.querySelector<HTMLElement>(".sheet__foot") ?? el;
+        return Math.max(0, Math.round(foot.getBoundingClientRect().bottom - el.getBoundingClientRect().bottom));
       })(),
       vw: window.innerWidth,
       vh: window.innerHeight,
@@ -557,7 +560,7 @@ try {
       [sheet, ...layout.dock].every((p) => "missing" in p || !intersects({ x1: p.left, y1: p.top, x2: p.right, y2: p.bottom }, { x1: layout.tools!.left, y1: layout.tools!.top, x2: layout.tools!.right, y2: layout.tools!.bottom })),
     `the map tools sit in the free right edge and touch no panel (${layout.tools ? `left ${Math.round(layout.tools.left)} of ${vw}` : "missing"})`,
   );
-  check(layout.sheetScroll <= 1, `all ten regions fit in the sheet without scrolling (hidden ${layout.sheetScroll}px)`);
+  check(layout.sheetScroll <= 1, `all ten regions and the sheet foot fit without scrolling (hidden ${layout.sheetScroll}px)`);
   await shot(page, "2-overview");
   await screen(page, "map.png");
 
@@ -750,6 +753,8 @@ try {
   await flipSwitch(page, "Hujan");
   await page.waitForTimeout(300);
   check(!(await mapState(page)).haze, "switching the rain off clears the haze");
+  await buildingChecks(page);
+  await buildingHeapSoak(page);
   // Close it so its idle orbit does not keep streaming city tiles in the background during the next check.
   await page.close();
 
@@ -970,4 +975,282 @@ async function recommendationsFailure() {
   check(true, "recommendations: 'Coba lagi' loads the items");
   check(errors.length === 0, `recommendations: no uncaught errors on the failure path (${errors.join("; ") || "none"})`);
   await p.close();
+// ---------- Buildings (Task 7): clickable buildings, the building panel, terrain and memory at building zoom ----------
+
+// Functions, not constants: the checks run from the main block above, before constants down here exist.
+
+/** The basemap's buildings featureset. */
+function buildingsTarget() {
+  return { featuresetId: "buildings", importId: "basemap" } as const;
+}
+/** Over the middle of Samarinda, close enough for single buildings. */
+function samarindaClose() {
+  return { center: [117.1475, -0.4955] as [number, number], zoom: 16.6, pitch: 62, bearing: -24 };
+}
+
+type PickedBuilding = { id: number; x: number; y: number; area: number; lng: number; lat: number };
+
+/**
+ * Buildings on screen in the open middle of the map (clear of the panels), with the screen point of their
+ * centre and their size on screen, largest first.
+ */
+function buildingsOnScreen(page: Page) {
+  return page.evaluate(
+    ([target, w, h]) => {
+      const map = (window as MapWindow).__malasMap!;
+      const features = map.queryRenderedFeatures(
+        [
+          [w * 0.32, h * 0.25],
+          [w * 0.62, h * 0.65],
+        ],
+        { target },
+      );
+      const seen = new Set<unknown>();
+      const out: PickedBuilding[] = [];
+      for (const f of features) {
+        if (f.id === undefined || seen.has(f.id) || f.geometry.type !== "Polygon") continue;
+        seen.add(f.id);
+        const ring = (f.geometry.coordinates[0] ?? []).slice(0, -1) as [number, number][];
+        if (ring.length < 3) continue;
+        const lng = ring.reduce((a, p) => a + p[0], 0) / ring.length;
+        const lat = ring.reduce((a, p) => a + p[1], 0) / ring.length;
+        const pts = ring.map((p) => map.project(p));
+        const area = Math.abs(pts.reduce((a, p, i) => a + p.x * pts[(i + 1) % pts.length]!.y - pts[(i + 1) % pts.length]!.x * p.y, 0)) / 2;
+        const c = map.project([lng, lat]);
+        // The centre must hit the building itself, in front (an L-shaped building's centre may fall outside
+        // it, and a taller building nearer the camera may hide it).
+        const hit = map.queryRenderedFeatures(c, { target })[0]?.id === f.id;
+        if (hit && area > 150) out.push({ id: Number(f.id), x: c.x, y: c.y, area, lng, lat });
+      }
+      out.sort((a, b) => b.area - a.area);
+      return out;
+    },
+    [buildingsTarget(), VIEW_W, VIEW_H] as const,
+  );
+}
+
+/** Feature state of a basemap building by id, and how many buildings are selected. */
+function buildingState(page: Page, id: number) {
+  return page.evaluate(
+    ([target, id]) => {
+      const map = (window as MapWindow).__malasMap!;
+      const features = map.queryRenderedFeatures({ target });
+      const f = features.find((g) => g.id === id);
+      const selected = new Set(features.filter((g) => map.getFeatureState(g)?.select).map((g) => g.id)).size;
+      return { state: f ? (map.getFeatureState(f) ?? {}) : null, selected };
+    },
+    [buildingsTarget(), id] as const,
+  );
+}
+
+type SelectWindow = Window & { __malasSelectBuildingAt: (lngLat: [number, number]) => Promise<void> };
+
+async function panelText(page: Page) {
+  return (await page.locator(".building-panel").innerText()).replace(/\s+/g, " ");
+}
+/** The kWh per year in the panel's readout, read back from its id-ID text ("176.352", "5,2 juta"). */
+async function readoutKwh(page: Page) {
+  const t = (await page.locator(".building-panel__readout .readout__figure").innerText()).trim();
+  const n = Number(t.replace(/ juta$/, "").replaceAll(".", "").replace(",", "."));
+  return t.endsWith("juta") ? n * 1e6 : n;
+}
+/** Waits for the panel's numbers (and their count-up). */
+async function waitForPanelReady(page: Page) {
+  await page.locator(".building-panel__readout").waitFor({ timeout: 20_000 });
+  await page.waitForTimeout(1200);
+}
+
+async function buildingChecks(page: Page) {
+  const terrainAt = async (zoom: number) => {
+    await page.evaluate(([view, zoom]) => (window as MapWindow).__malasMap!.jumpTo({ ...view, zoom }), [samarindaClose(), zoom] as const);
+    await page.waitForTimeout(300);
+    return page.evaluate(() => Boolean((window as MapWindow).__malasMap!.getTerrain()));
+  };
+  // Terrain goes off at building zoom (memory) and comes back on the way out, with hysteresis.
+  const close = await terrainAt(16.6);
+  const between = await terrainAt(13);
+  const out = await terrainAt(12.5);
+  const backIn = await terrainAt(13);
+  const inAgain = await terrainAt(13.5);
+  check(
+    !close && !between && out && backIn && !inAgain,
+    `terrain is off at building zoom and back below zoom 12.8, with hysteresis (16.6 ${close}, 13 ${between}, 12.5 ${out}, 13 ${backIn}, 13.5 ${inAgain})`,
+  );
+
+  await page.evaluate((view) => (window as MapWindow).__malasMap!.jumpTo(view), samarindaClose());
+  await waitForMapIdle(page, 15_000);
+  await page.waitForTimeout(800);
+  const found = await buildingsOnScreen(page);
+  check(found.length >= 3, `buildings to click in the middle of Samarinda (${found.length})`);
+  if (found.length < 3) return;
+  const picks = [found[0]!, found[Math.floor(found.length / 2)]!, found.at(-1)!];
+  // A spot with no building near it (a road, a field), for the "no building there" case.
+  const empty = await page.evaluate(
+    ([target, w, h]) => {
+      const map = (window as MapWindow).__malasMap!;
+      for (let y = h * 0.25; y < h * 0.75; y += 10) {
+        for (let x = w * 0.3; x < w * 0.65; x += 10) {
+          const box: [[number, number], [number, number]] = [
+            [x - 24, y - 24],
+            [x + 24, y + 24],
+          ];
+          if (map.queryRenderedFeatures(box, { target }).length === 0) return map.unproject([x, y]).toArray() as [number, number];
+        }
+      }
+      return null;
+    },
+    [buildingsTarget(), VIEW_W, VIEW_H] as const,
+  );
+
+  // Hover lights a building.
+  await page.mouse.move(picks[0]!.x, picks[0]!.y, { steps: 3 });
+  await page.waitForTimeout(400);
+  check((await buildingState(page, picks[0]!.id)).state?.highlight === true, "hovering a building lights it");
+  await shot(page, "9-building-hover");
+
+  // Click three buildings: each opens the panel with a type, kWh and "perkiraan", and only it is selected.
+  const kinds: string[] = [];
+  for (const [i, b] of picks.entries()) {
+    await page.mouse.click(b.x, b.y);
+    await waitForPanelReady(page);
+    const t = await panelText(page);
+    const kwh = await readoutKwh(page);
+    const sel = await buildingState(page, b.id);
+    const kind = (await page.locator(".building-type__trigger").innerText()).trim();
+    kinds.push(kind);
+    check(
+      kwh > 0 && /kWh per tahun, perkiraan/.test(t) && !/NaN|undefined/.test(t),
+      `building ${i + 1} (${Math.round(b.area)} px on screen): the panel shows a ${kind}, ${kwh} kWh per tahun, perkiraan`,
+    );
+    check(sel.state?.select === true && sel.selected === 1, `building ${i + 1} is the one selected building on the map (${sel.selected} selected)`);
+    if (i === 0) {
+      await page.mouse.move(VIEW_W * 0.45, 12);
+      await page.waitForTimeout(400);
+      await shot(page, "9-building-energi");
+      await screen(page, "building.png");
+      // The selection stays clear by day and by night (its colours follow the ground tone).
+      const colours: string[] = [];
+      for (const light of ["Siang", "Malam", "Otomatis"]) {
+        await page.getByRole("radio", { name: light }).click();
+        await waitForMapIdle(page, 12_000);
+        await page.waitForTimeout(600);
+        colours.push(await page.evaluate(() => String((window as MapWindow).__malasMap!.getConfigProperty("basemap", "colorBuildingSelect"))));
+        if (light !== "Otomatis") await shot(page, `9-building-${light.toLowerCase()}`);
+      }
+      const still = await buildingState(page, b.id);
+      check(colours[0] !== colours[1] && still.state?.select === true, `the selection colour follows the light (Siang ${colours[0]}, Malam ${colours[1]}) and the building stays selected`);
+    }
+  }
+  console.log(`  clicked buildings: ${kinds.join(", ")}`);
+
+  // The panel clears the dock and the map tools.
+  const layout = await page.evaluate(() => {
+    const r = (sel: string) => document.querySelector(sel)!.getBoundingClientRect();
+    return { panel: r(".building-panel"), dockTop: r(".dock-slot").top, toolsLeft: r(".map-tools").left };
+  });
+  check(
+    layout.panel.bottom <= layout.dockTop + 0.5 && layout.panel.right <= layout.toolsLeft,
+    `the building panel clears the dock (bottom ${Math.round(layout.panel.bottom)} ≤ ${Math.round(layout.dockTop)}) and the map tools (right ${Math.round(layout.panel.right)} ≤ ${Math.round(layout.toolsLeft)})`,
+  );
+
+  // Override the type and the floors: the numbers follow.
+  const before = await readoutKwh(page);
+  const current = (await page.locator(".building-type__trigger").innerText()).trim();
+  const other = current === "Mal" ? "Rumah" : "Mal";
+  await page.locator(".building-type__trigger").click();
+  await page.getByRole("option", { name: other, exact: true }).click();
+  await page.waitForTimeout(1800);
+  const typed = await readoutKwh(page);
+  const typedText = await panelText(page);
+  const typedKind = (await page.locator(".building-type__trigger").innerText()).trim();
+  check(
+    typed !== before && typedKind === other && typedText.includes("Jenis pilihan Anda."),
+    `choosing "${other}" re-estimates (${before} → ${typed} kWh per tahun)`,
+  );
+  await page.getByRole("button", { name: "Tambah lantai" }).click();
+  await page.waitForTimeout(1800);
+  const floored = await readoutKwh(page);
+  check(floored > typed, `one more floor raises the estimate (${typed} → ${floored} kWh per tahun)`);
+
+  // Emisi: CO2, the grid mix and the equivalents.
+  await page.getByRole("tab", { name: "Emisi" }).click();
+  await page.waitForTimeout(1200);
+  const emisi = await panelText(page);
+  const rows = await page.locator(".building-panel .equivalents__row").count();
+  check(/(ton|kg) CO2 per tahun, perkiraan/.test(emisi) && emisi.includes("Batu bara") && rows >= 3, `Emisi shows the CO2, the grid mix by fuel and ${rows} equivalents`);
+  await shot(page, "9-building-emisi");
+  await page.getByRole("tab", { name: "Energi" }).click();
+
+  // Escape closes the panel and clears the selection on the map.
+  await page.locator(".building-panel__close").focus();
+  await page.keyboard.press("Escape");
+  await page.locator(".building-panel").waitFor({ state: "detached", timeout: 3000 });
+  check((await buildingState(page, picks.at(-1)!.id)).selected === 0, "Escape closes the panel and clears the selection on the map");
+
+  // The chat's select building action, from the province view: fly in, select, open.
+  await page.evaluate((view) => (window as MapWindow).__malasMap!.jumpTo(view), KALTIM_VIEW);
+  await page.waitForTimeout(600);
+  const target = picks[1]!;
+  await page.evaluate(([lng, lat]) => (window as unknown as SelectWindow).__malasSelectBuildingAt([lng, lat]), [target.lng, target.lat] as const);
+  await waitForPanelReady(page);
+  const landed = await page.evaluate(() => (window as MapWindow).__malasMap!.getZoom());
+  const chosen = await buildingState(page, target.id);
+  check(Math.abs(landed - 17.5) < 0.05 && chosen.state?.select === true, `selectBuildingAt flies in (zoom ${landed.toFixed(2)}) and selects that building`);
+  await shot(page, "9-building-chat");
+  // A point with no building says so instead of showing a blank panel.
+  if (empty) {
+    await page.evaluate((p) => (window as unknown as SelectWindow).__malasSelectBuildingAt(p), empty);
+    const none = await page.locator(".building-panel").getByText("Gedung tidak ditemukan").isVisible();
+    check(none, `selectBuildingAt where there is no building says so (${empty.map((v) => v.toFixed(4)).join(", ")})`);
+    await shot(page, "9-building-none");
+  } else {
+    check(false, "a spot with no building near it in the middle of Samarinda");
+  }
+  await page.locator(".building-panel__close").click();
+  await page.locator(".building-panel").waitFor({ state: "detached", timeout: 3000 });
+}
+
+/**
+ * Pans and zooms around Samarinda at building zoom for about a minute and checks the JS heap stays
+ * bounded (with terrain on at this zoom the page once went to about 1 GB).
+ */
+async function buildingHeapSoak(page: Page) {
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send("Performance.enable");
+  const heapMb = async () => {
+    await cdp.send("HeapProfiler.collectGarbage");
+    const { metrics } = await cdp.send("Performance.getMetrics");
+    return (metrics.find((m) => m.name === "JSHeapUsedSize")?.value ?? 0) / 1e6;
+  };
+  await page.evaluate((view) => (window as MapWindow).__malasMap!.jumpTo(view), samarindaClose());
+  await waitForMapIdle(page, 15_000);
+  const start = await heapMb();
+  const SOAK_MS = 60_000;
+  const t0 = Date.now();
+  let peak = start;
+  let step = 0;
+  while (Date.now() - t0 < SOAK_MS) {
+    const a = step * 0.9;
+    const move = [117.1475 + 0.012 * Math.cos(a), -0.4955 + 0.012 * Math.sin(a), 15 + (step % 4) * 0.8, -24 + (step % 7) * 12] as const;
+    await page.evaluate(
+      ([lng, lat, zoom, bearing]) =>
+        new Promise<void>((resolve) => {
+          const map = (window as MapWindow).__malasMap!;
+          map.once("moveend", () => resolve());
+          map.easeTo({ center: [lng, lat], zoom, bearing, pitch: 60, duration: 1500 });
+        }),
+      move,
+    );
+    if (step % 5 === 4) peak = Math.max(peak, await heapMb());
+    step++;
+  }
+  await waitForMapIdle(page, 15_000);
+  const end = await heapMb();
+  peak = Math.max(peak, end);
+  const terrain = await page.evaluate(() => Boolean((window as MapWindow).__malasMap!.getTerrain()));
+  check(
+    end < 400 && end - start < 150 && !terrain,
+    `heap soak: ${step} moves at building zoom over ${Math.round((Date.now() - t0) / 1000)} s, JS heap ${start.toFixed(0)} → ${end.toFixed(0)} MB (peak ${peak.toFixed(0)} MB), terrain ${terrain ? "on" : "off"}`,
+  );
+  await cdp.detach();
 }

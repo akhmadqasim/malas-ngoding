@@ -12,6 +12,7 @@ import { presetTone } from "./map/effects.ts";
 import { MapView } from "./map/MapView.tsx";
 import { METRIC_TEXT } from "./metrics.ts";
 import { DURATION, EASE_OUT } from "./motion.ts";
+import { BuildingPanel } from "./panels/BuildingPanel.tsx";
 import { Legend } from "./panels/Legend.tsx";
 import { MapControls } from "./panels/MapControls.tsx";
 import { MapTools } from "./panels/MapTools.tsx";
@@ -126,6 +127,7 @@ export function App() {
               <motion.div className="sheet-slot" variants={assemble(0, -16)}>
                 <RegionPanel regions={regionList} />
               </motion.div>
+              <BuildingPanel />
               <div className="dock-slot">
                 <motion.div variants={assemble(12, 0)}>
                   <Legend plants={data.plants} regions={regionList} />

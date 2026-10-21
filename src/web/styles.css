@@ -1,6 +1,7 @@
 @import "tailwindcss";
 @import "@heroui/styles";
 @import "./atlas-theme.css";
+@import "./buildings.css";
 
 /*
  * Visual direction "Atlas malam": docs/research/design/00-direction.md (binding).

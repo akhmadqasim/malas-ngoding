@@ -72,7 +72,7 @@ const TOKENS: Record<string, string> = {
   "--color-ink-faint": "#626973",
   "--color-outline-light": "#1c222c",
   "--color-paper-muted": "#a7adb5",
-  "--color-paper-bright": "#f5f2ea",
+  "--color-co2-4": "#ebc082",
 };
 beforeEach(() => {
   g.document = { documentElement: {} };
@@ -88,9 +88,9 @@ afterEach(() => {
 });
 
 describe("building colours follow the ground tone", () => {
-  test("ink on a light ground, paper on a dark one; the selection stands out more than the hover", () => {
+  test("ink on a light ground; on a dark one a paper hover and an amber selection", () => {
     expect(buildingColors("light")).toEqual({ highlight: "#626973", select: "#1c222c" });
-    expect(buildingColors("dark")).toEqual({ highlight: "#a7adb5", select: "#f5f2ea" });
+    expect(buildingColors("dark")).toEqual({ highlight: "#a7adb5", select: "#ebc082" });
   });
 });
 

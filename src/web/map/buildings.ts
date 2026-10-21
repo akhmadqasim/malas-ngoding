@@ -91,13 +91,16 @@ export function buildingInputFrom(feature: BuildingFeature): BuildingInput | nul
 }
 
 /**
- * Building hover and select colours (00-direction section 8): paper-muted and paper-bright on a dark
- * ground, ink on a light one (the selection darker than the hover).
+ * Building hover and select colours (00-direction section 8). On a light ground: ink, the selection darker
+ * than the hover. On a dark ground the hover is paper-muted, but the selection is the light CO2 amber:
+ * rendered, the night basemap theme (`faded`) grades light neutrals down to the colour of the other
+ * buildings, so a paper-bright selection all but vanished, while the amber stays clear in every light
+ * (at dusk, under `monochrome`, it reads as a light tint). It is the colour of what the panel measures.
  */
 export function buildingColors(tone: Tone): { highlight: string; select: string } {
   return tone === "light"
     ? { highlight: token("--color-ink-faint"), select: token("--color-outline-light") }
-    : { highlight: token("--color-paper-muted"), select: token("--color-paper-bright") };
+    : { highlight: token("--color-paper-muted"), select: token("--color-co2-4") };
 }
 
 /** Sets the basemap's building hover and select colours for the ground tone. */
