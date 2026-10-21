@@ -1,0 +1,19 @@
+# Secrets and local state never go into the image.
+.env*
+node_modules
+data/cache
+.superpowers
+
+# Not needed to run the app.
+.git
+.claude
+.idea
+.DS_Store
+*.log
+coverage
+dist
+docs
+tests
+Dockerfile
+.dockerignore
+docker-compose.yml
