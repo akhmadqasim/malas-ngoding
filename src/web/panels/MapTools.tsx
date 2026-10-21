@@ -1,23 +1,42 @@
 import { CircleInfo, Compass, House, Minus, Plus } from "@gravity-ui/icons";
 import { Button, Popover, Separator, Toolbar, Tooltip } from "@heroui/react";
 import type { Map as MapboxMap } from "mapbox-gl";
-import { type ReactNode, useEffect, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import { flyToProvince } from "../map/camera.ts";
 import { useAppStore } from "../store.ts";
 
-/** The map's bearing, updated as the camera turns (for the compass needle). */
-function useMapBearing(map: MapboxMap | null): number {
-  const [bearing, setBearing] = useState(() => map?.getBearing() ?? 0);
+/**
+ * Turns the compass needle with the map. Written straight to the element on every `rotate` frame: through
+ * React state the whole toolbar, tooltips and popover would re-render 60 times a second during the sway.
+ */
+function useCompassNeedle(map: MapboxMap | null) {
+  const needle = useRef<SVGSVGElement>(null);
   useEffect(() => {
     if (!map) return;
-    const update = () => setBearing(map.getBearing());
+    // Gravity's compass needle points north-east; turned back 45 degrees it points to north on the map.
+    const update = () => {
+      if (needle.current) needle.current.style.transform = `rotate(${-map.getBearing() - 45}deg)`;
+    };
     update();
     map.on("rotate", update);
     return () => {
       map.off("rotate", update);
     };
   }, [map]);
-  return bearing;
+  return needle;
+}
+
+/** Phones lay the tools out in a row (styles.css), so the arrow keys follow: Left and Right there. */
+function useToolbarOrientation(): "horizontal" | "vertical" {
+  const query = "(max-width: 720px)";
+  const [row, setRow] = useState(() => typeof window !== "undefined" && window.matchMedia(query).matches);
+  useEffect(() => {
+    const mq = window.matchMedia(query);
+    const update = () => setRow(mq.matches);
+    mq.addEventListener("change", update);
+    return () => mq.removeEventListener("change", update);
+  }, []);
+  return row ? "horizontal" : "vertical";
 }
 
 /** One tool: an icon button with its name as a tooltip (on hover and on keyboard focus). */
@@ -39,7 +58,8 @@ function Tool({ label, onPress, children }: { label: string; onPress: () => void
  */
 export function MapTools() {
   const map = useAppStore((s) => s.map);
-  const bearing = useMapBearing(map);
+  const needle = useCompassNeedle(map);
+  const orientation = useToolbarOrientation();
 
   const backToProvince = () => {
     const store = useAppStore.getState();
@@ -49,7 +69,7 @@ export function MapTools() {
   };
 
   return (
-    <Toolbar aria-label="Alat peta" orientation="vertical" className="map-tools">
+    <Toolbar aria-label="Alat peta" orientation={orientation} className="map-tools">
       <Tool label="Perbesar" onPress={() => map?.zoomIn()}>
         <Plus aria-hidden />
       </Tool>
@@ -58,8 +78,7 @@ export function MapTools() {
       </Tool>
       <Separator className="map-tools__rule" />
       <Tool label="Hadapkan ke utara" onPress={() => map?.resetNorth()}>
-        {/* Gravity's compass needle points north-east; turned back 45° it points to north on the map. */}
-        <Compass aria-hidden style={{ transform: `rotate(${-bearing - 45}deg)` }} />
+        <Compass aria-hidden ref={needle} />
       </Tool>
       <Tool label="Kembali ke seluruh Kalimantan Timur" onPress={backToProvince}>
         <House aria-hidden />
@@ -88,7 +107,7 @@ export function MapTools() {
             </p>
             <p>Data wilayah: BPS Kalimantan Timur, Kementerian ESDM dan PLN.</p>
             <p>Data pembangkit: Global Energy Monitor, WRI dan Kementerian ESDM; sebagian lokasinya perkiraan.</p>
-            <p className="map-about__note">Angka per wilayah adalah perkiraan. Cara hitungnya ada di rincian setiap wilayah.</p>
+            <p className="map-about__note">Angka per wilayah adalah perkiraan. Cara menghitungnya dijelaskan di bawah.</p>
           </Popover.Dialog>
         </Popover.Content>
       </Popover>

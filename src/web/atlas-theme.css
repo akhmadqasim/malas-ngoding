@@ -26,8 +26,8 @@
     --radius: calc(var(--radius-sm) * 2);
     --field-radius: var(--radius-sm);
     --field-border-width: 1px;
-    --ring-offset-width: 2px;
-    --disabled-opacity: 0.4;
+    --ring-offset-width: --spacing(0.5);
+    --disabled-opacity: var(--opacity-disabled);
     --cursor-interactive: pointer;
     /* Flat loading blocks, no shimmer (00-direction section 8). */
     --skeleton-animation: none;

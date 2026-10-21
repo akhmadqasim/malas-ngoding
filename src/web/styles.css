@@ -144,6 +144,7 @@
   --duration-exit: 180ms;
   --duration-intro: 6000ms;
   --duration-tooltip: 400ms;
+  --opacity-disabled: 0.4;
 
   --layout-inset: 24px;
   --layout-panel: 336px;
@@ -155,6 +156,8 @@
 
 /* In the base layer, so HeroUI's component rules (layer components) win over these element defaults. */
 @layer base {
+  /* The root keeps the browser's 16 px, so every rem token (ours and HeroUI's) is the size 00-direction
+     gives; the body text is set to the base size below. */
   html,
   body,
   #root {
@@ -163,10 +166,12 @@
     background: var(--background);
     color: var(--foreground);
     font-family: var(--font-sans);
-    font-size: var(--text-base);
-    line-height: var(--text-base--line-height);
     -webkit-font-smoothing: antialiased;
     overflow: hidden;
+  }
+  body {
+    font-size: var(--text-base);
+    line-height: var(--text-base--line-height);
   }
 
   button {
@@ -782,7 +787,7 @@
 .map-about a {
   color: var(--foreground);
   text-decoration: underline;
-  text-underline-offset: 2px;
+  text-underline-offset: --spacing(0.5);
 }
 .map-about__title {
   margin: 0;
@@ -809,6 +814,8 @@
 }
 .app .mapboxgl-ctrl-attrib.mapboxgl-compact-show,
 .app .mapboxgl-ctrl-attrib {
+  /* Never wider than the sheet column, so it can never reach the dock beside it (it wraps instead). */
+  max-width: calc(var(--layout-inset) + var(--layout-panel) - --spacing(26));
   margin: 0 0 --spacing(2.5);
   padding: 0 --spacing(1.5);
   border-radius: var(--radius-xs);
@@ -1041,9 +1048,9 @@
     margin-top: --spacing(4);
   }
   .ranking__row {
-    row-gap: --spacing(1);
-    padding-top: --spacing(1);
-    padding-bottom: --spacing(1.5);
+    row-gap: --spacing(0.75);
+    padding-top: --spacing(0.5);
+    padding-bottom: --spacing(1);
   }
 }
 
@@ -1078,8 +1085,9 @@
     padding-top: --spacing(2);
   }
   .ranking__row {
-    padding-top: --spacing(0.75);
-    padding-bottom: --spacing(1.25);
+    row-gap: --spacing(0.5);
+    padding-top: --spacing(0.5);
+    padding-bottom: --spacing(0.75);
   }
   .sheet__foot {
     margin-top: --spacing(3);
@@ -1115,6 +1123,10 @@
   .legend,
   .controls {
     width: 100%;
+  }
+  .controls__items {
+    flex-wrap: wrap;
+    gap: --spacing(2) --spacing(4);
   }
   /* The map tools turn into a row just under the sheet, clear of the dock at the bottom. */
   .tools-slot {

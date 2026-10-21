@@ -59,8 +59,8 @@ export function lightModeFor(option: LightOption, linked: LightMode): LightMode 
 export const LIGHT_NOTE: Partial<Record<LightPreset, string>> = { dawn: "fajar", dusk: "senja" };
 
 /**
- * Ground tone per preset, measured from the render: the land is near white at day and dawn, dark grey at
- * dusk and navy at night (values in docs/research/design/00-direction.md section 4).
+ * Ground tone per preset, measured from the render: light at day and dawn (Standard's day light, pale
+ * green land), navy at dusk and night (its night light). Values in 00-direction.md section 4.
  */
 export function presetTone(preset: LightPreset): Tone {
   return preset === "day" || preset === "dawn" ? "light" : "dark";
@@ -70,9 +70,7 @@ export function presetTone(preset: LightPreset): Tone {
  * Standard basemap theme: `faded` in every light. It is Standard's own look, lightly muted, so water reads
  * as water and the data colours still carry the map (`monochrome` turned rivers and land the same grey).
  */
-export function basemapTheme(_preset: LightPreset): "faded" {
-  return "faded";
-}
+export const BASEMAP_THEME = "faded";
 
 /**
  * The basemap light for a preset. Dawn and dusk use Standard's day and night light: its own dawn and dusk
@@ -86,7 +84,7 @@ export function basemapLight(preset: LightPreset): "day" | "night" {
 /** Sets the basemap light and theme for a preset. */
 export function applyLightPreset(map: MapboxMap, preset: LightPreset): void {
   map.setConfigProperty("basemap", "lightPreset", basemapLight(preset));
-  map.setConfigProperty("basemap", "theme", basemapTheme(preset));
+  map.setConfigProperty("basemap", "theme", BASEMAP_THEME);
 }
 
 /** Rain starts to show at this zoom, where Standard draws solid buildings, and is full at RAIN_FULL_ZOOM. */

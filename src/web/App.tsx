@@ -126,9 +126,6 @@ export function App() {
               <motion.div className="sheet-slot" variants={assemble(0, -16)}>
                 <RegionPanel regions={regionList} />
               </motion.div>
-              <motion.div className="tools-slot" variants={assemble(0, 12)}>
-                <MapTools />
-              </motion.div>
               <div className="dock-slot">
                 <motion.div variants={assemble(12, 0)}>
                   <Legend plants={data.plants} regions={regionList} />
@@ -137,6 +134,10 @@ export function App() {
                   <MapControls />
                 </motion.div>
               </div>
+              {/* After the dock in the tab order: the tools sit to its right. */}
+              <motion.div className="tools-slot" variants={assemble(0, 12)}>
+                <MapTools />
+              </motion.div>
             </motion.div>
           )}
         </AnimatePresence>

@@ -275,11 +275,70 @@ async function swayKeepsItsArc(page: Page) {
       }),
     after.last,
   );
-  const next = await watchBearing(page, 8000);
+  // 20 s: from near its north end back past the middle toward the far end.
+  const next = await watchBearing(page, 20_000);
   check(
     resumed && next.min >= lo && next.max <= hi,
     `the next sway stays on its arc, ${(rest - SWAY_DEG).toFixed(0)}° to ${(rest + SWAY_DEG).toFixed(0)}° (${resumed ? `${next.min.toFixed(1)}° to ${next.max.toFixed(1)}°` : "it never started"})`,
   );
+}
+
+/**
+ * After "Hadapkan ke utara" the province view rests at 0°, outside the arc the region names are swept on.
+ * Idle, the sway must glide back to that arc and swing on it, never around 0° (fix round 1, Important 6).
+ */
+async function swayReturnsToItsArc(page: Page) {
+  const rest = KALTIM_VIEW.bearing;
+  await page.mouse.move(VIEW_W - 10, 10); // off the map's regions, onto the empty top-right corner
+  await page.mouse.move(40, VIEW_H - 60);
+  // 20 s idle, then a glide of about 14° at the sway's speed.
+  const back = await page.evaluate(
+      ({ edge }) =>
+        new Promise<boolean>((resolve) => {
+          const map = (window as MapWindow).__malasMap!;
+          const start = performance.now();
+          const tick = () => {
+            if (map.getBearing() <= edge) return resolve(true);
+            if (performance.now() - start > 45_000) return resolve(false);
+            requestAnimationFrame(tick);
+          };
+          tick();
+        }),
+      { edge: rest + SWAY_DEG + 0.05 },
+  );
+  const swing = await watchBearing(page, 10_000);
+  check(
+    back && swing.min >= rest - SWAY_DEG - 0.3 && swing.max <= rest + SWAY_DEG + 0.3,
+    `after a turn to north the idle sway glides back to its arc around ${rest}° (${back ? `${swing.min.toFixed(1)}° to ${swing.max.toFixed(1)}°` : "it never came back"})`,
+  );
+}
+
+/**
+ * A selected region is framed beside the chrome: no part of its outline sits under the sheet, the dock
+ * cards or the map tools (fix round 1, Important 5).
+ */
+async function regionClearOfChrome(page: Page, id: string) {
+  const covered = await page.evaluate(async (id) => {
+    const map = (window as MapWindow).__malasMap!;
+    const fc = (await (await fetch("/api/regions")).json()) as { features: { properties: { id: string }; geometry: { type: string; coordinates: unknown } }[] };
+    const g = fc.features.find((f) => f.properties.id === id)!.geometry;
+    const polys = (g.type === "Polygon" ? [g.coordinates] : g.coordinates) as number[][][][];
+    const rects = [".sheet", ".legend", ".controls", ".map-tools"].flatMap((sel) => {
+      const r = document.querySelector(sel)?.getBoundingClientRect();
+      return r ? [{ sel, r }] : [];
+    });
+    const hits: string[] = [];
+    let total = 0;
+    for (const poly of polys)
+      for (const [lng, lat] of poly[0]!) {
+        total++;
+        const p = map.project([lng!, lat!]);
+        const under = rects.find(({ r }) => p.x > r.left && p.x < r.right && p.y > r.top && p.y < r.bottom);
+        if (under) hits.push(under.sel);
+      }
+    return { total, hits: hits.length, where: [...new Set(hits)].join(", ") };
+  }, id);
+  check(covered.hits === 0, `the selected ${id} is framed clear of the sheet, dock and tools (${covered.hits} of ${covered.total} outline points covered${covered.where ? ` by ${covered.where}` : ""})`);
 }
 
 /** The hover preview as the map and the panels show it: lifted and faded columns, list row, needle, tooltip. */
@@ -336,6 +395,33 @@ async function pickFromList(page: Page, how: "mouse" | "keyboard", region: { id:
     after.lifted.length === 0 && after.faded === 0 && after.activeRow === null && after.needle === null,
     `${how}: after picking ${region.name} from the list and going back, no preview is left (lifted ${after.lifted.join() || "none"}, faded ${after.faded}, row ${after.activeRow ?? "none"}, needle ${after.needle ?? "none"})`,
   );
+}
+
+/**
+ * "Lewati intro" during the flight: the most common first action. The camera eases off the globe while
+ * tiles are half built; the page must stay free of console warnings (it once logged 12 WebGL
+ * GL_INVALID_OPERATION warnings here, from the plant markers).
+ */
+async function skipIntroIsClean(browser: Awaited<ReturnType<typeof launchBrowser>>) {
+  const page = await browser.newPage({ viewport: { width: VIEW_W, height: VIEW_H }, deviceScaleFactor: 1 });
+  const problems: string[] = [];
+  page.on("console", (msg: ConsoleMessage) => {
+    const type = msg.type();
+    if ((type === "error" || type === "warning") && !KNOWN_UPSTREAM_WARNINGS.some((re) => re.test(msg.text()))) problems.push(msg.text().slice(0, 140));
+  });
+  page.on("pageerror", (err) => problems.push(err.message));
+  await page.goto(BASE_URL, { waitUntil: "domcontentloaded" });
+  const skip = page.getByRole("button", { name: "Lewati intro" });
+  await skip.waitFor({ timeout: 30_000 });
+  await page.waitForTimeout(1200); // well into the flight, still on the globe
+  await skip.click();
+  await page.locator(".ui-layer").waitFor({ timeout: 20_000 });
+  await waitForMapIdle(page, 15_000);
+  await page.waitForTimeout(2500);
+  const landed = await page.evaluate(() => (window as MapWindow).__malasMap!.getZoom());
+  check(Math.abs(landed - KALTIM_VIEW.zoom) < 0.05, `"Lewati intro" lands on the province view (zoom ${landed.toFixed(2)})`);
+  check(problems.length === 0, `"Lewati intro" during the flight logs no console warning or error (${problems.length ? problems.slice(0, 2).join("; ") : "none"})`);
+  await page.close();
 }
 
 const failures: string[] = [];
@@ -411,14 +497,15 @@ try {
   check(overview.regionLabels === 10, `all 10 region names stand on their columns (got ${overview.regionLabels})`);
   check(overview.placeLabels === false, "no basemap place names over the columns at the province view");
   // After the intro a small zoom-out keeps the basemap names off the standing columns; well out they return.
-  // Each view settles (tiles loaded, frame drawn) before the next jump, as it would for a person zooming:
-  // jumping on within milliseconds made Chromium log WebGL warnings from abandoned globe tiles.
-  const placeLabelsAt = async (zoom: number) => {
-    await page.evaluate(({ view, zoom }) => (window as MapWindow).__malasMap!.jumpTo({ ...view, zoom }), { view: KALTIM_VIEW, zoom });
-    await waitForMapIdle(page, 15_000);
-    await page.waitForTimeout(300);
-    return page.evaluate(() => (window as MapWindow).__malasMap!.getConfigProperty("basemap", "showPlaceLabels") as boolean);
-  };
+  const placeLabelsAt = (zoom: number) =>
+    page.evaluate(
+      ({ view, zoom }) => {
+        const map = (window as MapWindow).__malasMap!;
+        map.jumpTo({ ...view, zoom });
+        return map.getConfigProperty("basemap", "showPlaceLabels") as boolean;
+      },
+      { view: KALTIM_VIEW, zoom },
+    );
   const smallOut = await placeLabelsAt(5.1);
   const farOut = await placeLabelsAt(LANDED_LABEL_ZOOM - 0.2);
   check(!smallOut && farOut, `after the intro, place names stay off the columns at zoom 5.1 (${smallOut ? "on" : "off"}) and return below zoom ${LANDED_LABEL_ZOOM} (${farOut ? "on" : "off"})`);
@@ -518,6 +605,7 @@ try {
   await page.waitForTimeout(2600);
   await waitForMapIdle(page);
   await shot(page, "4-region");
+  await regionClearOfChrome(page, "paser");
 
   await page.getByRole("radio", { name: "Listrik" }).click();
   await page.waitForTimeout(1800);
@@ -580,12 +668,14 @@ try {
   await page.getByRole("button", { name: "Perbesar" }).focus();
   await page.keyboard.press("ArrowDown");
   const tip = page.getByRole("tooltip");
-  await tip.waitFor({ timeout: 3000 }).catch(() => {});
+  // The previous tool's tooltip fades out while the next one fades in: wait until one is left.
+  await page.waitForFunction(() => document.querySelectorAll('[role="tooltip"]').length === 1, undefined, { timeout: 3000 }).catch(() => {});
   check((await tip.textContent().catch(() => null)) === "Perkecil", "arrow keys move through the map tools and each one shows its tooltip");
   await page.getByRole("button", { name: "Hadapkan ke utara" }).click();
   await page.waitForTimeout(1500);
   const north = await page.evaluate(() => (window as MapWindow).__malasMap!.getBearing());
   check(Math.abs(north) < 0.5, `the compass turns the map to north (bearing ${north.toFixed(1)}°)`);
+  await swayReturnsToItsArc(page);
   await page.getByRole("button", { name: "Kembali ke seluruh Kalimantan Timur" }).click();
   await page.waitForTimeout(2600);
   const home = await page.evaluate(() => {
@@ -661,6 +751,8 @@ try {
   check(!(await mapState(page)).haze, "switching the rain off clears the haze");
   // Close it so its idle orbit does not keep streaming city tiles in the background during the next check.
   await page.close();
+
+  await skipIntroIsClean(browser);
 
   // Failure path: Mapbox rejects the token. The app must show the Indonesian card, not hang or throw.
   const failPage = await browser.newPage({ viewport: { width: VIEW_W, height: VIEW_H }, deviceScaleFactor: 1 });

@@ -3,7 +3,7 @@ import type { FogSpecification } from "mapbox-gl";
 import { clearTokenCache } from "../../src/web/theme.ts";
 import {
   basemapLight,
-  basemapTheme,
+  BASEMAP_THEME,
   LIGHT_NOTE,
   type LightMode,
   lightModeFor,
@@ -47,7 +47,7 @@ describe("light preset follows WITA time", () => {
     expect(presetTone("night")).toBe("dark");
   });
   test("the basemap is Standard's own look, lightly muted, in every light", () => {
-    for (const p of ["day", "dawn", "dusk", "night"] as const) expect(basemapTheme(p)).toBe("faded");
+    expect(BASEMAP_THEME).toBe("faded");
   });
   test("dawn and dusk use Standard's day and night light, never its warm tan wash", () => {
     expect(basemapLight("day")).toBe("day");
