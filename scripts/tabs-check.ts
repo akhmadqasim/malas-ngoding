@@ -37,13 +37,13 @@ const HARNESS = harness.url.href.replace(/\/$/, "");
 mkdirSync(SHOTS, { recursive: true });
 const browser = await launchBrowser();
 
-async function open(theme: "day" | "night", tab: "surya" | "cuaca", size: readonly [number, number] = [1600, 900]): Promise<Page> {
+async function open(theme: "day" | "night", tab: "surya" | "cuaca", size: readonly [number, number] = [1600, 900], type = "kantor"): Promise<Page> {
   const page = await browser.newPage({ viewport: { width: size[0], height: size[1] }, deviceScaleFactor: 1 });
   page.on("console", (msg) => {
     if (msg.type() === "error" || msg.type() === "warning") consoleProblems.push(`${msg.type()}: ${msg.text()}`);
   });
   page.on("pageerror", (err) => consoleProblems.push(`pageerror: ${err.message}`));
-  await page.goto(`${HARNESS}/?theme=${theme}&tab=${tab}`);
+  await page.goto(`${HARNESS}/?theme=${theme}&tab=${tab}&type=${type}`);
   return page;
 }
 
@@ -77,6 +77,33 @@ async function shotsFor(theme: "day" | "night") {
         await page.screenshot({ path: "docs/technical/screens/solar.png" });
         console.log("saved docs/technical/screens/solar.png");
       }
+      await page.close();
+    }
+  }
+}
+
+/**
+ * The Surya tab for a house, an office, a mall and a government office, by night and by day: each names its
+ * own PLN tariff class and daytime share, and the ring never claims more than that share.
+ */
+async function typeShots() {
+  const expected = { rumah: ["R-1/TR 1.300 VA", 40], kantor: ["B-2/TR", 85], mal: ["B-3/TM", 70], pemerintahan: ["P-1/TR", 85] } as const;
+  for (const [type, [golongan, share]] of Object.entries(expected)) {
+    for (const theme of ["night", "day"] as const) {
+      const page = await open(theme, "surya", [1600, 900], type);
+      await page.locator(".sw-cover").waitFor({ timeout: 30_000 });
+      await settle(page);
+      await page.screenshot({ path: join(SHOTS, `type-${type}-${theme}.png`) });
+      const notes = (await page.locator(".sw-tab__note").allTextContents()).join(" | ");
+      const cover = num(await page.locator(".sw-cover__figure").textContent());
+      if (theme === "night") {
+        check(notes.includes(`golongan ${golongan}`), `${type}: the tariff line names ${golongan}`);
+        check(notes.includes(`${share}%`) && cover <= share, `${type}: the ring stays within the ${share}% daytime share (${cover}%)`);
+        check(notes.includes("Permen ESDM 2/2024"), `${type}: says export earns nothing`);
+      }
+      await page.locator(".harness__scroll").evaluate((el) => el.scrollTo(0, el.scrollHeight));
+      await page.waitForTimeout(500);
+      await page.screenshot({ path: join(SHOTS, `type-${type}-${theme}-bottom.png`) });
       await page.close();
     }
   }
@@ -120,6 +147,7 @@ try {
   await page.getByRole("slider").focus();
   for (let i = 0; i < 4; i++) await page.keyboard.press("ArrowRight");
   check((await page.locator(".slider__output").textContent()) === "8 jam", "the backup slider reads 8 jam after four steps");
+  check((await page.getByRole("slider").getAttribute("aria-valuetext")) === "8 jam", "screen readers hear 8 jam too");
   const seen = new Set<string>();
   const until = Date.now() + 1400;
   while (Date.now() < until) {
@@ -171,8 +199,11 @@ try {
   await wet.locator(".sw-chart__line").waitFor({ timeout: 30_000 });
   await wet.waitForTimeout(900);
   check((await wet.locator(".sw-chart__rain").count()) >= 1, "rain hours are shaded in the chart");
-  const drop = await wet.locator(".sw-days__drop").first().textContent().catch(() => null);
-  check(/^produksi turun \d+% karena hujan$/.test(drop ?? ""), `the rainy day says what rain costs (${drop})`);
+  const wetRow = wet.locator(".sw-days__row", { has: wet.locator(".sw-days__sky", { hasText: /^Hujan$/ }) }).first();
+  const drop = await wetRow.locator(".sw-days__drop").textContent().catch(() => null);
+  check(/^produksi turun \d+% karena hujan$/.test(drop ?? ""), `the rainy day says what rain costs against a clear sky (${drop})`);
+  const allDrops = await wet.locator(".sw-days__drop").count();
+  check(allDrops === (await wet.locator(".sw-days__row").count()), `every day, the best one too, is measured against a clear sky (${allDrops} lines)`);
   await wet.screenshot({ path: join(SHOTS, "check-cuaca-rain-day.png") });
   await wet.locator(".harness__scroll").evaluate((el) => el.scrollTo(0, el.scrollHeight));
   await wet.waitForTimeout(400);
@@ -201,6 +232,7 @@ try {
 
   await shotsFor("night");
   await shotsFor("day");
+  await typeShots();
 } catch (err) {
   failures.push(err instanceof Error ? err.message : String(err));
   console.error(err);

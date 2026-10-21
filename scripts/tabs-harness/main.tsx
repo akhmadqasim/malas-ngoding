@@ -7,7 +7,7 @@ import { MotionConfig } from "motion/react";
 import { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { fmtNumber } from "../../src/shared/format.ts";
-import type { BuildingEstimate, BuildingInput } from "../../src/shared/types.ts";
+import type { BuildingEstimate, BuildingInput, BuildingType } from "../../src/shared/types.ts";
 import { api } from "../../src/web/api.ts";
 import { Estimate } from "../../src/web/components/Estimate.tsx";
 import { SolarTab } from "../../src/web/panels/SolarTab.tsx";
@@ -16,15 +16,24 @@ import { WeatherTab } from "../../src/web/panels/WeatherTab.tsx";
 const q = new URLSearchParams(location.search);
 document.documentElement.dataset.theme = q.get("theme") === "day" ? "atlas-day" : "atlas-night";
 
-/** A four-floor office in central Samarinda (the estimate comes from the real API). */
+/** Fixture buildings in central Samarinda, by `?type=` (the estimate comes from the real API). */
+const FIXTURES: Partial<Record<BuildingType, { name: string; footprintM2: number; floors: number }>> = {
+  rumah: { name: "Rumah", footprintM2: 100, floors: 1 },
+  kantor: { name: "Kantor", footprintM2: 600, floors: 4 },
+  mal: { name: "Mal", footprintM2: 6000, floors: 3 },
+  pemerintahan: { name: "Kantor pemerintahan", footprintM2: 1200, floors: 3 },
+  sekolah: { name: "Sekolah", footprintM2: 900, floors: 2 },
+};
+const TYPE = (q.get("type") ?? "kantor") as BuildingType;
+const PICK = FIXTURES[TYPE] ?? FIXTURES.kantor!;
 const FIXTURE: BuildingInput = {
-  featureId: "harness-samarinda-office",
+  featureId: `harness-samarinda-${TYPE}`,
   lng: 117.1475,
   lat: -0.4955,
-  footprintM2: 600,
+  footprintM2: PICK.footprintM2,
   heightM: null,
-  typeOverride: "kantor",
-  floorsOverride: 4,
+  typeOverride: FIXTURES[TYPE] ? TYPE : "kantor",
+  floorsOverride: PICK.floors,
 };
 
 const TABS = [
@@ -49,7 +58,7 @@ function Harness() {
         {error && <p>{error}</p>}
         {building && (
           <div className="harness__scroll">
-            <h2 className="harness__name">Kantor</h2>
+            <h2 className="harness__name">{PICK.name}</h2>
             <p className="harness__meta">{building.region?.name ?? "Di luar Kalimantan Timur"}, {building.floors} lantai</p>
             <p className="harness__readout num">{fmtNumber(building.kwhYear)}</p>
             <p className="harness__meta">

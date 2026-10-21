@@ -22,6 +22,7 @@ import { join } from "node:path";
 import type { ConsoleMessage, Page } from "playwright";
 import { launchBrowser } from "./chromium.ts";
 import { KALTIM_VIEW, SWAY_DEG } from "../src/web/map/camera.ts";
+import { pvFromForecast, summariseDays } from "../src/shared/pvForecast.ts";
 import { basemapLight, lightPresetFor } from "../src/web/map/effects.ts";
 import { GLOBE_LABEL_ZOOM, LANDED_LABEL_ZOOM } from "../src/web/map/regionLabels.ts";
 
@@ -446,26 +447,50 @@ const listen = (page: Page, sink: string[]) => {
   page.on("pageerror", (err) => sink.push(`pageerror (after "${lastCheck}"): ${err.message}`));
 };
 
-/** WITA time of an instant as Open-Meteo writes it ("2026-10-21T14:00"). */
-function witaHourText(ms: number): string {
-  return `${new Date(ms + 8 * 3600_000).toISOString().slice(0, 13)}:00`;
+/** WITA date of an instant ("2026-10-21"). */
+function witaDateText(ms: number): string {
+  return new Date(ms + 8 * 3600_000).toISOString().slice(0, 10);
 }
 
+/** How many /api/weather calls the stub answered: a check that expects a refetch can see one happened. */
+let weatherStubHits = 0;
+
 /**
- * Answers every /api/weather call of the page with a fixed forecast, so the real weather at the view
- * centre cannot switch the rain on in the middle of the rain checks (auto rain, map/autoRain.ts). "stale"
- * is a cached forecast from three days ago that said rain: auto rain must ignore it.
+ * Answers every /api/weather call of the page with a fixed three-day forecast (a sun curve from 06.00 to
+ * 18.00 WITA), so the real weather at the view centre cannot switch the rain on in the middle of the rain
+ * checks (auto rain, map/autoRain.ts). "rain" rains every hour; "stale" is a cached rainy forecast from
+ * three days ago, which auto rain must ignore.
  */
 async function stubWeather(page: Page, sky: "dry" | "rain" | "stale") {
   await page.unroute("**/api/weather?*");
   const raining = sky !== "dry";
-  const at = sky === "stale" ? Date.now() - 3 * 86_400_000 : Date.now();
-  const hour = { time: witaHourText(at), ghiWm2: 200, cloudPct: raining ? 100 : 10, precipMm: raining ? 3 : 0, weatherCode: raining ? 63 : 1, pvKwh: 0 };
-  await page.route("**/api/weather?*", (route) =>
-    route.fulfill({
-      json: { hours: [hour], days: [], current: { raining, cloudPct: hour.cloudPct, precipMm: hour.precipMm, isDay: true }, stale: sky === "stale" },
-    }),
-  );
+  const start = Date.parse(`${witaDateText(Date.now() - (sky === "stale" ? 3 * 86_400_000 : 0))}T00:00:00+08:00`);
+  const forecast = Array.from({ length: 72 }, (_, i) => {
+    const hour = i % 24;
+    const sun = Math.max(0, Math.sin((Math.PI * (hour - 6)) / 12));
+    return {
+      time: `${witaDateText(start + i * 3600_000)}T${String(hour).padStart(2, "0")}:00`,
+      ghiWm2: Math.round((raining ? 250 : 850) * sun),
+      cloudPct: raining ? 100 : 10,
+      precipMm: raining ? 3 : 0,
+      weatherCode: raining ? 63 : 1,
+    };
+  });
+  const gap = (t: string) => Math.abs(Date.parse(`${t}:00+08:00`) - Date.now());
+  const now = forecast.reduce((a, b) => (gap(b.time) < gap(a.time) ? b : a));
+  await page.route("**/api/weather?*", (route) => {
+    weatherStubHits++;
+    const kWp = Number(new URL(route.request().url()).searchParams.get("kWp")) || 0;
+    const hours = pvFromForecast(forecast, kWp);
+    return route.fulfill({
+      json: {
+        hours,
+        days: summariseDays(hours),
+        current: { raining, cloudPct: now.cloudPct, precipMm: now.precipMm, isDay: now.ghiWm2 > 0 },
+        stale: sky === "stale",
+      },
+    });
+  });
 }
 
 /** Rain drawn on the map, the Hujan switch, the note under it and the overcast tint. */
@@ -492,8 +517,10 @@ async function jumpClose(page: Page, center: [number, number]) {
  */
 async function autoRainChecks(page: Page) {
   await stubWeather(page, "stale");
+  const hitsBefore = weatherStubHits;
   await jumpClose(page, [116.8473, -1.2654]); // Balikpapan
   const stale = await rainShown(page);
+  check(weatherStubHits > hitsBefore, `a big camera move asks for the weather again (${weatherStubHits - hitsBefore} request(s))`);
   check(!stale.rain && !stale.switchOn, `auto rain ignores a forecast that is days old (rain ${stale.rain ? "on" : "off"})`);
   await stubWeather(page, "rain");
   await jumpClose(page, [117.4949, 0.1335]); // Bontang
@@ -504,8 +531,72 @@ async function autoRainChecks(page: Page) {
   await flipSwitch(page, "Hujan");
   await page.waitForTimeout(600);
   const off = await rainShown(page);
-  check(!off.rain && !off.switchOn && off.note === null, `switching rain off while it really rains keeps it off (rain ${off.rain ? "on" : "off"})`);
+  check(
+    !off.rain && !off.switchOn && off.note === "Efek hujan mati sampai hujan di sini reda.",
+    `switching rain off while it really rains keeps it off for this shower (rain ${off.rain ? "on" : "off"}, note ${off.note ?? "none"})`,
+  );
   await stubWeather(page, "dry");
+}
+
+/** The number in a text, read the Indonesian way ("1.234,5" is 1234.5). */
+const idNumber = (text: string | null) => Number((text ?? "").match(/[\d.]+(,\d+)?/)?.[0]?.replaceAll(".", "").replace(",", ".") ?? Number.NaN);
+
+/**
+ * The Surya and Cuaca tabs in the real building panel (Task 9): the backup slider counts the battery up
+ * smoothly, Cuaca forecasts the panels Surya sized, rain hours are shaded and a rainy day says what rain
+ * costs against a clear sky, and a failed simulation offers "Coba lagi". Clicks the building in the middle
+ * of the view; skipped (not failed) while no building panel with these tabs is mounted in this build.
+ */
+async function solarPanelChecks(page: Page) {
+  await page.mouse.click(VIEW_W / 2, VIEW_H / 2);
+  const suryaTab = page.getByRole("tab", { name: "Surya" });
+  if (!(await suryaTab.waitFor({ timeout: 10_000 }).then(() => true, () => false))) {
+    console.log("skip solar panel checks: no building panel with a Surya tab in this build yet");
+    return;
+  }
+  await suryaTab.click();
+  await page.locator(".sw-cover").waitFor({ timeout: 30_000 });
+  await page.waitForTimeout(1300);
+  const fact = (label: string) =>
+    page.locator(".sw-fact", { has: page.locator(".sw-fact__label", { hasText: label }) }).locator(".sw-fact__number").textContent();
+  const batteryBefore = idNumber(await fact("Baterai"));
+  await page.getByRole("slider").focus();
+  for (let i = 0; i < 4; i++) await page.keyboard.press("ArrowRight");
+  const seen = new Set<string>();
+  const until = Date.now() + 1400;
+  while (Date.now() < until) {
+    seen.add((await fact("Baterai")) ?? "");
+    await page.waitForTimeout(40);
+  }
+  check(
+    seen.size >= 4 && idNumber(await fact("Baterai")) > batteryBefore,
+    `panel: the battery counts up smoothly with the backup slider (${seen.size} values on the way)`,
+  );
+  const kWp = idNumber(await fact("Kapasitas panel"));
+  await shot(page, "9-panel-surya");
+
+  await stubWeather(page, "rain");
+  await page.getByRole("tab", { name: "Cuaca" }).click();
+  await page.locator(".sw-chart__line").waitFor({ timeout: 30_000 });
+  await page.waitForTimeout(900);
+  const title = await page.locator("#pv-chart-title").textContent();
+  check(idNumber(title?.replace(/^\D+/, "") ?? null) === kWp, `panel: Cuaca forecasts the panels Surya sized (${title})`);
+  check((await page.locator(".sw-chart__rain").count()) >= 1, "panel: rain hours are shaded in the hourly chart");
+  const drop = await page.locator(".sw-days__drop").first().textContent();
+  check(/^produksi turun \d+% karena hujan$/.test(drop ?? ""), `panel: a rainy day says what rain costs against a clear sky (${drop})`);
+  await shot(page, "9-panel-cuaca");
+  await stubWeather(page, "dry");
+
+  await page.route("**/api/solar/simulate", (route) => route.fulfill({ status: 503, json: { error: "Layanan sedang tidak tersedia." } }));
+  await page.getByRole("tab", { name: "Surya" }).click();
+  const alert = page.locator(".sw-tab__failure");
+  const failed = await alert.waitFor({ timeout: 10_000 }).then(() => true, () => false);
+  await page.unroute("**/api/solar/simulate");
+  check(failed, "panel: a failed simulation says so and offers Coba lagi");
+  if (failed) {
+    await alert.getByRole("button", { name: "Coba lagi" }).click();
+    check(await page.locator(".sw-cover").waitFor({ timeout: 20_000 }).then(() => true, () => false), "panel: Coba lagi brings the simulation back");
+  }
 }
 
 const browser = await launchBrowser();
@@ -818,6 +909,7 @@ try {
   check(!(await mapState(page)).haze, "switching the rain off clears the haze");
   await autoRainChecks(page);
   await buildingChecks(page);
+  await solarPanelChecks(page);
   await buildingHeapSoak(page);
   // Close it so its idle orbit does not keep streaming city tiles in the background during the next check.
   await page.close();
