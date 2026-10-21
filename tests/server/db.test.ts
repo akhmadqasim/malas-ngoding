@@ -93,24 +93,42 @@ describe.skipIf(!reachable)("db", () => {
     expect((await regionAt(116.8312, -1.2717))?.id).toBe("balikpapan");
   });
 
-  test("regionAt picks one region deterministically on a shared border", async () => {
-    const [row] = await sql`
-      SELECT a.id AS a_id, b.id AS b_id,
-             ST_X(p.pt) AS lng, ST_Y(p.pt) AS lat
+  test("regionAt picks the lowest id on every shared border point, not whichever row the scan meets first", async () => {
+    // A border vertex belongs to both regions. The old query (LIMIT 1, no ORDER BY) answered in index scan
+    // order, which is not id order for some pairs, so checking every pair pins the ORDER BY.
+    const points = await sql`
+      SELECT a.id AS a_id, b.id AS b_id, ST_X(p.pt) AS lng, ST_Y(p.pt) AS lat
       FROM regions a
       JOIN regions b ON a.id < b.id
       CROSS JOIN LATERAL (
-        SELECT ST_LineInterpolatePoint(ST_LineMerge(line.geom), 0.5) AS pt
-        FROM (SELECT ST_CollectionExtract(ST_Intersection(ST_Boundary(a.geom), ST_Boundary(b.geom)), 2) AS geom) line
-        WHERE NOT ST_IsEmpty(line.geom)
+        SELECT ST_StartPoint(d.geom) AS pt
+        FROM ST_Dump(ST_CollectionExtract(ST_Intersection(ST_Boundary(a.geom), ST_Boundary(b.geom)), 2)) d
+        LIMIT 1
       ) p
-      WHERE ST_Intersects(a.geom, b.geom) AND p.pt IS NOT NULL
-      ORDER BY a.id, b.id LIMIT 1`;
-    expect(row).toBeDefined();
-    const first = await regionAt(Number(row?.lng), Number(row?.lat));
-    expect(first).not.toBeNull();
-    // Whichever regions touch the point, the answer is stable and is not left to the planner.
-    for (let i = 0; i < 3; i++) expect(await regionAt(Number(row?.lng), Number(row?.lat))).toEqual(first);
+      WHERE ST_Intersects(a.geom, p.pt) AND ST_Intersects(b.geom, p.pt)
+      ORDER BY a.id, b.id`;
+    expect(points.length).toBeGreaterThanOrEqual(5);
+    for (const row of points) {
+      const lng = Number(row.lng);
+      const lat = Number(row.lat);
+      const touching = await sql`
+        SELECT id FROM regions
+        WHERE ST_Intersects(geom, ST_SetSRID(ST_MakePoint(${lng}, ${lat}), 4326)) ORDER BY id`;
+      expect(touching.length).toBeGreaterThanOrEqual(2);
+      expect((await regionAt(lng, lat))?.id, `${row.a_id} / ${row.b_id}`).toBe(String(touching[0]?.id));
+    }
+  });
+
+  test("an empty grid_mix is an error, not a silent 1.14", async () => {
+    try {
+      await sql`DELETE FROM grid_mix`;
+      await expect(getGridMix()).rejects.toThrow("grid_mix is empty");
+      await expect(listRegions()).rejects.toThrow("grid_mix is empty");
+      await expect(regionGeoJSON()).rejects.toThrow("grid_mix is empty");
+    } finally {
+      await seedAll();
+    }
+    expect((await getGridMix()).factorKgPerKwh).toBe(1.14);
   });
 
   test("regionAt returns null outside Kaltim", async () => {
