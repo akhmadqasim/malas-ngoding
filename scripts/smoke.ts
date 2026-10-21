@@ -544,16 +544,21 @@ const idNumber = (text: string | null) => Number((text ?? "").match(/[\d.]+(,\d+
 /**
  * The Surya and Cuaca tabs in the real building panel (Task 9): the backup slider counts the battery up
  * smoothly, Cuaca forecasts the panels Surya sized, rain hours are shaded and a rainy day says what rain
- * costs against a clear sky, and a failed simulation offers "Coba lagi". Clicks the building in the middle
- * of the view; skipped (not failed) while no building panel with these tabs is mounted in this build.
+ * costs against a clear sky, and a failed simulation offers "Coba lagi". Opens a building in central
+ * Samarinda and closes the panel again at the end.
  */
 async function solarPanelChecks(page: Page) {
-  await page.mouse.click(VIEW_W / 2, VIEW_H / 2);
-  const suryaTab = page.getByRole("tab", { name: "Surya" });
-  if (!(await suryaTab.waitFor({ timeout: 10_000 }).then(() => true, () => false))) {
-    console.log("skip solar panel checks: no building panel with a Surya tab in this build yet");
+  await page.evaluate((view) => (window as MapWindow).__malasMap!.jumpTo(view), samarindaClose());
+  await waitForMapIdle(page, 15_000);
+  await page.waitForTimeout(800);
+  const found = await buildingsOnScreen(page);
+  if (!found.length) {
+    check(false, "panel: a building to open for the Surya and Cuaca tabs");
     return;
   }
+  await page.mouse.click(found[0]!.x, found[0]!.y);
+  await waitForPanelReady(page);
+  const suryaTab = page.getByRole("tab", { name: "Surya" });
   await suryaTab.click();
   await page.locator(".sw-cover").waitFor({ timeout: 30_000 });
   await page.waitForTimeout(1300);
@@ -573,7 +578,9 @@ async function solarPanelChecks(page: Page) {
     `panel: the battery counts up smoothly with the backup slider (${seen.size} values on the way)`,
   );
   const kWp = idNumber(await fact("Kapasitas panel"));
+  await page.mouse.move(VIEW_W * 0.45, 12);
   await shot(page, "9-panel-surya");
+  await screen(page, "solar.png");
 
   await stubWeather(page, "rain");
   await page.getByRole("tab", { name: "Cuaca" }).click();
@@ -587,16 +594,22 @@ async function solarPanelChecks(page: Page) {
   await shot(page, "9-panel-cuaca");
   await stubWeather(page, "dry");
 
+  const logged = consoleProblems.length;
   await page.route("**/api/solar/simulate", (route) => route.fulfill({ status: 503, json: { error: "Layanan sedang tidak tersedia." } }));
   await page.getByRole("tab", { name: "Surya" }).click();
   const alert = page.locator(".sw-tab__failure");
   const failed = await alert.waitFor({ timeout: 10_000 }).then(() => true, () => false);
   await page.unroute("**/api/solar/simulate");
+  // Chromium logs the 503 sent on purpose above as a failed resource: that one is ours, not a problem.
+  for (let i = consoleProblems.length - 1; i >= logged; i--) if (/status of 503/.test(consoleProblems[i]!)) consoleProblems.splice(i, 1);
   check(failed, "panel: a failed simulation says so and offers Coba lagi");
   if (failed) {
     await alert.getByRole("button", { name: "Coba lagi" }).click();
     check(await page.locator(".sw-cover").waitFor({ timeout: 20_000 }).then(() => true, () => false), "panel: Coba lagi brings the simulation back");
   }
+  await page.getByRole("tab", { name: "Energi" }).click();
+  await page.locator(".building-panel__close").click();
+  await page.locator(".building-panel").waitFor({ state: "detached", timeout: 3000 });
 }
 
 const browser = await launchBrowser();
