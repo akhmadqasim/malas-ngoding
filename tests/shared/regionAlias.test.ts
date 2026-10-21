@@ -23,3 +23,11 @@ describe("resolveRegion", () => {
     expect(resolveRegion("Kota")).toBeNull();
   });
 });
+
+describe("resolveRegion against the seed", () => {
+  test("every seeded region id resolves to itself, so the slug list in regionAlias.ts cannot drift", async () => {
+    const seed = (await Bun.file("data/seed/regions.json").json()) as { id: string }[];
+    expect(seed).toHaveLength(10);
+    for (const { id } of seed) expect(resolveRegion(id)).toBe(id);
+  });
+});

@@ -69,9 +69,10 @@ export function estimateBuilding(
 ): BuildingEstimate {
   const assumptions: string[] = [];
 
-  const rawFootprint = Number.isFinite(input.footprintM2) ? input.footprintM2 : MIN_FOOTPRINT_M2;
-  const footprint = clamp(rawFootprint, MIN_FOOTPRINT_M2, MAX_FOOTPRINT_M2);
-  if (!Number.isFinite(input.footprintM2)) {
+  // Only NaN means "unknown". +-Infinity is a number that is out of range, so it clamps like any other.
+  const footprintKnown = !Number.isNaN(input.footprintM2);
+  const footprint = clamp(footprintKnown ? input.footprintM2 : MIN_FOOTPRINT_M2, MIN_FOOTPRINT_M2, MAX_FOOTPRINT_M2);
+  if (!footprintKnown) {
     assumptions.push(`Luas lantai dasar tidak diketahui, dipakai ${MIN_FOOTPRINT_M2} m2.`);
   } else if (footprint !== input.footprintM2) {
     assumptions.push(`Luas lantai dasar dibatasi ke ${footprint.toLocaleString("id-ID")} m2 agar perkiraan tetap masuk akal.`);
@@ -97,8 +98,11 @@ export function estimateBuilding(
     floors = clamp(Math.round(input.floorsOverride), MIN_FLOORS, MAX_FLOORS);
   } else {
     floors = estimateFloors(type, input.heightM, params.typicalFloors);
-    if (input.heightM === null || !Number.isFinite(input.heightM) || input.heightM <= 3) {
+    if (input.heightM === null || !Number.isFinite(input.heightM)) {
       assumptions.push(`Tinggi bangunan tidak ada di data peta, dipakai jumlah lantai umum: ${floors} lantai.`);
+    } else if (input.heightM <= 3) {
+      const height = input.heightM.toLocaleString("id-ID", { maximumFractionDigits: 1 });
+      assumptions.push(`Tinggi bangunan di data peta hanya ${height} m, terlalu rendah untuk menghitung lantai, dipakai jumlah lantai umum: ${floors} lantai.`);
     }
   }
 

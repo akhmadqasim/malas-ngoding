@@ -23,8 +23,22 @@ describe("co2BySource", () => {
     expect(rows.map((r) => r.fuel)).toEqual(["batubara", "gas", "air"]);
     expect(rows[0]!.kwh).toBeCloseTo(700, 6);
   });
-  test("zero kwh gives zero co2", () => {
-    const rows = co2BySource(0, grid);
-    expect(rows.every((r) => r.co2Kg === 0)).toBe(true);
+  test("zero, negative and non-finite kwh give no rows at all", () => {
+    for (const kwh of [0, -5, Number.NaN, Number.POSITIVE_INFINITY]) expect(co2BySource(kwh, grid)).toEqual([]);
+  });
+  test("pins the split of 1000 kWh: 0.7 x 1.0 and 0.2 x 0.5 scaled to 800 kg", () => {
+    // raw = 700 + 100 = 800 kg already equals 1000 x 0.8, so the scale is 1 and nothing moves.
+    expect(co2BySource(1000, grid)).toEqual([
+      { fuel: "batubara", kwh: 700, co2Kg: 700 },
+      { fuel: "gas", kwh: 200, co2Kg: 100 },
+      { fuel: "air", kwh: 100, co2Kg: 0 },
+    ]);
+  });
+  test("when every present fuel has a zero factor, the total is split by energy share", () => {
+    const flat: GridMix = { ...grid, fuelFactors: zero() };
+    const rows = co2BySource(1000, flat);
+    expect(rows.map((r) => r.fuel)).toEqual(["batubara", "gas", "air"]);
+    expect(rows.map((r) => r.co2Kg)).toEqual([560, 160, 80]);
+    expect(rows.reduce((s, r) => s + r.co2Kg, 0)).toBeCloseTo(800, 9);
   });
 });
