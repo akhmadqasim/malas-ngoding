@@ -16,6 +16,12 @@ export const ACTION_TOOL_DEFINITIONS: Anthropic.Tool[] = [
     input_schema: { type: "object", properties: { region: REGION_PARAM }, required: ["region"] },
   },
   {
+    name: "show_all_regions",
+    description:
+      "Map action: back to the whole of Kalimantan Timur with all 10 regions side by side and nothing selected. Use it to compare regions or rank them; add set_metric for the measure you compare.",
+    input_schema: { type: "object", properties: {} },
+  },
+  {
     name: "fly_to",
     description:
       "Map action: fly the camera to a point. Zoom 6 shows all of Kaltim, 10 a city, 14 a district, 17.5 single buildings.",
@@ -70,6 +76,7 @@ export const ACTION_TOOL_DEFINITIONS: Anthropic.Tool[] = [
 /** Map actions Claude calls as tools. */
 export type ClientActionName =
   | "fly_to_region"
+  | "show_all_regions"
   | "fly_to"
   | "select_building_at"
   | "toggle_layer"
@@ -95,6 +102,7 @@ export const ACTIONS: Record<ClientActionName, (i: Record<string, unknown>) => C
     const r = region(i.region);
     return "problem" in r ? r : { input: { region: r.id } };
   },
+  show_all_regions: () => ({ input: {} }),
   fly_to: (i) => {
     const p = point(i);
     if ("problem" in p) return p;

@@ -47,6 +47,7 @@ const TOOL_NAMES = [
   "get_weather",
   "find_places",
   "fly_to_region",
+  "show_all_regions",
   "fly_to",
   "select_building_at",
   "toggle_layer",
@@ -642,6 +643,7 @@ describe("POST /api/chat", () => {
   });
 
   test.each([
+    ["show_all_regions", { anything: 1 }, {}],
     ["fly_to", { lng: 117.15, lat: -0.5, zoom: 15 }, { lng: 117.15, lat: -0.5, zoom: 15 }],
     ["select_building_at", { lng: 117.1466, lat: -0.4998 }, { lng: 117.1466, lat: -0.4998 }],
     ["toggle_layer", { layer: "Buildings", visible: true }, { layer: "buildings", visible: true }],
