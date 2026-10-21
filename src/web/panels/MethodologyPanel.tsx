@@ -460,14 +460,17 @@ export function MethodologyContent({ grid }: { grid: GridMix }) {
         <Formula>hasil per kWp per tahun = jam puncak matahari × 365 × 0,78</Formula>
         <p>
           Jam puncak matahari dari NASA POWER di titik gedung (4,2 jam bila layanan itu tidak terjangkau). 0,78 adalah rasio
-          kinerja: bagian produksi panel yang tersisa setelah rugi panas, kabel, dan inverter. Kapasitas yang dipasang adalah
-          yang lebih kecil antara kebutuhan gedung dan kapasitas atap: luas atap × 0,6 (bagian yang bisa dipakai) ÷ 5,5 m² per kWp.
+          kinerja: bagian produksi panel yang tersisa setelah rugi panas, kabel, dan inverter. Panel hanya menghemat listrik yang
+          dipakai langsung di gedung, dan listrik ke jaringan PLN tidak mengurangi tagihan (Permen ESDM 2/2024). Karena itu
+          kapasitas yang dipasang mengikuti pemakaian listrik siang gedung (porsi siang dan hari pakai menurut jenis gedung, asumsi),
+          dan tidak lebih dari kapasitas atap: luas atap × 0,6 (bagian yang bisa dipakai) ÷ 5,5 m² per kWp.
         </p>
         <p>
           {chem(
-            `CO2 yang dihindari memakai faktor ${factor(grid.factorKgPerKwh)}; Kepmen yang sama memberi ${factor(SOLAR_MARGIN_KG_PER_KWH)} khusus untuk PLTS dan PLTB, selisihnya sekitar ${fmtNumber((1 - SOLAR_MARGIN_KG_PER_KWH / grid.factorKgPerKwh) * 100)}%.`,
+            `CO2 yang dihindari memakai faktor ${factor(SOLAR_MARGIN_KG_PER_KWH)} khusus untuk PLTS dan PLTB, dari Kepmen yang sama dengan ${factor(grid.factorKgPerKwh)} untuk jaringan; selisihnya sekitar ${fmtNumber((1 - SOLAR_MARGIN_KG_PER_KWH / grid.factorKgPerKwh) * 100)}%.`,
           )}{" "}
-          Harga panel, baterai, dan tarif PLN berasal dari berita dan blog vendor 2026 yang belum diverifikasi. Balik modal
+          Tarif PLN mengikuti golongan jenis gedung (misalnya R-1 untuk rumah, P-1 untuk kantor pemerintah, B-2 untuk ruko dan
+          kantor). Harga panel, baterai, dan tarif PLN berasal dari berita dan blog vendor 2026 yang belum diverifikasi. Balik modal
           dihitung sederhana, tanpa bunga dan kenaikan tarif.
         </p>
       </Section>

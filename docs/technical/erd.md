@@ -106,7 +106,7 @@ erDiagram
   recommendations {
     text region_id PK, FK
     jsonb content "daftar rekomendasi"
-    text model "nama model, atau aturan bawaan"
+    text model "nama model AI, wajib diisi"
     timestamptz generated_at
   }
   chat_sessions {
@@ -137,7 +137,7 @@ erDiagram
 |---|---|---|
 | Data wilayah dan listrik | `regions`, `power_plants`, `grid_mix`, `building_types`, `equivalents` | `bun run seed`, dari `data/seed/*.json` dan `regions.geojson` |
 | Cache layanan luar dan hasil hitungan | `building_estimates`, `poi_cache`, `solar_climatology`, `weather_cache` | Server, saat aplikasi dipakai (dan saat pemanasan cache) |
-| AI | `recommendations`, `chat_sessions`, `chat_messages` | Fitur rekomendasi pemerintah dan chat AI (diverifikasi ulang di T11b) |
+| AI | `recommendations`, `chat_sessions`, `chat_messages` | Server: rekomendasi pemerintah (saat dibuat Claude, juga oleh `bun run warm`) dan riwayat chat AI |
 
 Isi seed saat ini: 10 wilayah, 13 pembangkit, 7 baris bauran listrik (satu per jenis bahan bakar, tahun 2024), 12 jenis bangunan, dan 5 faktor padanan. Seed memakai `INSERT ... ON CONFLICT DO UPDATE`, jadi aman dijalankan berulang.
 
@@ -207,7 +207,7 @@ Faktor untuk mengubah kilogram CO2 menjadi padanan yang mudah dibayangkan.
 | `key` | text, PK | `mobil_km`, `motor_km`, `pohon`, `charge_hp`, atau `penerbangan`. |
 | `label` | text | Teks tampilan, misalnya "km naik mobil". |
 | `kg_co2_per_unit` | double precision | Kilogram CO2 per satu satuan padanan. |
-| `unit` | text | Satuan: `km`, `pohon`, `kali`, atau `penerbangan`. |
+| `unit` | text | Satuan: `km`, `pohon`, `kali`, atau `penumpang`. |
 | `source` | text | Sumber faktor. |
 
 ### building_estimates
@@ -251,27 +251,29 @@ Rata-rata radiasi matahari jangka panjang dari NASA POWER.
 
 ### recommendations
 
-Rekomendasi untuk pemerintah daerah, satu baris per wilayah (diverifikasi ulang di T11b).
+Rekomendasi untuk pemerintah daerah yang ditulis Claude, satu baris per wilayah. Baris ini hanya ditulis bila Claude berhasil dan jawabannya lolos pemeriksaan.
 
 | Kolom | Tipe | Keterangan |
 |---|---|---|
 | `region_id` | text, PK dan FK ke `regions.id` | |
-| `content` | jsonb | Daftar rekomendasi: judul, kategori, isi, dampak, prioritas. |
-| `model` | text | Nama model AI yang menulisnya. |
-| `generated_at` | timestamptz | Waktu dibuat. |
+| `content` | jsonb | Objek `{ "items": [...] }`; tiap butir berisi judul, kategori, isi, dampak, dan prioritas 1 sampai 3 (3 sampai 6 butir). |
+| `model` | text, **NOT NULL** | Nama model AI yang menulis baris itu, misalnya `claude-sonnet-5-5`. Kolom ini tidak pernah kosong. |
+| `generated_at` | timestamptz | Waktu dibuat atau dibuat ulang. |
+
+Rekomendasi berbasis aturan (cadangan saat AI tidak ada atau gagal) tidak punya baris di tabel ini. Server menyusunnya saat dibaca dan mengirimnya dengan `model: null` di jawaban API, tetapi tidak menyimpannya, sehingga permintaan berikutnya mencoba Claude lagi. Jadi nilai kosong untuk `model` hanya ada di jawaban API, bukan di basis data. Hasil yang ditulis dengan jam matahari cadangan (NASA POWER gagal) juga tidak disimpan.
 
 ### chat_sessions dan chat_messages
 
-Riwayat chat AI per sesi anonim (diverifikasi ulang di T11b).
+Riwayat chat AI per sesi anonim.
 
 | Kolom | Tipe | Keterangan |
 |---|---|---|
-| `chat_sessions.id` | uuid, PK | Dibuat otomatis (`gen_random_uuid()`). Peramban menyimpannya di `localStorage`. |
+| `chat_sessions.id` | uuid, PK | Dibuat otomatis (`gen_random_uuid()`). Browser menyimpannya di `localStorage`. |
 | `chat_sessions.created_at` | timestamptz | |
 | `chat_messages.id` | serial, PK | |
 | `chat_messages.session_id` | uuid, FK ke `chat_sessions.id` | `ON DELETE CASCADE`. |
 | `chat_messages.role` | text | `user` atau `assistant` (dibatasi `CHECK`). |
-| `chat_messages.content` | jsonb | Isi pesan. |
+| `chat_messages.content` | jsonb | Pesan pengguna: `{ "text": ... }`. Jawaban asisten: `{ "text": ..., "actions": [...] }` dengan aksi peta yang dijalankannya. |
 | `chat_messages.created_at` | timestamptz | Indeks `chat_messages_session_idx` pada `(session_id, id)` mempercepat pembacaan riwayat. |
 
 ## PostGIS di aplikasi
