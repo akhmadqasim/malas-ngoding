@@ -1,0 +1,193 @@
+import type { Map as MapboxMap } from "mapbox-gl";
+import { api } from "../api.ts";
+import { type MarkedPlace, showPlaces } from "../chat/placesLayer.ts";
+import type { ChatAction } from "../chat/sse.ts";
+import { type AppState, type LayerKey, type Metric, type PanelTab, type RainMode, useAppStore } from "../store.ts";
+import { FLY_MS, flyToProvince, flyToRegion } from "./camera.ts";
+
+// Turns the map actions of the AI chat (server `action` events) into store and camera calls.
+
+/** Lane buildings' contract: select the building at a point, fly there and open its panel. */
+type BuildingSelection = { selectBuildingAt?: (lngLat: [number, number]) => Promise<void> };
+
+/** Where actions land. Tests pass their own; the app uses the store, the map in it and the API. */
+export interface ActionTarget {
+  getState: () => AppState & BuildingSelection;
+  /** A region's centre, to fly to the region that is already selected. */
+  regionCentroid: (id: string) => Promise<[number, number] | null>;
+  /** Marks found places on the map; a click on one selects the building there. */
+  showPlaces: (map: MapboxMap, places: MarkedPlace[], onPick: (lngLat: [number, number]) => void) => void;
+  reducedMotion: () => boolean;
+}
+
+export const appTarget: ActionTarget = {
+  getState: () => useAppStore.getState(),
+  regionCentroid: (id) =>
+    api
+      .region(id)
+      .then((r) => r.centroid)
+      .catch(() => null),
+  showPlaces,
+  reducedMotion: () => typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches,
+};
+
+/** The zoom at which single buildings fill the view (camera for a building without lane buildings). */
+export const BUILDING_ZOOM = 17.5;
+
+const LAYERS: readonly LayerKey[] = ["regions", "plants", "buildings"];
+const METRICS: readonly Metric[] = ["co2", "kwh"];
+const RAIN: readonly RainMode[] = ["auto", "on", "off"];
+const TABS: readonly PanelTab[] = ["energi", "emisi", "surya", "cuaca"];
+const MAX_PLACES = 10;
+
+const isNum = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
+const lngLatOf = (i: Record<string, unknown>): [number, number] | null =>
+  isNum(i.lng) && isNum(i.lat) && Math.abs(i.lng) <= 180 && Math.abs(i.lat) <= 90 ? [i.lng, i.lat] : null;
+const oneOf = <T extends string>(v: unknown, values: readonly T[]): T | null =>
+  typeof v === "string" && (values as readonly string[]).includes(v) ? (v as T) : null;
+
+function flyTo(map: MapboxMap, target: ActionTarget, center: [number, number], zoom: number): void {
+  map.flyTo({
+    center,
+    zoom,
+    // Tilted close in, so buildings read as 3D; the province view keeps its own tilt.
+    pitch: zoom >= 14 ? 60 : zoom >= 9 ? 50 : map.getPitch(),
+    duration: target.reducedMotion() ? 0 : FLY_MS,
+    curve: 1.2,
+    essential: true,
+  });
+}
+
+/** When this chat last selected a region; MapView starts that flight once the region's centre has loaded. */
+let regionAskedAt = 0;
+/** How long a region flight may take to start after the selection. */
+export const REGION_FLIGHT_WAIT_MS = 1000;
+
+/**
+ * A camera move right after a region selection waits until MapView's region flight has started (or a
+ * second has passed), so it takes over that flight instead of being overridden by it when the region's
+ * centre arrives a moment later.
+ */
+function afterRegionFlightStarts(map: MapboxMap): Promise<void> {
+  if (Date.now() - regionAskedAt > REGION_FLIGHT_WAIT_MS || map.isMoving?.()) return Promise.resolve();
+  return new Promise((resolve) => {
+    const done = () => {
+      clearTimeout(timer);
+      map.off("movestart", done);
+      resolve();
+    };
+    const timer = setTimeout(done, REGION_FLIGHT_WAIT_MS - (Date.now() - regionAskedAt));
+    map.once("movestart", done);
+  });
+}
+
+/** Selects the building at a point through lane buildings, or at least flies there until that lands. */
+async function selectBuilding(target: ActionTarget, lngLat: [number, number]): Promise<void> {
+  const state = target.getState();
+  if (typeof state.selectBuildingAt === "function") {
+    await state.selectBuildingAt(lngLat);
+    return;
+  }
+  if (state.map) flyTo(state.map, target, lngLat, BUILDING_ZOOM);
+}
+
+function placesOf(v: unknown): MarkedPlace[] {
+  if (!Array.isArray(v)) return [];
+  return v
+    .filter((p): p is Record<string, unknown> => typeof p === "object" && p !== null)
+    .flatMap((p) => {
+      const at = lngLatOf(p);
+      return at && typeof p.name === "string" ? [{ name: p.name, lng: at[0], lat: at[1] }] : [];
+    })
+    .slice(0, MAX_PLACES);
+}
+
+/**
+ * Runs one chat map action. Returns false when the action is unknown, its input is unusable or the map is
+ * not ready; the chat then simply has nothing to show. Never throws.
+ */
+export async function runAction(action: ChatAction, target: ActionTarget = appTarget): Promise<boolean> {
+  const state = target.getState();
+  const input = action.input ?? {};
+  try {
+    switch (action.name) {
+      case "fly_to_region": {
+        const id = typeof input.region === "string" ? input.region : null;
+        if (!id) return false;
+        // A region is the province-level view: the building panel steps aside.
+        if (state.selectedBuilding) state.setSelectedBuilding(null);
+        if (state.selectedRegionId !== id) {
+          regionAskedAt = Date.now();
+          state.selectRegion(id); // MapView flies to a newly selected region.
+          return true;
+        }
+        const centroid = await target.regionCentroid(id);
+        const map = target.getState().map;
+        if (!centroid || !map) return false;
+        flyToRegion(map, centroid);
+        return true;
+      }
+      case "show_all_regions": {
+        if (state.selectedBuilding) state.setSelectedBuilding(null);
+        if (state.selectedRegionId) {
+          state.selectRegion(null); // MapView flies back to the province.
+          return true;
+        }
+        if (!state.map) return false;
+        flyToProvince(state.map);
+        return true;
+      }
+      case "fly_to": {
+        const at = lngLatOf(input);
+        if (!at || !isNum(input.zoom) || !state.map) return false;
+        await afterRegionFlightStarts(state.map);
+        flyTo(state.map, target, at, Math.min(22, Math.max(0, input.zoom)));
+        return true;
+      }
+      case "select_building_at": {
+        const at = lngLatOf(input);
+        if (!at) return false;
+        if (state.map) await afterRegionFlightStarts(state.map);
+        await selectBuilding(target, at);
+        return true;
+      }
+      case "toggle_layer": {
+        const layer = oneOf(input.layer, LAYERS);
+        if (!layer || typeof input.visible !== "boolean") return false;
+        state.setLayer(layer, input.visible);
+        return true;
+      }
+      case "set_metric": {
+        const metric = oneOf(input.metric, METRICS);
+        if (!metric) return false;
+        state.setMetric(metric);
+        return true;
+      }
+      case "set_rain": {
+        const mode = oneOf(input.mode, RAIN);
+        if (!mode) return false;
+        state.setRain(mode);
+        return true;
+      }
+      case "open_tab": {
+        const tab = oneOf(input.tab, TABS);
+        if (!tab) return false;
+        state.setPanelTab(tab);
+        return true;
+      }
+      case "mark_places": {
+        const places = placesOf(input.places);
+        if (places.length === 0 || !state.map) return false;
+        target.showPlaces(state.map, places, (lngLat) => {
+          void selectBuilding(target, lngLat).catch(() => {});
+        });
+        return true;
+      }
+      default:
+        return false;
+    }
+  } catch {
+    // A failed camera move or building lookup shows in its own panel; the chat answer stands.
+    return false;
+  }
+}

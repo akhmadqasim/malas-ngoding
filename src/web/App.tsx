@@ -4,6 +4,7 @@ import { type Ref, useCallback, useEffect, useLayoutEffect, useMemo, useRef, use
 import { fmtCompact } from "../shared/format.ts";
 import type { RegionSummary } from "../shared/types.ts";
 import { api, type PlantCollection, type RegionCollection } from "./api.ts";
+import { ChatPanel } from "./chat/ChatPanel.tsx";
 import { chem } from "./components/Chem.tsx";
 import { Estimate } from "./components/Estimate.tsx";
 import { Intro } from "./components/Intro.tsx";
@@ -140,6 +141,7 @@ export function App() {
               <motion.div className="tools-slot" variants={assemble(0, 12)}>
                 <MapTools />
               </motion.div>
+              <ChatPanel />
             </motion.div>
           )}
         </AnimatePresence>

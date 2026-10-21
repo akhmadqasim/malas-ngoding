@@ -1,0 +1,308 @@
+/*
+ * The AI chat (ChatPanel.tsx). Same rules as styles.css (docs/research/design/00-direction.md): only
+ * tokens and HeroUI's semantic variables, no raw colours, sizes or durations (tests/web/chatStyles.test.ts).
+ * Plain CSS: this file is not run through Tailwind, so spacing is calc(var(--spacing) * n).
+ */
+
+.chat,
+.chat-launch {
+  --chat-width: calc(var(--spacing) * 90);
+  --chat-gap: calc(var(--spacing) * 3);
+  --chat-launch-size: calc(var(--spacing) * 11);
+  /* Just above the button. ChatPanel raises it further where the dock reaches under the panel. */
+  --chat-bottom: calc(var(--layout-inset) + var(--chat-launch-size) + var(--chat-gap));
+}
+
+@media (max-width: 1440px) {
+  .chat,
+  .chat-launch {
+    --chat-width: calc(var(--spacing) * 80);
+  }
+}
+
+/* ---------- The button in the bottom-right corner, under the map tools ---------- */
+
+.chat-launch {
+  position: absolute;
+  right: var(--layout-inset);
+  bottom: var(--layout-inset);
+  pointer-events: auto;
+}
+.chat-launch .chat-launch__button {
+  width: var(--chat-launch-size);
+  height: var(--chat-launch-size);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--overlay-shadow);
+}
+.chat-launch .chat-launch__button svg {
+  width: calc(var(--spacing) * 5);
+  height: calc(var(--spacing) * 5);
+}
+
+/* ---------- The panel: the right column, above the button ---------- */
+
+.chat {
+  position: absolute;
+  top: var(--layout-inset);
+  right: var(--layout-inset);
+  bottom: var(--chat-bottom);
+  width: var(--chat-width);
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  pointer-events: none;
+}
+/* Next to the building panel (same width, on the right edge): one column further left. */
+.chat[data-beside] {
+  right: calc(var(--layout-inset) + var(--chat-width) + var(--chat-gap));
+}
+
+.chat .chat__card {
+  display: flex;
+  flex-direction: column;
+  max-height: 100%;
+  min-height: 0;
+  background: var(--surface);
+  box-shadow: var(--overlay-shadow);
+  pointer-events: auto;
+}
+
+.chat__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: calc(var(--spacing) * 2);
+  padding: calc(var(--spacing) * 3) calc(var(--spacing) * 3) calc(var(--spacing) * 3) calc(var(--spacing) * 4);
+  border-bottom: 1px solid var(--border);
+}
+.chat__title {
+  margin: 0;
+  font-size: var(--text-base);
+  line-height: var(--text-base--line-height);
+  font-weight: var(--font-weight-semibold);
+}
+.chat__lede {
+  margin: calc(var(--spacing) * 0.5) 0 0;
+  font-size: var(--text-xs);
+  line-height: var(--text-xs--line-height);
+  color: var(--muted);
+}
+.chat__tools {
+  display: flex;
+  gap: calc(var(--spacing) * 0.5);
+  margin-top: calc(var(--spacing) * -0.5);
+}
+.chat .chat__icon {
+  border-radius: var(--radius-xs);
+}
+.chat .chat__icon svg {
+  width: calc(var(--spacing) * 4);
+  height: calc(var(--spacing) * 4);
+}
+
+/* The key is missing: one plain notice, not an alarm. */
+.chat__notice {
+  display: flex;
+  gap: calc(var(--spacing) * 2);
+  margin: calc(var(--spacing) * 3) calc(var(--spacing) * 4) 0;
+  padding: calc(var(--spacing) * 2.5) calc(var(--spacing) * 3);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-xs);
+  line-height: var(--leading-relaxed);
+  color: var(--muted);
+}
+.chat__notice p {
+  margin: 0;
+}
+.chat__notice .chat__notice-title {
+  color: var(--foreground);
+  font-weight: var(--font-weight-semibold);
+}
+.chat__notice-icon {
+  flex: none;
+  width: calc(var(--spacing) * 4);
+  height: calc(var(--spacing) * 4);
+  margin-top: calc(var(--spacing) * 0.5);
+  color: var(--foreground);
+}
+
+/* ---------- The conversation ---------- */
+
+.chat__log {
+  flex: 1 1 auto;
+  min-height: calc(var(--spacing) * 24);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: calc(var(--spacing) * 3) calc(var(--spacing) * 4);
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--spacing) * 3);
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+}
+
+.chat__empty p {
+  margin: 0 0 calc(var(--spacing) * 3);
+  font-size: var(--text-sm);
+  line-height: var(--text-sm--line-height);
+  color: var(--muted);
+}
+.chat__empty .group-label {
+  margin-bottom: calc(var(--spacing) * 2);
+}
+.chat__prompts {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--spacing) * 1.5);
+}
+.chat .chat__prompt {
+  justify-content: flex-start;
+  height: auto;
+  min-height: calc(var(--spacing) * 8);
+  padding: calc(var(--spacing) * 1.5) calc(var(--spacing) * 3);
+  text-align: left;
+  white-space: normal;
+  font-weight: var(--font-weight-regular);
+}
+
+.chat-msg {
+  margin: 0;
+  font-size: var(--text-sm);
+  line-height: var(--text-sm--line-height);
+}
+/* The question: a quiet block on the right, so the answers read as the main text. */
+.chat-msg--user {
+  align-self: flex-end;
+  max-width: 85%;
+  padding: calc(var(--spacing) * 1.5) calc(var(--spacing) * 2.5);
+  border-radius: var(--radius-sm);
+  background: var(--surface-secondary);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.chat-msg--ai {
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--spacing) * 2);
+}
+.chat-msg__text {
+  overflow-wrap: anywhere;
+}
+.chat-msg__text p,
+.chat-msg__text ul,
+.chat-msg__text ol {
+  margin: 0;
+}
+/* :not() lifts this above the reset of p and lists just before it. */
+.chat-msg__text > :not(:first-child) {
+  margin-top: calc(var(--spacing) * 2);
+}
+.chat-msg__text ul,
+.chat-msg__text ol {
+  padding-left: calc(var(--spacing) * 5);
+}
+.chat-msg__text ul {
+  list-style: disc;
+}
+.chat-msg__text ol {
+  list-style: decimal;
+}
+.chat-msg__text li::marker {
+  color: var(--muted);
+}
+.chat-msg__text li + li {
+  margin-top: calc(var(--spacing) * 1);
+}
+.chat-msg__text strong {
+  font-weight: var(--font-weight-semibold);
+}
+.chat-msg__status {
+  margin: 0;
+  color: var(--muted);
+}
+
+/* What the answer showed on the map; each button shows it again. */
+.chat-msg__actions-label {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--spacing) * 1.5);
+  margin: 0 0 calc(var(--spacing) * 1.5);
+  font-size: var(--text-xs);
+  line-height: var(--text-xs--line-height);
+  color: var(--muted);
+}
+.chat-msg__actions-label svg {
+  width: calc(var(--spacing) * 3.5);
+  height: calc(var(--spacing) * 3.5);
+}
+.chat-msg__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: calc(var(--spacing) * 1.5);
+}
+.chat .chat-chip {
+  height: auto;
+  min-height: calc(var(--spacing) * 7);
+  padding: calc(var(--spacing) * 1) calc(var(--spacing) * 2.5);
+  border-radius: var(--radius-xs);
+  font-size: var(--text-xs);
+  font-weight: var(--font-weight-medium);
+}
+
+.chat-msg__problem {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: calc(var(--spacing) * 3);
+  padding-top: calc(var(--spacing) * 2);
+  border-top: 1px solid var(--border);
+}
+.chat-msg__problem p {
+  margin: 0;
+  color: var(--muted);
+}
+
+/* ---------- Writing a question ---------- */
+
+.chat__form {
+  display: flex;
+  align-items: flex-end;
+  gap: calc(var(--spacing) * 2);
+  padding: calc(var(--spacing) * 3) calc(var(--spacing) * 3) 0 calc(var(--spacing) * 4);
+  border-top: 1px solid var(--border);
+}
+.chat .chat__input {
+  flex: 1 1 auto;
+  min-height: calc(var(--spacing) * 10);
+  max-height: calc(var(--spacing) * 32);
+  resize: none;
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
+  line-height: var(--text-sm--line-height);
+}
+.chat__form .chat__icon {
+  width: calc(var(--spacing) * 10);
+  height: calc(var(--spacing) * 10);
+  border-radius: var(--radius-sm);
+}
+.chat__foot {
+  margin: 0;
+  padding: calc(var(--spacing) * 2) calc(var(--spacing) * 4) calc(var(--spacing) * 3);
+  font-size: var(--text-2xs);
+  line-height: var(--text-2xs--line-height);
+  color: var(--faint);
+}
+
+/* Narrow screens: the panel takes the width above the button. */
+@media (max-width: 720px) {
+  .chat,
+  .chat[data-beside] {
+    left: var(--layout-inset);
+    right: var(--layout-inset);
+    width: auto;
+  }
+}
