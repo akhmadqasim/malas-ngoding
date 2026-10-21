@@ -43,7 +43,7 @@ export function ruleBasedRecommendations(f: RegionFacts): RecommendationItem[] {
       title: "Petakan dan usulkan penyambungan rumah tangga tanpa listrik",
       category: "akses_listrik",
       body: `Rasio elektrifikasi ${place} ${dec(r.electrificationPct)}% (BPS 2024), ${rankWords(c.electrificationRank, c.regionCount, "tertinggi", "terendah")} di Kalimantan Timur. Petakan rumah tangga yang belum berlistrik per kecamatan, lalu bersama PLN dan Dinas ESDM Provinsi Kalimantan Timur tentukan cara yang paling murah untuk tiap lokasi: perluasan jaringan PLN, PLTS komunal, atau PLTS rumah dengan baterai.`,
-      impact: `Menutup selisih ${dec(100 - r.electrificationPct)} poin persentase menuju rasio elektrifikasi 100%.`,
+      impact: `Selisih rasio elektrifikasi ke 100% saat ini ${dec(100 - r.electrificationPct)} poin persentase.`,
       priority: r.electrificationPct < LOW_ACCESS_PCT ? 1 : 2,
     });
   }

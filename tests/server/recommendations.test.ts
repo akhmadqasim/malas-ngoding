@@ -629,6 +629,9 @@ describe("ruleBasedRecommendations", () => {
     // Connecting homes is PLN's job: the region proposes it, it does not do it.
     expect(access?.title).toContain("usulkan penyambungan");
     expect(access?.title).not.toContain("sambungkan");
+    // Prompt rule 9 bans outcome claims, so the fallback text states the current gap and promises nothing.
+    expect(access?.impact).toContain("Selisih rasio elektrifikasi ke 100% saat ini");
+    expect(access?.impact).not.toContain("Menutup");
     expect(access?.body).toContain("Dinas ESDM Provinsi Kalimantan Timur");
     expect(access?.priority).toBe(1);
     expect(ruleBasedRecommendations(facts("samarinda")).some((i) => i.category === "akses_listrik")).toBe(false);

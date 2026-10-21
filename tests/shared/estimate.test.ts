@@ -89,6 +89,11 @@ describe("estimateBuilding", () => {
   test("the height assumption says why: missing, or known but too low to use", () => {
     const missing = estimateBuilding({ ...base, heightM: null }, ctx);
     expect(missing.assumptions.some((a) => a.includes("Tinggi bangunan tidak ada di data peta"))).toBe(true);
+    for (const heightM of [0, -2]) {
+      const zero = estimateBuilding({ ...base, heightM }, ctx);
+      expect(zero.assumptions.some((a) => a.includes("Tinggi bangunan tidak ada"))).toBe(true);
+      expect(zero.assumptions.some((a) => a.includes("hanya"))).toBe(false);
+    }
     const low = estimateBuilding({ ...base, heightM: 2.5 }, ctx);
     expect(low.floors).toBe(2);
     expect(low.assumptions.some((a) => a.includes("hanya 2,5 m"))).toBe(true);

@@ -98,7 +98,8 @@ export function estimateBuilding(
     floors = clamp(Math.round(input.floorsOverride), MIN_FLOORS, MAX_FLOORS);
   } else {
     floors = estimateFloors(type, input.heightM, params.typicalFloors);
-    if (input.heightM === null || !Number.isFinite(input.heightM)) {
+    // A height of 0 or less is how a missing height often arrives, so it counts as missing.
+    if (input.heightM === null || !Number.isFinite(input.heightM) || input.heightM <= 0) {
       assumptions.push(`Tinggi bangunan tidak ada di data peta, dipakai jumlah lantai umum: ${floors} lantai.`);
     } else if (input.heightM <= 3) {
       const height = input.heightM.toLocaleString("id-ID", { maximumFractionDigits: 1 });
