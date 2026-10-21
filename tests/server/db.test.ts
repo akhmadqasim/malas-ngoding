@@ -61,6 +61,20 @@ describe.skipIf(!reachable)("db", () => {
     expect(row?.n).toBe(10);
   });
 
+  test("seed removes plants and equivalents that are no longer in the seed files", async () => {
+    await sql`
+      INSERT INTO power_plants (name, fuel, capacity_mw, status, geom, approx, source)
+      VALUES ('Stale test plant', 'batubara', 1, 'unknown', ST_SetSRID(ST_MakePoint(117, -0.5), 4326), true, 'test')`;
+    await sql`
+      INSERT INTO equivalents (key, label, kg_co2_per_unit, unit, source)
+      VALUES ('stale_test', 'Stale', 1, 'unit', 'test')`;
+    await seedAll();
+    const [plants] = await sql`SELECT count(*)::int AS n FROM power_plants WHERE name = 'Stale test plant'`;
+    const [eq] = await sql`SELECT count(*)::int AS n FROM equivalents WHERE key = 'stale_test'`;
+    expect(plants?.n).toBe(0);
+    expect(eq?.n).toBe(0);
+  });
+
   test("listRegions returns 10 regions with co2 from the grid factor", async () => {
     const regions = await listRegions();
     expect(regions).toHaveLength(10);
@@ -77,6 +91,26 @@ describe.skipIf(!reachable)("db", () => {
   test("regionAt finds the region containing a point", async () => {
     expect(await regionAt(117.1466, -0.4998)).toEqual({ id: "samarinda", name: "Samarinda" });
     expect((await regionAt(116.8312, -1.2717))?.id).toBe("balikpapan");
+  });
+
+  test("regionAt picks one region deterministically on a shared border", async () => {
+    const [row] = await sql`
+      SELECT a.id AS a_id, b.id AS b_id,
+             ST_X(p.pt) AS lng, ST_Y(p.pt) AS lat
+      FROM regions a
+      JOIN regions b ON a.id < b.id
+      CROSS JOIN LATERAL (
+        SELECT ST_LineInterpolatePoint(ST_LineMerge(line.geom), 0.5) AS pt
+        FROM (SELECT ST_CollectionExtract(ST_Intersection(ST_Boundary(a.geom), ST_Boundary(b.geom)), 2) AS geom) line
+        WHERE NOT ST_IsEmpty(line.geom)
+      ) p
+      WHERE ST_Intersects(a.geom, b.geom) AND p.pt IS NOT NULL
+      ORDER BY a.id, b.id LIMIT 1`;
+    expect(row).toBeDefined();
+    const first = await regionAt(Number(row?.lng), Number(row?.lat));
+    expect(first).not.toBeNull();
+    // Whichever regions touch the point, the answer is stable and is not left to the planner.
+    for (let i = 0; i < 3; i++) expect(await regionAt(Number(row?.lng), Number(row?.lat))).toEqual(first);
   });
 
   test("regionAt returns null outside Kaltim", async () => {

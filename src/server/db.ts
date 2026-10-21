@@ -31,15 +31,17 @@ export async function regionAt(
   const rows = await sql`
     SELECT id, name FROM regions
     WHERE ST_Intersects(geom, ST_SetSRID(ST_MakePoint(${lng}, ${lat}), 4326))
+    ORDER BY ST_Contains(geom, ST_SetSRID(ST_MakePoint(${lng}, ${lat}), 4326)) DESC, id
     LIMIT 1`;
   const row = rows[0];
   return row ? { id: row.id, name: row.name } : null;
 }
 
-/** Latest grid factor (kg CO2 per kWh). Falls back to the official Mahakam value. */
+/** Latest grid factor (kg CO2 per kWh). Throws on an unseeded database, like `getGridMix`. */
 async function latestGridFactor(): Promise<number> {
   const rows = await sql`SELECT grid_factor FROM grid_mix ORDER BY year DESC LIMIT 1`;
-  return Number(rows[0]?.grid_factor ?? 1.14);
+  if (!rows[0]) throw new Error("grid_mix is empty; run `bun run seed`");
+  return Number(rows[0].grid_factor);
 }
 
 function toSummary(r: Record<string, unknown>, factor: number): RegionSummary {

@@ -76,6 +76,8 @@ async function seedPlants(tx: Tx) {
         fuel = EXCLUDED.fuel, capacity_mw = EXCLUDED.capacity_mw, status = EXCLUDED.status,
         geom = EXCLUDED.geom, approx = EXCLUDED.approx, source = EXCLUDED.source`;
   }
+  // The seed file is the whole list: a plant renamed or removed there must not linger on the map.
+  await tx`DELETE FROM power_plants WHERE name NOT IN ${tx(plants.map((p) => p.name))}`;
   return plants.length;
 }
 
@@ -118,6 +120,7 @@ async function seedEquivalents(tx: Tx) {
         label = EXCLUDED.label, kg_co2_per_unit = EXCLUDED.kg_co2_per_unit,
         unit = EXCLUDED.unit, source = EXCLUDED.source`;
   }
+  await tx`DELETE FROM equivalents WHERE key NOT IN ${tx(items.map((e) => e.key))}`;
   return items.length;
 }
 
