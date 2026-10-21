@@ -826,8 +826,11 @@ describe("chat server tools", () => {
   test("the region note says how the kWh split works, with its exceptions", async () => {
     const { json } = await callTool("list_regions", {});
     expect(json.note).toContain("per cabang");
-    expect(json.note).toContain("Samarinda dan Mahakam Ulu");
-    expect(json.note).not.toContain("dibagi menurut jumlah pelanggan");
+    // All four exceptions to the plain split by customers (architecture.md, Metodologi section 1).
+    expect(json.note).toContain("Samarinda memakai angka tabel BPS Kota Samarinda");
+    expect(json.note).toContain("Mahakam Ulu memakai asumsi 1.500 kWh per pelanggan");
+    expect(json.note).toContain("Kutai Kartanegara dibagi ke tiga cabang");
+    expect(json.note).toContain("Malinau");
   });
 
   test("estimate_building_at gives the building type id for simulate_solar", async () => {

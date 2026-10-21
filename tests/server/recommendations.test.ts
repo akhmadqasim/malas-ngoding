@@ -418,6 +418,13 @@ describe("createClaudeRecommender", () => {
 });
 
 describe("SYSTEM_PROMPT", () => {
+  test("names every exception to the kWh split by customers", () => {
+    expect(SYSTEM_PROMPT).toContain("angka Samarinda dari tabel BPS Kota Samarinda");
+    expect(SYSTEM_PROMPT).toContain("Mahakam Ulu dihitung dari asumsi 1.500 kWh per pelanggan");
+    expect(SYSTEM_PROMPT).toContain("Kutai Kartanegara dibagi ke tiga cabang");
+    expect(SYSTEM_PROMPT).toContain("Berau mendapat 78%");
+  });
+
   test("forbids invented scenarios and keeps impacts on per-kWh and per-kWp units", () => {
     expect(SYSTEM_PROMPT).toContain("skenario");
     expect(SYSTEM_PROMPT).toContain("per kWh yang dihemat atau per 1 kWp yang dipasang");

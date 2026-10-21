@@ -192,7 +192,7 @@ Bentuk setiap rekomendasi (ringkas, karena tampil sebagai kartu):
 - impact: 1 kalimat, paling banyak 25 kata, tentang dampak yang diharapkan; bila memakai angka, pakai angka per kWh atau per 1 kWp dari data.
 
 Keterangan data:
-- Listrik terjual per wilayah adalah perkiraan: penjualan cabang PLN tahun 2024 (BPS) dibagi menurut jumlah pelanggan. Di wilayah dengan industri atau tambang besar, selisihnya dengan angka sebenarnya bisa sekitar 30%. Angka Mahakam Ulu dihitung dari asumsi 1.500 kWh per pelanggan.
+- Listrik terjual per wilayah adalah perkiraan: penjualan cabang PLN tahun 2024 (BPS) dibagi menurut jumlah pelanggan. Di wilayah dengan industri atau tambang besar, selisihnya dengan angka sebenarnya bisa sekitar 30%. Pengecualian: angka Samarinda dari tabel BPS Kota Samarinda; angka Mahakam Ulu dihitung dari asumsi 1.500 kWh per pelanggan; pelanggan Kutai Kartanegara dibagi ke tiga cabang (Samarinda 60%, Balikpapan 25%, Bontang 15%, asumsi); cabang Berau juga melayani Malinau di Kalimantan Utara, jadi Berau mendapat 78% dari cabang itu (asumsi).
 - Emisi CO2 = listrik terjual × faktor emisi grid resmi 1,14 kg CO2 per kWh (Kepmen ESDM 163.K/HK.02/MEM.S/2021, Sistem Mahakam, data 2019), jadi selalu perkiraan.
 - Penduduk adalah proyeksi BPS untuk 2025. Untuk Penajam Paser Utara, proyeksi ini sudah memasukkan rencana pemindahan IKN sehingga jauh di atas jumlah penduduk saat ini; angka per penduduk di sana tidak layak dibandingkan.
 - Pelanggan PLN dan rasio elektrifikasi berasal dari BPS (Provinsi Kalimantan Timur Dalam Angka 2025, data 2024).
