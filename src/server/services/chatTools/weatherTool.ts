@@ -1,5 +1,5 @@
 import { fmtNumber } from "../../../shared/format.ts";
-import { pvFromForecast, summariseDays } from "../../../shared/pvForecast.ts";
+import { dayAgainstClearSky, dropSentence, pvFromForecast, summariseDays } from "../../../shared/pvForecast.ts";
 import { currentConditions } from "../../routes/weather.ts";
 import { cachedForecast } from "../cache.ts";
 import { estimated, inRange, kaltimPoint, latParam, lngParam, percent, point, type ServerTool } from "./common.ts";
@@ -30,18 +30,12 @@ function dayLabel(date: string, today: string): string {
   return weekday;
 }
 
-function comparedToBest(kwh: number, best: number): string {
-  if (best <= 0 || kwh >= best) return "hari terbaik dalam prakiraan";
-  const lowerPct = Math.round((1 - kwh / best) * 100);
-  if (lowerPct === 0) return "hampir sama dengan hari terbaik dalam prakiraan";
-  return `${fmtNumber(lowerPct)}% lebih rendah dari hari terbaik dalam prakiraan`;
-}
 
 export const getWeather: ServerTool = {
   definition: {
     name: "get_weather",
     description:
-      "Weather forecast for the coming days at a point (rain, cloud) and the expected solar production per day for a system of kWp kilowatt-peak. Days are labelled \"hari ini\", \"besok\" and \"lusa\". Pass the kWp from simulate_solar when you have it; without it 1 kWp is used. Only for points in or near Kalimantan Timur.",
+      "Weather forecast for the coming days at a point (rain, cloud) and the expected solar production per day for a system of kWp kilowatt-peak, each day compared with the same panels under a clear sky (comparedToClearSky). Days are labelled \"hari ini\", \"besok\" and \"lusa\". Pass the kWp from simulate_solar when you have it; without it 1 kWp is used. Only for points in or near Kalimantan Timur.",
     input_schema: {
       type: "object",
       properties: {
@@ -69,8 +63,11 @@ export const getWeather: ServerTool = {
     // A stale forecast can start before today; only today and later days are useful.
     const days = summariseDays(pvFromForecast(forecast.hours, kWp)).filter((d) => d.date >= today);
     if (days.length === 0) return { problem: WEATHER_DOWN };
-    const best = Math.max(...days.map((d) => d.pvKwh));
     const now = currentConditions(forecast.hours, nowMs);
+    const clearSky = (d: (typeof days)[number]) => {
+      const v = dayAgainstClearSky(d, forecast.hours, { lat: p.lat, lng: p.lng, kWp });
+      return { clearSkyText: `${fmtNumber(v.clearKwh, 1)} kWh (model langit cerah)`, comparedToClearSky: dropSentence(v) };
+    };
     return {
       result: {
         location: { lat: p.lat, lng: p.lng },
@@ -83,10 +80,12 @@ export const getWeather: ServerTool = {
           rain: d.rainy,
           heaviestRainText: `${fmtNumber(d.maxPrecipMm, 1)} mm per jam`,
           solarText: estimated(`${fmtNumber(d.pvKwh, 1)} kWh`),
-          comparedToBestDay: comparedToBest(d.pvKwh, best),
+          // Against a clear sky at this place and date, as the Cuaca tab does.
+          ...clearSky(d),
         })),
         ...(forecast.stale ? { note: "Prakiraan ini dari simpanan lama karena Open-Meteo sedang tidak bisa dihubungi." } : {}),
-        source: "Prakiraan cuaca Open-Meteo. Produksi surya = kWp x radiasi matahari x 0,78.",
+        source:
+          "Prakiraan cuaca Open-Meteo. Produksi surya = kWp x radiasi matahari x 0,78. Pembanding: produksi panel yang sama saat langit cerah (model).",
       },
     };
   },

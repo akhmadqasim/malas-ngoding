@@ -15,7 +15,8 @@ import {
   runChat,
 } from "../../src/server/services/claude.ts";
 import type { PoiHit } from "../../src/server/services/tilequery.ts";
-import { fmtRupiah } from "../../src/shared/format.ts";
+import { fmtKwh, fmtNumber, fmtRupiah } from "../../src/shared/format.ts";
+import { dayAgainstClearSky, dropSentence, pvFromForecast, summariseDays } from "../../src/shared/pvForecast.ts";
 import type { ForecastHour } from "../../src/shared/pvForecast.ts";
 import type { BuildingEstimate } from "../../src/shared/types.ts";
 import { type FakeDeps, type FakeUpstreams, fakeDeps } from "./fakes.ts";
@@ -531,7 +532,7 @@ describe("POST /api/chat", () => {
     expect(state).toContain("2 lantai");
     expect(state).toContain("145.600 kWh");
     // Exact values for the tools: the roof is the footprint (floor area / floors) and the point is the map centre.
-    expect(state).toContain('{"lat":-0.5,"lng":117.15,"roofAreaM2":400,"kwhYear":145600}');
+    expect(state).toContain('{"lat":-0.5,"lng":117.15,"roofAreaM2":400,"kwhYear":145600,"buildingType":"sekolah"}');
     expect(state).toContain("Tinggi bangunan tidak ada di data peta");
   });
 
@@ -559,7 +560,7 @@ describe("POST /api/chat", () => {
     const context = { ...CONTEXT, selectedBuilding: BUILDING, selectedBuildingAt: [117.16123456, -0.49] };
     await chat(server, body("Kalau gedung ini pakai panel surya?", context));
     const state = (model.calls[0]!.messages.at(-1)!.content as Anthropic.TextBlockParam[])[0]!.text;
-    expect(state).toContain('{"lat":-0.49,"lng":117.16123,"roofAreaM2":400,"kwhYear":145600}');
+    expect(state).toContain('{"lat":-0.49,"lng":117.16123,"roofAreaM2":400,"kwhYear":145600,"buildingType":"sekolah"}');
     expect(state).toContain("koordinat gedung");
     expect(state).not.toContain("dipakai pusat peta");
   });
@@ -822,6 +823,18 @@ describe("chat server tools", () => {
     expect(json.note).toContain("perkiraan");
   });
 
+  test("the region note says how the kWh split works, with its exceptions", async () => {
+    const { json } = await callTool("list_regions", {});
+    expect(json.note).toContain("per cabang");
+    expect(json.note).toContain("Samarinda dan Mahakam Ulu");
+    expect(json.note).not.toContain("dibagi menurut jumlah pelanggan");
+  });
+
+  test("estimate_building_at gives the building type id for simulate_solar", async () => {
+    const { json } = await callTool("estimate_building_at", { lng: 117.15, lat: -0.5 }, {}, SCHOOL);
+    expect(json.buildingType).toBe("sekolah");
+  });
+
   test("estimate_building_at uses the POI type and a 150 m2 footprint that is flagged as an assumption", async () => {
     const { json, fake } = await callTool("estimate_building_at", { lng: 117.15, lat: -0.5 }, {}, SCHOOL);
     expect(fake.poiCalls).toEqual([[117.15, -0.5]]);
@@ -882,21 +895,49 @@ describe("chat server tools", () => {
     expect(String(results[7]?.content)).toContain("paling banyak 6");
   });
 
-  test("simulate_solar gives the same numbers as POST /api/solar/simulate", async () => {
-    const input = { lat: -0.5, lng: 117.15, roofAreaM2: 100, kwhYear: 5000, backupHours: 4 };
-    const { json, result } = await callTool("simulate_solar", input);
-    expect(result?.is_error).toBeUndefined();
+  test.each([["sekolah"], ["rumah"], [undefined]])(
+    "simulate_solar gives the same numbers as POST /api/solar/simulate (building type %p)",
+    async (buildingType) => {
+      const input = { lat: -0.5, lng: 117.15, roofAreaM2: 400, kwhYear: 60000, backupHours: 4, ...(buildingType ? { buildingType } : {}) };
+      const { json, result } = await callTool("simulate_solar", input);
+      expect(result?.is_error, String(result?.content)).toBeUndefined();
 
-    const { server } = start();
-    const res = await fetch(new URL("/api/solar/simulate", server.url), {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(input),
-    });
-    const direct = (await res.json()) as { kWp: number; costRp: number };
-    expect(json.kWp).toBe(direct.kWp);
-    expect(json.costText).toBe(`${fmtRupiah(direct.costRp)} (perkiraan)`);
-    expect(json.assumptions.length).toBeGreaterThan(0);
+      const { server } = start();
+      const res = await fetch(new URL("/api/solar/simulate", server.url), {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(input),
+      });
+      const direct = (await res.json()) as {
+        kWp: number;
+        costRp: number;
+        savingRpYear: number;
+        selfUseKwh: number;
+        exportKwh: number;
+        paybackPanelYears: number;
+        assumptions: string[];
+      };
+      expect(json.kWp).toBe(direct.kWp);
+      expect(json.costText).toBe(`${fmtRupiah(direct.costRp)} (perkiraan)`);
+      expect(json.savingText).toBe(`${fmtRupiah(direct.savingRpYear)} per tahun (perkiraan)`);
+      expect(json.selfUseText).toBe(`${fmtKwh(direct.selfUseKwh)} per tahun (perkiraan)`);
+      expect(json.paybackPanelText).toBe(`${fmtNumber(direct.paybackPanelYears, 1)} tahun (perkiraan)`);
+      expect(json.assumptions).toEqual(direct.assumptions);
+      expect(json.coverageText).toContain("dipakai langsung");
+    },
+  );
+
+  test("simulate_solar prices a school as a school: the type changes the saving", async () => {
+    const base = { lat: -0.5, lng: 117.15, roofAreaM2: 400, kwhYear: 60000, backupHours: 0 };
+    const school = (await callTool("simulate_solar", { ...base, buildingType: "Sekolah" })).json;
+    const unknown = (await callTool("simulate_solar", base)).json;
+    expect(school.input.buildingType).toBe("sekolah");
+    expect(school.savingText).not.toBe(unknown.savingText);
+  });
+
+  test("simulate_solar with an unknown building type returns an error result", async () => {
+    const { result } = await callTool("simulate_solar", { lat: -0.5, lng: 117.15, roofAreaM2: 100, kwhYear: 5000, backupHours: 4, buildingType: "kasino" });
+    expect(result?.is_error).toBe(true);
   });
 
   test("simulate_solar with an invalid input returns an error result", async () => {
@@ -912,16 +953,20 @@ describe("chat server tools", () => {
     expect(json.days).toHaveLength(2);
     expect(json.days[0].day).toStartWith("hari ini");
     expect(json.days[1].day).toStartWith("besok");
-    expect(json.days[0]).toMatchObject({ rain: false, comparedToBestDay: "hari terbaik dalam prakiraan" });
     // 12 sunny hours x 2 kWp x 0.6 kW/m2 x PR 0.78.
     expect(json.days[0].solarText).toBe("11,2 kWh (perkiraan)");
-    // Tomorrow: 9 sunny hours plus 3 rainy ones at 150 W/m2 is 9,126 kWh, 19% below today's 11,232 kWh.
-    expect(json.days[1]).toMatchObject({
-      rain: true,
-      heaviestRainText: "3,0 mm per jam",
-      solarText: "9,1 kWh (perkiraan)",
-      comparedToBestDay: "19% lebih rendah dari hari terbaik dalam prakiraan",
-    });
+    // Tomorrow: 9 sunny hours plus 3 rainy ones at 150 W/m2 is 9,126 kWh.
+    expect(json.days[1]).toMatchObject({ rain: true, heaviestRainText: "3,0 mm per jam", solarText: "9,1 kWh (perkiraan)" });
+    // Each day is measured against a clear sky at that place and date (the Cuaca tab's model), not the best day.
+    const hours = forecastFromToday();
+    const rows = summariseDays(pvFromForecast(hours, 2));
+    for (const [i, day] of json.days.entries()) {
+      const v = dayAgainstClearSky(rows[i]!, hours, { lat: -0.5, lng: 117.15, kWp: 2 });
+      expect(day.comparedToClearSky).toBe(dropSentence(v));
+      expect(day.clearSkyText).toBe(`${fmtNumber(v.clearKwh, 1)} kWh (model langit cerah)`);
+    }
+    expect(json.days[1].comparedToClearSky).toMatch(/^produksi turun \d+% karena (hujan|awan dan hujan)$/);
+    expect(JSON.stringify(json)).not.toContain("hari terbaik");
   });
 
   test("get_weather without kWp uses 1 kWp and says so", async () => {

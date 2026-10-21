@@ -129,7 +129,13 @@ export function describeContext(context: ChatContext, now: Date): string {
     // The building's own point when the app sends it; older clients only send the map centre.
     const at = context.selectedBuildingAt;
     const [bLng, bLat] = at ?? [lng, lat];
-    const tools = { lat: round5(bLat), lng: round5(bLng), roofAreaM2: Math.round(b.floorAreaM2 / b.floors), kwhYear: Math.round(b.kwhYear) };
+    const tools = {
+      lat: round5(bLat),
+      lng: round5(bLng),
+      roofAreaM2: Math.round(b.floorAreaM2 / b.floors),
+      kwhYear: Math.round(b.kwhYear),
+      buildingType: b.type,
+    };
     const point = at ? "koordinat gedung" : "koordinat gedung tidak dikirim, jadi dipakai pusat peta";
     lines.push(`  Nilai untuk simulate_solar dan get_weather (${point}; atap = luas lantai dasar): ${JSON.stringify(tools)}`);
     if (b.assumptions.length > 0) lines.push(`  Asumsi perkiraan gedung ini: ${b.assumptions.join(" ")}`);

@@ -15,7 +15,7 @@ import {
 // Region-level tools: the ranking of the 10 kabupaten/kota, one region's figures and the grid mix.
 
 const REGION_NOTE =
-  "Listrik per wilayah adalah perkiraan dari penjualan listrik PLN 2024 per cabang, dibagi menurut jumlah pelanggan. " +
+  "Listrik per wilayah adalah perkiraan dari penjualan listrik PLN 2024 per cabang; Samarinda dan Mahakam Ulu memakai cara lain (lihat Metodologi). " +
   "Emisi CO2 = kWh dikali faktor emisi jaringan Kaltim. Sumber: BPS Kalimantan Timur 2024 dan Kementerian ESDM.";
 const FUEL_WORDS: Record<FuelType, string> = {
   batubara: "batu bara",
