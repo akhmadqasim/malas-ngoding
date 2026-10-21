@@ -20,7 +20,7 @@ export const FLY_MS = 2000;
 const prefersReducedMotion = () =>
   typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
-let finishIntro: (() => void) | null = null;
+let finishIntro: ((skipped: boolean) => void) | null = null;
 
 /**
  * Flies from the globe to Kaltim in about 6 s. Resolves when the camera lands, or right away after
@@ -47,7 +47,7 @@ export function introFlight(map: MapboxMap): Promise<void> {
     const onMoveEnd = () => end(false);
     const onGesture = () => end(true);
 
-    finishIntro = () => end(true);
+    finishIntro = end;
     for (const g of gestures) canvas.addEventListener(g, onGesture, { passive: true });
 
     if (prefersReducedMotion()) {
@@ -62,7 +62,12 @@ export function introFlight(map: MapboxMap): Promise<void> {
 
 /** Ends a running intro flight early. Does nothing when no intro is playing. */
 export function skipIntro(): void {
-  finishIntro?.();
+  finishIntro?.(true);
+}
+
+/** Drops a running intro without touching the camera (the map is being removed). */
+export function abortIntro(): void {
+  finishIntro?.(false);
 }
 
 export interface FlyOptions {

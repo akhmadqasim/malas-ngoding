@@ -76,7 +76,12 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     const message = typeof body?.error === "string" ? body.error : `Permintaan gagal (${res.status}).`;
     throw new ApiError(message, res.status);
   }
-  return (await res.json()) as T;
+  try {
+    return (await res.json()) as T;
+  } catch {
+    // A 200 that is not JSON: an HTML error page from a proxy, or a cut-off response.
+    throw new ApiError("Server mengirim jawaban yang tidak bisa dibaca. Coba lagi sebentar lagi.", res.status);
+  }
 }
 
 const post = <T>(path: string, body: unknown) =>

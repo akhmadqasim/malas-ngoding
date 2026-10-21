@@ -1,9 +1,11 @@
-import { motion } from "motion/react";
-import { useMemo, useRef } from "react";
+import type { Map as MapboxMap } from "mapbox-gl";
+import { AnimatePresence, motion } from "motion/react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { fmtCompact } from "../../shared/format.ts";
 import type { RegionSummary } from "../../shared/types.ts";
 import type { PlantCollection } from "../api.ts";
 import { Estimate } from "../components/Estimate.tsx";
+import { RAIN_MIN_ZOOM } from "../map/effects.ts";
 import { FUEL_LABELS, fuelsPresent } from "../map/fuels.ts";
 import { intensities } from "../map/regionsLayer.ts";
 import { METRIC_TEXT } from "../metrics.ts";
@@ -15,6 +17,21 @@ const METRICS: { key: Metric; label: string }[] = [
   { key: "kwh", label: "Listrik" },
 ];
 
+/** The map's zoom, updated when a zoom gesture or camera move ends. */
+function useMapZoom(map: MapboxMap | null): number {
+  const [zoom, setZoom] = useState(() => map?.getZoom() ?? 0);
+  useEffect(() => {
+    if (!map) return;
+    const update = () => setZoom(map.getZoom());
+    update();
+    map.on("zoomend", update);
+    return () => {
+      map.off("zoomend", update);
+    };
+  }, [map]);
+  return zoom;
+}
+
 /** Bottom legend strip: what the columns mean (with the meter), the metric switch and the layers. */
 export function Legend({ plants, regions }: { plants: PlantCollection; regions: RegionSummary[] }) {
   const metric = useAppStore((s) => s.metric);
@@ -23,7 +40,10 @@ export function Legend({ plants, regions }: { plants: PlantCollection; regions: 
   const setLayer = useAppStore((s) => s.setLayer);
   const rain = useAppStore((s) => s.rain);
   const setRain = useAppStore((s) => s.setRain);
+  const map = useAppStore((s) => s.map);
+  const zoom = useMapZoom(map);
   const fuels = useMemo(() => fuelsPresent(plants), [plants]);
+  const rainHint = rain === "on" && zoom < RAIN_MIN_ZOOM;
 
   return (
     <section className="legend" aria-label="Legenda dan lapisan peta">
@@ -67,6 +87,19 @@ export function Legend({ plants, regions }: { plants: PlantCollection; regions: 
         </div>
         <div className="layer">
           <Toggle label="Hujan" on={rain === "on"} onChange={(v) => setRain(v ? "on" : "auto")} />
+          <AnimatePresence initial={false}>
+            {rainHint && (
+              <motion.p
+                key="rain-hint"
+                className="layer__hint"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1, transition: { duration: DURATION.panel } }}
+                exit={{ opacity: 0, transition: { duration: DURATION.exit } }}
+              >
+                Terlihat saat peta diperbesar sampai tingkat gedung.
+              </motion.p>
+            )}
+          </AnimatePresence>
         </div>
       </div>
     </section>

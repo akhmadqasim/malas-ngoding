@@ -3,9 +3,11 @@ import type { Map as MapboxMap } from "mapbox-gl";
 import type { RegionCollection } from "../../src/web/api.ts";
 import {
   addRegions,
+  REGION_LAYER,
   type RegionHandlers,
   removeRegions,
   setRegionHover,
+  setRegionMetric,
 } from "../../src/web/map/regionsLayer.ts";
 import { clearTokenCache } from "../../src/web/theme.ts";
 import type { RegionSummary } from "../../src/shared/types.ts";
@@ -129,3 +131,14 @@ describe("region hover", () => {
   });
 });
 
+describe("cleanup", () => {
+  test("removeRegions cancels a pending metric switch and removes everything it added", async () => {
+    const { map, paintCalls, interactions, layers } = setup();
+    setRegionMetric(map, "kwh");
+    removeRegions(map);
+    await Bun.sleep(500);
+    expect(paintCalls.filter(([layer, prop]) => layer === REGION_LAYER && prop === "fill-extrusion-color")).toEqual([]);
+    expect(interactions.size).toBe(0);
+    expect(layers.size).toBe(0);
+  });
+});

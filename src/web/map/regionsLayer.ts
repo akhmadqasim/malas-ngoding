@@ -74,6 +74,8 @@ interface LayerState {
   selected: string | null;
   /** False until `riseRegions()`: columns stay flat while the intro flies in. */
   risen: boolean;
+  /** The pending colour swap of a metric switch. */
+  metricTimer: ReturnType<typeof setTimeout> | undefined;
   onMouseMove: (e: MapMouseEvent) => void;
 }
 let state: LayerState | null = null;
@@ -209,6 +211,7 @@ export function addRegions(
     hovered: null,
     selected: null,
     risen: false,
+    metricTimer: undefined,
     onMouseMove,
   };
   writeIntensity();
@@ -273,8 +276,9 @@ export function setRegionMetric(map: MapboxMap, metric: Metric): void {
   if (!state || state.map !== map || state.metric === metric) return;
   const s = state;
   s.metric = metric;
+  clearTimeout(s.metricTimer);
   for (const r of s.regions) animateTo(r.id, (s.heights.get(r.id) ?? 0) * 0.3, MS.sink);
-  setTimeout(() => {
+  s.metricTimer = setTimeout(() => {
     if (state !== s) return;
     map.setPaintProperty(REGION_LAYER, "fill-extrusion-color", colorExpression(s.metric, s.tone));
     writeIntensity();
@@ -312,10 +316,11 @@ export function setRegionsVisible(map: MapboxMap, visible: boolean): void {
   }
 }
 
-/** Stops the column animation, then removes the layers, source and interactions. */
+/** Stops every animation and timer, then removes the layers, source and interactions. */
 export function removeRegions(map: MapboxMap): void {
   if (state) {
     if (state.frame) cancelAnimationFrame(state.frame);
+    clearTimeout(state.metricTimer);
     map.off("mousemove", state.onMouseMove);
     state = null;
   }

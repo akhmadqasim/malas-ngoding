@@ -32,20 +32,29 @@ export function App() {
   const [mapHoverId, setMapHoverId] = useState<string | null>(null);
   const metric = useAppStore((s) => s.metric);
   const regionList = useMemo(() => data?.regions.features.map((f) => f.properties) ?? [], [data]);
+  const attempt = useRef(0);
 
   const load = useCallback(() => {
+    const run = ++attempt.current;
     setFailure(null);
+    setData(null);
+    setPhase("loading");
+    setMapHoverId(null);
+    useAppStore.getState().setHoveredRegion(null);
     Promise.all([api.config(), api.regions(), api.plants()])
       .then(([config, regions, plants]) => {
         if (!config.mapboxToken) throw new Error("Token Mapbox belum diisi di server (MAPBOX_TOKEN).");
-        setData({ token: config.mapboxToken, regions, plants });
+        if (run === attempt.current) setData({ token: config.mapboxToken, regions, plants });
       })
-      .catch((err: unknown) => setFailure(err instanceof Error ? err.message : "Data peta gagal dimuat."));
+      .catch((err: unknown) => {
+        if (run === attempt.current) setFailure(err instanceof Error ? err.message : "Data peta gagal dimuat.");
+      });
   }, []);
   useEffect(load, [load]);
 
   const onIntroStart = useCallback(() => setPhase("flying"), []);
   const onIntroEnd = useCallback(() => setPhase("done"), []);
+  const onFailure = useCallback((message: string) => setFailure(message), []);
 
   // The tooltip follows the pointer through a ref, so moving the mouse never re-renders React.
   const tooltip = useRef<HTMLDivElement>(null);
@@ -71,7 +80,7 @@ export function App() {
     useAppStore.getState().setHoveredRegion(id);
   }, []);
 
-  const showUi = phase === "done";
+  const showUi = phase === "done" && !failure;
   const hovered = mapHoverId ? regionList.find((r) => r.id === mapHoverId) : undefined;
   useLayoutEffect(placeTooltip, [placeTooltip, hovered, metric]);
 
@@ -87,6 +96,7 @@ export function App() {
             onIntroEnd={onIntroEnd}
             onRegionHover={onRegionHover}
             onRegionPointer={onRegionPointer}
+            onFailure={onFailure}
           />
         )}
 

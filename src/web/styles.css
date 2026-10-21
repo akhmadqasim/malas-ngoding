@@ -592,6 +592,13 @@ button {
   flex-direction: column;
   gap: --spacing(1.5);
 }
+.layer__hint {
+  max-width: --spacing(36);
+  margin: 0;
+  font-size: var(--text-2xs);
+  line-height: var(--text-2xs--line-height);
+  color: var(--color-paper-faint);
+}
 
 .toggle {
   display: inline-flex;

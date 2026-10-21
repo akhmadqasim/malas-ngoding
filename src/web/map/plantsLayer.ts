@@ -1,7 +1,7 @@
 import mapboxgl, { type ExpressionSpecification, type GeoJSONSourceSpecification, type Map as MapboxMap } from "mapbox-gl";
 import type { PlantCollection, PlantProperties } from "../api.ts";
 import { token } from "../theme.ts";
-import { FUEL_LABELS, FUELS, fuelKey } from "./fuels.ts";
+import { FUEL_LABELS, FUELS, fuelKey, fuelsPresent, plantIconExpression } from "./fuels.ts";
 import type { FuelType } from "../../shared/types.ts";
 import { fmtNumber } from "../../shared/format.ts";
 
@@ -34,8 +34,34 @@ export function plantPopupHtml(p: PlantProperties): string {
 }
 
 let popup: mapboxgl.Popup | null = null;
+
+// --- Pulse ---------------------------------------------------------------------------------------
+// One shared ticker asks the map for a frame 24 times a second while the plants are shown. Each marker
+// redraws at most once per tick, and nothing redraws or repaints while the layer is hidden.
+
 const IMAGE_PX = 128;
+const FRAME_MS = 1000 / 24;
 const PERIOD_MS = 3200;
+
+const pulse = {
+  map: null as MapboxMap | null,
+  visible: true,
+  still: false,
+  timer: undefined as ReturnType<typeof setInterval> | undefined,
+};
+
+function startPulse() {
+  if (pulse.timer || pulse.still || !pulse.visible || !pulse.map) return;
+  const map = pulse.map;
+  pulse.timer = setInterval(() => {
+    if (!document.hidden) map.triggerRepaint();
+  }, FRAME_MS);
+}
+
+function stopPulse() {
+  clearInterval(pulse.timer);
+  pulse.timer = undefined;
+}
 
 interface MarkerColors {
   /** Fuel colour. */
@@ -52,17 +78,17 @@ interface MarkerColors {
  * and fades from it, meaning "a working plant". A symbol layer, unlike a circle layer, can ignore depth,
  * so the plants stay visible in front of the region columns.
  */
-function markerImage(map: MapboxMap, colors: MarkerColors, phase: number): mapboxgl.StyleImageInterface {
+function markerImage(colors: MarkerColors, phase: number): mapboxgl.StyleImageInterface {
   const size = IMAGE_PX;
-  const still = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   const canvas = document.createElement("canvas");
   canvas.width = size;
   canvas.height = size;
   let ctx: CanvasRenderingContext2D | null = canvas.getContext("2d", { willReadFrequently: true });
+  let lastDraw = Number.NEGATIVE_INFINITY;
 
   const draw = (now: number) => {
     if (!ctx) return;
-    const t = still ? 0.4 : ((now + phase) % PERIOD_MS) / PERIOD_MS;
+    const t = pulse.still ? 0.4 : ((now + phase) % PERIOD_MS) / PERIOD_MS;
     const c = size / 2;
     const core = size * 0.13;
     const ring = core + 4;
@@ -102,10 +128,12 @@ function markerImage(map: MapboxMap, colors: MarkerColors, phase: number): mapbo
     height: size,
     data: ctx ? ctx.getImageData(0, 0, size, size).data : new Uint8Array(size * size * 4),
     render() {
-      if (!ctx || still) return false;
-      draw(performance.now());
+      if (!ctx || pulse.still || !pulse.visible) return false;
+      const now = performance.now();
+      if (now - lastDraw < FRAME_MS - 1) return false;
+      lastDraw = now;
+      draw(now);
       this.data = ctx.getImageData(0, 0, size, size).data;
-      map.triggerRepaint();
       return true;
     },
     onRemove() {
@@ -115,13 +143,20 @@ function markerImage(map: MapboxMap, colors: MarkerColors, phase: number): mapbo
 }
 
 /** Power plants as pulsing markers coloured by fuel and sized by MW, with a popup on hover or tap. */
-export function addPlants(map: MapboxMap, fc: PlantCollection): void {
+export function addPlants(map: MapboxMap, fc: PlantCollection, visible = true): void {
   removePlants(map);
+  pulse.map = map;
+  pulse.visible = visible;
+  pulse.still = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
   map.addSource(SOURCE, { type: "geojson", data: fc as unknown as GeoJSONSourceSpecification["data"] });
+  const present = fuelsPresent(fc);
   const edge = token("--color-ink");
   const paper = token("--color-paper");
-  FUELS.forEach((fuel, i) => {
-    map.addImage(`plant-${fuel}`, markerImage(map, { core: token(`--color-fuel-${fuel}`), edge, pulse: paper }, i * 460), { pixelRatio: 2 });
+  present.forEach((fuel) => {
+    // Phases are spread so neighbouring plants do not pulse in step.
+    const phase = FUELS.indexOf(fuel) * 460;
+    map.addImage(`plant-${fuel}`, markerImage({ core: token(`--color-fuel-${fuel}`), edge, pulse: paper }, phase), { pixelRatio: 2 });
   });
 
   // Square root of MW so a 2.200 MW site does not swallow a 50 MW one.
@@ -132,11 +167,12 @@ export function addPlants(map: MapboxMap, fc: PlantCollection): void {
     source: SOURCE,
     slot: "top",
     layout: {
-      "icon-image": ["concat", "plant-", ["match", ["get", "fuel"], [...FUELS], ["get", "fuel"], "lainnya"]],
+      "icon-image": plantIconExpression(present),
       "icon-size": ["interpolate", ["linear"], ["zoom"], 5, size(0.75), 10, size(1.35)],
       "icon-allow-overlap": true,
       "icon-ignore-placement": true,
       "symbol-sort-key": ["-", 0, ["get", "capacityMw"]],
+      visibility: visible ? "visible" : "none",
     },
     paint: {
       // Planned and unverified sites are drawn fainter than operating ones.
@@ -146,6 +182,7 @@ export function addPlants(map: MapboxMap, fc: PlantCollection): void {
       "icon-occlusion-opacity": 1,
     },
   });
+  startPulse();
 
   popup = new mapboxgl.Popup({ closeButton: false, closeOnClick: false, offset: 14, className: "map-popup", maxWidth: "260px" });
   const show = (e: mapboxgl.InteractionEvent) => {
@@ -171,12 +208,22 @@ export function addPlants(map: MapboxMap, fc: PlantCollection): void {
   });
 }
 
+/** Shows or hides the plants. Hidden plants neither redraw nor ask the map for frames. */
 export function setPlantsVisible(map: MapboxMap, visible: boolean): void {
+  pulse.visible = visible;
   if (map.getLayer(PLANT_LAYER)) map.setLayoutProperty(PLANT_LAYER, "visibility", visible ? "visible" : "none");
-  if (!visible) popup?.remove();
+  if (visible) {
+    startPulse();
+  } else {
+    stopPulse();
+    popup?.remove();
+  }
 }
 
+/** Stops the pulse, then removes the popup, layer, source, marker images and interactions. */
 export function removePlants(map: MapboxMap): void {
+  stopPulse();
+  pulse.map = null;
   popup?.remove();
   popup = null;
   for (const id of INTERACTIONS) map.removeInteraction(id);
