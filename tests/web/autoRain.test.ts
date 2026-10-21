@@ -4,6 +4,7 @@ import {
   AUTO_RAIN_MIN_ZOOM,
   BIG_MOVE_KM,
   distanceKm,
+  forecastIsCurrent,
   liveRainFrom,
   nextRainMode,
   nextStep,
@@ -49,6 +50,15 @@ describe("live rain from a forecast", () => {
   });
 });
 
+describe("is the forecast about now?", () => {
+  test("a fresh forecast always is; a stale one only within 2 h of one of its hours", () => {
+    expect(forecastIsCurrent(weather({ hours: [hour("2026-10-20T10:00")] }), NOW)).toBe(true);
+    expect(forecastIsCurrent(weather({ stale: true }), NOW)).toBe(true);
+    expect(forecastIsCurrent(weather({ stale: true, hours: [hour("2026-10-21T12:00")] }), NOW)).toBe(false);
+    expect(forecastIsCurrent(weather({ stale: true, hours: [] }), NOW)).toBe(false);
+  });
+});
+
 describe("rain mode and the Hujan switch", () => {
   test("rain shows when switched on, or in auto mode while it rains at the view centre", () => {
     const at: [number, number] = [117.15, -0.5];
@@ -73,7 +83,8 @@ describe("rain mode and the Hujan switch", () => {
     expect(rainNote({ rain: "auto", liveRain: wet }, 13)).toBe(
       "Sedang hujan di sini menurut prakiraan Open-Meteo. Terlihat saat peta diperbesar sampai tingkat gedung.",
     );
-    expect(rainNote({ rain: "off", liveRain: wet }, 16)).toBeNull();
+    expect(rainNote({ rain: "off", liveRain: wet }, 16)).toBe("Efek hujan mati sampai hujan di sini reda.");
+    expect(rainNote({ rain: "off", liveRain: { ...wet, raining: false } }, 16)).toBeNull();
   });
 });
 
@@ -205,6 +216,29 @@ describe("startAutoRain", () => {
     await flush();
     expect(n).toBe(2);
     expect(useAppStore.getState().liveRain?.raining).toBe(true);
+    stop();
+  });
+
+  test("off means off for this shower: a dry check brings auto back, a wet one keeps it off", async () => {
+    let wet = true;
+    const map = fakeMap([117.1475, -0.4955], 16);
+    useAppStore.setState({ rain: "off" });
+    const stop = startAutoRain(map, { fetchWeather: async () => weather({ raining: wet }), now: () => NOW });
+    await flush();
+    expect(useAppStore.getState().rain).toBe("off");
+    wet = false;
+    map.moveTo([116.85, -1.24], 16);
+    await flush();
+    expect(useAppStore.getState().rain).toBe("auto");
+    stop();
+  });
+
+  test("a dry check leaves a rain switched on alone", async () => {
+    const map = fakeMap([117.1475, -0.4955], 16);
+    useAppStore.setState({ rain: "on" });
+    const stop = startAutoRain(map, { fetchWeather: async () => weather({ raining: false }), now: () => NOW });
+    await flush();
+    expect(useAppStore.getState().rain).toBe("on");
     stop();
   });
 

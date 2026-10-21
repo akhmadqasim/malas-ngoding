@@ -1,3 +1,4 @@
+import { nearestHourGapMs } from "../../shared/pvForecast.ts";
 import { api, type WeatherResponse } from "../api.ts";
 import { type LiveRain, type RainMode, useAppStore } from "../store.ts";
 import { RAIN_MIN_ZOOM } from "./effects.ts";
@@ -17,26 +18,17 @@ export const RECHECK_MS = 10 * 60_000;
 /** A stale forecast (Open-Meteo down, an old cached one) counts only if one of its hours is this close to now. */
 export const STALE_GAP_MS = 2 * 60 * 60_000;
 
-/** Forecast times are WITA (UTC+8, no daylight saving) without an offset. */
-const witaMs = (time: string) => Date.parse(`${time}:00+08:00`);
-
-/** Gap between `nowMs` and the nearest forecast hour, Infinity without hours. */
-function nearestHourGapMs(hours: { time: string }[], nowMs: number): number {
-  let best = Infinity;
-  for (const h of hours) {
-    const gap = Math.abs(witaMs(h.time) - nowMs);
-    if (gap < best) best = gap;
-  }
-  return best;
+/**
+ * Whether a forecast speaks about now. The server reads `current` from the hour nearest to now; for a stale
+ * forecast (Open-Meteo down, an old cache) that hour can be days old, so it counts only within 2 hours.
+ */
+export function forecastIsCurrent(w: Pick<WeatherResponse, "stale" | "hours">, nowMs: number): boolean {
+  return !w.stale || nearestHourGapMs(w.hours, nowMs) <= STALE_GAP_MS;
 }
 
-/**
- * Whether it rains now according to a forecast. The server reads `current` from the hour nearest to now;
- * for a stale forecast that hour can be days old, so then it only counts within 2 hours of now.
- */
+/** Whether it rains now according to a forecast (a stale one only counts when it is current). */
 export function liveRainFrom(w: Pick<WeatherResponse, "current" | "stale" | "hours">, nowMs: number): boolean {
-  if (w.stale && !(nearestHourGapMs(w.hours, nowMs) <= STALE_GAP_MS)) return false;
-  return w.current.raining;
+  return forecastIsCurrent(w, nowMs) && w.current.raining;
 }
 
 type RainState = { rain: RainMode; liveRain: LiveRain | null };
@@ -48,7 +40,8 @@ export function rainVisible({ rain, liveRain }: RainState): boolean {
 
 /**
  * The mode the Hujan switch sets. On forces rain. Off returns to auto, unless it really rains here: then
- * auto would bring the rain straight back, so off stays off.
+ * auto would bring the rain straight back, so it is off for this shower (startAutoRain returns to auto
+ * at the first dry check).
  */
 export function nextRainMode(on: boolean, liveRaining: boolean): RainMode {
   if (on) return "on";
@@ -57,12 +50,14 @@ export function nextRainMode(on: boolean, liveRaining: boolean): RainMode {
 
 const FAR_OUT = "Terlihat saat peta diperbesar sampai tingkat gedung.";
 const LIVE = "Sedang hujan di sini menurut prakiraan Open-Meteo.";
+const OFF_FOR_SHOWER = "Efek hujan mati sampai hujan di sini reda.";
 
 /** The quiet note under the Hujan switch, or null. */
 export function rainNote(state: RainState, zoom: number): string | null {
   const farOut = zoom < RAIN_MIN_ZOOM;
   if (state.rain === "on") return farOut ? FAR_OUT : null;
   if (state.rain === "auto" && state.liveRain?.raining) return farOut ? `${LIVE} ${FAR_OUT}` : LIVE;
+  if (state.rain === "off" && state.liveRain?.raining) return OFF_FOR_SHOWER;
   return null;
 }
 
@@ -130,7 +125,11 @@ export function startAutoRain(map: AutoRainMap, { fetchWeather = api.weather, no
     lastAt = centre;
     fetchWeather(centre[1], centre[0], 0).then(
       (w) => {
-        if (!stopped && id === seq) store().setLiveRain({ raining: liveRainFrom(w, now()), at: centre });
+        if (stopped || id !== seq) return;
+        const raining = liveRainFrom(w, now());
+        store().setLiveRain({ raining, at: centre });
+        // "Off" was for the shower that was falling; once it is dry here, auto takes over again.
+        if (!raining && store().rain === "off") store().setRain("auto");
       },
       () => {
         if (stopped || id !== seq) return;
