@@ -15,6 +15,8 @@ const MAX_HEIGHT_M = 75_000;
 const MIN_HEIGHT_M = 4_000;
 /** Above this zoom the city and its buildings matter more than the columns, so they flatten out and hide. */
 const HIDE_ZOOM = 12;
+/** By this zoom the columns have all but faded, so a hover on them ends (see `onZoom` in addRegions). */
+const HOVER_END_ZOOM = HIDE_ZOOM - 0.5;
 /** Map motion in ms (docs/research/design/00-direction.md section 6). */
 const MS = { rise: 1600, riseStagger: 110, hover: 300, select: 900, sink: 380, swapRise: 900, swapStagger: 40 } as const;
 /** Hover previews a selection: the column under the pointer rises this much ... */
@@ -93,6 +95,7 @@ interface LayerState {
   /** The pending colour swap of a metric switch. */
   metricTimer: ReturnType<typeof setTimeout> | undefined;
   onMouseMove: (e: MapMouseEvent) => void;
+  onZoom: () => void;
 }
 let state: LayerState | null = null;
 
@@ -230,6 +233,14 @@ export function addRegions(
   const onMouseMove = (e: MapMouseEvent) => {
     if (state?.hovered) handlers.onPointer?.({ x: e.point.x, y: e.point.y });
   };
+  // A wheel zoom with a still pointer fires no mouseleave, so a hover would outlive its column and leave
+  // the tooltip floating over the city. End it once the columns have faded.
+  const onZoom = () => {
+    if (!state?.hovered || map.getZoom() < HOVER_END_ZOOM) return;
+    applyHover(null);
+    map.getCanvas().style.cursor = "";
+    handlers.onHover?.(null);
+  };
   state = {
     map,
     regions,
@@ -243,9 +254,11 @@ export function addRegions(
     risen: false,
     metricTimer: undefined,
     onMouseMove,
+    onZoom,
   };
   writeIntensity();
   map.on("mousemove", onMouseMove);
+  map.on("zoom", onZoom);
 
   map.addInteraction("regions-enter", {
     type: "mouseenter",
@@ -356,6 +369,7 @@ export function removeRegions(map: MapboxMap): void {
     if (state.frame) cancelAnimationFrame(state.frame);
     clearTimeout(state.metricTimer);
     map.off("mousemove", state.onMouseMove);
+    map.off("zoom", state.onZoom);
     state = null;
   }
   for (const id of INTERACTIONS) map.removeInteraction(id);

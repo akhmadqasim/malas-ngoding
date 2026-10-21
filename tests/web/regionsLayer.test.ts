@@ -26,6 +26,7 @@ function fakeMap() {
   const featureState = new Map<string, Record<string, unknown>>();
   const paintCalls: [string, string][] = [];
   const canvas = { style: { cursor: "" } };
+  const zoom = { value: 6.6 };
   const map = {
     addSource: (id: string) => void sources.add(id),
     getSource: (id: string) => (sources.has(id) ? {} : undefined),
@@ -45,9 +46,11 @@ function fakeMap() {
     addInteraction: (id: string, spec: { handler: Handler }) => void interactions.set(id, spec.handler),
     removeInteraction: (id: string) => void interactions.delete(id),
     getCanvas: () => canvas,
+    getZoom: () => zoom.value,
   };
   return {
     map: map as unknown as MapboxMap,
+    zoom,
     fire: (id: string, e: Record<string, unknown>) => interactions.get(id)?.(e),
     emit: (type: string, e: Record<string, unknown>) => listeners.get(type)?.forEach((fn) => fn(e)),
     hovered: (id: string) => featureState.get(id)?.hover === true,
@@ -189,6 +192,24 @@ describe("hover previews the selection", () => {
   test("the outline no longer claims to mark the selection (it sits under the column)", () => {
     const { map, specs } = setup();
     expect(JSON.stringify(specs.get("regions-outline")?.paint)).not.toContain("selected");
+    removeRegions(map);
+  });
+});
+
+describe("hover after zooming in", () => {
+  test("a hover ends when the columns fade out, even if the pointer never moves", () => {
+    const { map, fire, emit, zoom, calls, hovered, state } = setup();
+    fire("regions-enter", { feature: { id: "paser" }, point: { x: 0, y: 0 } });
+    expect(calls.hover).toEqual(["paser"]);
+    // A wheel zoom with a still pointer: no mouseleave, only zoom events.
+    zoom.value = 9;
+    emit("zoom", {});
+    expect(hovered("paser")).toBe(true);
+    zoom.value = 11.6;
+    emit("zoom", {});
+    expect(calls.hover).toEqual(["paser", null]);
+    expect(hovered("paser")).toBe(false);
+    expect(state("samarinda").recede).toBe(false);
     removeRegions(map);
   });
 });
