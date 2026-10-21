@@ -4,6 +4,7 @@ import type { Map as MapboxMap } from "mapbox-gl";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { flyToProvince } from "../map/camera.ts";
 import { useAppStore } from "../store.ts";
+import { MethodologyPanel } from "./MethodologyPanel.tsx";
 
 /**
  * Turns the compass needle with the map. Written straight to the element on every `rotate` frame: through
@@ -108,6 +109,7 @@ export function MapTools() {
             <p>Data wilayah: BPS Kalimantan Timur, Kementerian ESDM dan PLN.</p>
             <p>Data pembangkit: Global Energy Monitor, WRI dan Kementerian ESDM; sebagian lokasinya perkiraan.</p>
             <p className="map-about__note">Angka per wilayah adalah perkiraan. Cara menghitungnya dijelaskan di bawah.</p>
+            <MethodologyPanel />
           </Popover.Dialog>
         </Popover.Content>
       </Popover>
