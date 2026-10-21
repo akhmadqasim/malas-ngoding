@@ -114,7 +114,7 @@ Tidak ada Vite, Express, atau alat khusus Node: Bun menangani semuanya.
 |---|---|
 | `map/MapView.tsx` | Membuat peta Mapbox, memasang medan dan lapisan data, memutar intro, dan menangani kegagalan (token ditolak, WebGL mati, gaya peta gagal, terlalu lama). |
 | `map/regionsLayer.ts`, `columns.ts`, `regionLabels.ts` | Kolom 3D per wilayah, animasi tinggi, hover dan klik, dan nama wilayah di atas kolom. |
-| `map/plantsLayer.ts`, `fuels.ts` | Titik pembangkit, penanda gabungan untuk pembangkit yang berdekatan, dan keterangannya. |
+| `map/plantsLayer.ts`, `plantGroups.ts`, `fuels.ts` | Pin pembangkit yang berdiri di puncak kolom wilayahnya (satu lapisan pin per kolom, ikut naik turun bersama kolom), pin berangka untuk pembangkit yang berdekatan, dan keterangannya. |
 | `map/effects.ts`, `camera.ts` | Cahaya mengikuti jam WITA, efek hujan, serta gerak kamera (intro, terbang ke wilayah, orbit saat diam). |
 | `map/buildings.ts` | Gedung yang bisa diklik lewat `map.addInteraction`: luas dasar dari poligon, titik tengah, pilihan dan sorotan gedung, medan dimatikan di pembesaran tinggi, dan pemilihan gedung di satu titik untuk chat. |
 | `map/autoRain.ts` | Hujan otomatis: membaca cuaca di pusat peta (saat mulai, setelah kamera pindah jauh, tiap 10 menit) dan menyalakan efek hujan bila sedang hujan. |
@@ -124,7 +124,7 @@ Tidak ada Vite, Express, atau alat khusus Node: Bun menangani semuanya.
 | `panels/RecommendationPanel.tsx` | Kartu "Rekomendasi untuk Pemkab atau Pemkot": daftar bertingkat prioritas, asal teks (AI atau aturan), pemuatan dan galat. |
 | `panels/MethodologyPanel.tsx` | Lembar samping "Cara menghitung dan sumber data" (dibuka dari "Tentang peta ini"): rumus, tabel faktor dengan baris asumsi bertanda, dan semua sumber dengan lisensinya. |
 | `chat/` | Panel chat: `useChat.ts` (percakapan di `localStorage`, kirim pertanyaan, hentikan, ulangi), `sse.ts` (membaca aliran), `ChatPanel.tsx`, `actionLabels.ts` (tombol aksi di bawah jawaban), `placesLayer.ts` (penanda tempat hasil `find_places`), dan `markdown.tsx` (Markdown ringan). |
-| `panels/Legend.tsx`, `MapControls.tsx` | Dua kartu di bawah: legenda (saklar metrik, meter, kunci pembangkit) dan kontrol peta (lapisan, cahaya, hujan). |
+| `panels/Dock.tsx`, `Legend.tsx`, `MapControls.tsx` | Dok di bawah. Selalu tampil: kartu legenda (saklar "Tinggi kolom" dan meter). Di balik tombol "Lapisan dan tampilan" (HeroUI Disclosure, tertutup di awal sesi, keadaannya diingat selama sesi): kartu kontrol peta (lapisan Wilayah dan Pembangkit dengan kunci bahan bakar di bawahnya, Cahaya, Hujan), yang terbuka di samping legenda. |
 | `panels/MapTools.tsx` | Alat peta di kanan bawah: perbesar, perkecil, hadap utara, kembali ke seluruh provinsi, dan "Tentang peta ini". |
 | `components/` | Komponen kecil yang dipakai ulang: pilihan tersegmen dan saklar (di atas HeroUI), angka berjalan, CO2 dengan subskrip, intro. |
 | `store.ts`, `api.ts` | State aplikasi (Zustand) dan fungsi `fetch` bertipe ke semua endpoint. |
@@ -142,6 +142,7 @@ Semua jalur di bawah `/api/`, tanpa nomor versi. Galat selalu berbentuk `{ "erro
 | `GET /api/regions/:id` | Satu wilayah | | Ringkasan wilayah dan `centroid` | 404 bila id tidak dikenal |
 | `GET /api/plants` | Pembangkit | | GeoJSON titik: nama, bahan bakar, MW, status, `approx` | 500 |
 | `GET /api/grid` | Bauran listrik dan faktor emisi tahun terbaru | | `GridMix` | 500 |
+| `GET /api/equivalents` | Faktor padanan CO2 (km mobil, km motor, pohon, charge HP, penerbangan) | | Daftar `EquivalentFactor`: `key`, `label`, `kgCo2PerUnit`, `unit` | 500 |
 | `POST /api/buildings/estimate` | Perkiraan satu gedung | `featureId`, `lng`, `lat`, `footprintM2`, `heightM`, opsional `poiClass`, `poiType`, `typeOverride`, `floorsOverride`, `typeHint` | `BuildingEstimate` | 400 bila isian tidak valid |
 | `POST /api/solar/simulate` | Simulasi panel surya | `lat`, `lng`, `roofAreaM2`, `kwhYear`, `backupHours`, opsional `buildingType` | Hasil simulasi, `peakSunHours`, `pshByMonth`, `assumptions` | 400 bila isian tidak valid |
 | `GET /api/weather?lat=&lng=&kWp=` | Prakiraan 7 hari dan produksi panel | | `{ hours, days, current, stale }` | 400 bila isian tidak valid; 503 bila tidak ada prakiraan sama sekali |

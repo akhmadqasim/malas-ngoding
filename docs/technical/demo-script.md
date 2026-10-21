@@ -12,9 +12,10 @@ Lakukan 15 menit sebelum mulai, bukan di depan juri.
 2. **Server.** `bun start` (mode produksi, lebih ringan) atau `bun dev`. Buka `http://localhost:3000` di Chrome atau Edge terbaru dengan WebGL aktif, layar penuh (F11), zoom browser 100%.
 3. **Kunci AI.** `.env` harus berisi `MAPBOX_TOKEN` publik dan `ANTHROPIC_API_KEY` asli. Buka panel chat sekali: bila tertulis "Asisten AI belum aktif", kunci belum terbaca dan chat tidak akan menjawab (lihat bagian Cadangan).
 4. **Pemanasan cache gedung.** Cari gedung demo (lihat langkah 4 di bawah), klik, dan buka keempat tabnya sekali, termasuk Cuaca. Itu mengisi cache POI, klimatologi NASA, dan prakiraan Open-Meteo (segar 1 jam; bila sumbernya mati, prakiraan lama tetap dipakai). Tutup panel lalu muat ulang halaman.
-5. **Cahaya.** Untuk tampilan paling dramatis pakai malam: buka `http://localhost:3000/?cahaya=night`. Saklar "Cahaya" tetap bisa diubah di tengah demo. Garis hujan terlihat di semua cahaya (di cahaya terang peta menambah kabut tipis supaya garisnya tampak).
-6. **Cadangan visual.** Buka `docs/technical/screens/` di tab lain (map, building, solar, chat, rain) dan siapkan PDF dokumentasi. Itu bahan bila peta tidak bisa dimuat.
-7. **Tutup** semua notifikasi dan tab lain. Matikan jeda layar.
+5. **Cahaya.** Untuk tampilan paling dramatis pakai malam: buka `http://localhost:3000/?cahaya=night`. Saklar "Cahaya" tetap bisa diubah di tengah demo, dari balik tombol "Lapisan dan tampilan" (lihat langkah 6). Garis hujan terlihat di semua cahaya (di cahaya terang peta menambah kabut tipis supaya garisnya tampak).
+6. **Lapisan dan tampilan.** Kartu legenda di bawah hanya menampilkan saklar "Tinggi kolom" dan meter. Saklar Wilayah dan Pembangkit, kunci warna pembangkit, Cahaya, dan Hujan ada di balik tombol teks **Lapisan dan tampilan** di ujung kanan baris satuan legenda. Coba buka dan tutup sekali supaya tahu letaknya, lalu biarkan **tertutup** sebelum mulai: keadaan buka-tutupnya diingat selama tab browser masih terbuka. Bukalah di tengah demo hanya saat perlu: sebelum mengganti Cahaya, dan sebelum bagian 5 (Hujan).
+7. **Cadangan visual.** Buka `docs/technical/screens/` di tab lain (map, building, solar, chat, rain) dan siapkan PDF dokumentasi. Itu bahan bila peta tidak bisa dimuat.
+8. **Tutup** semua notifikasi dan tab lain. Matikan jeda layar.
 
 ## Alur demo
 
@@ -24,7 +25,7 @@ Lakukan 15 menit sebelum mulai, bukan di depan juri.
 | 0:45 | 2. Ringkasan provinsi | Daftar peringkat, saklar Tinggi kolom, pembangkit |
 | 1:45 | 3. Rincian wilayah | Klik Samarinda, lalu Kutai Barat, buka rekomendasi |
 | 2:45 | 4. Klik gedung | Energi, Emisi, ganti jenis, Surya, Cuaca |
-| 4:30 | 5. Hujan | Saklar Hujan di tingkat gedung |
+| 4:30 | 5. Hujan | Buka "Lapisan dan tampilan", lalu saklar Hujan di tingkat gedung |
 | 5:00 | 6. Chat | Tiga sampai empat pertanyaan yang menggerakkan peta |
 | 6:15 | 7. Metodologi dan penutup | Tentang peta ini, Cara menghitung dan sumber data |
 
@@ -40,15 +41,16 @@ Lakukan 15 menit sebelum mulai, bukan di depan juri.
   1. Tunjuk angka besar di panel kiri: total emisi sekitar 6,1 juta ton CO2 per tahun, perkiraan.
   2. Arahkan penunjuk ke kolom Samarinda, lalu ke deretan di daftar peringkat. Kolom terangkat, tooltip muncul, dan jarum meter di legenda berayun.
   3. Di kartu legenda, ganti "Tinggi kolom" dari Emisi CO2 ke Listrik dan kembali. Tinggi dan warna kolom bergerak.
-  4. Arahkan penunjuk ke satu titik pembangkit untuk memperlihatkan nama, bahan bakar, kapasitas, dan "Lokasi perkiraan".
-- **Ucapan.** *"Tinggi kolom adalah emisi per tahun. Samarinda, Kutai Kartanegara, dan Balikpapan paling tinggi. Titik berwarna adalah 13 pembangkit, abu-abu untuk batu bara. Sebagian besar listrik kita berasal dari batu bara. Semua angka ini perkiraan, kami tulis sumbernya."*
+  4. Arahkan penunjuk ke satu pin pembangkit untuk memperlihatkan nama, bahan bakar, kapasitas, dan "Lokasi perkiraan". Pin berdiri di puncak kolom wilayahnya; kepalanya berwarna menurut bahan bakar, dan pin berangka adalah beberapa pembangkit yang berdekatan (klik untuk memisahkannya).
+- **Ucapan.** *"Tinggi kolom adalah emisi per tahun. Samarinda, Kutai Kartanegara, dan Balikpapan paling tinggi. Pin berwarna adalah 13 pembangkit, abu-abu untuk batu bara. Sebagian besar listrik kita berasal dari batu bara. Semua angka ini perkiraan, kami tulis sumbernya."*
+- **Catatan.** Kunci warna bahan bakar ada di bawah saklar Pembangkit, di balik "Lapisan dan tampilan". Tidak perlu dibuka di bagian ini; tooltip pin sudah menyebut bahan bakarnya.
 
 ### 3. Rincian wilayah dan rekomendasi (1:45 sampai 2:45)
 
 - **Aksi.**
   1. Klik Samarinda (kolom atau baris daftar). Kamera terbang dan panel kiri berganti ke rincian: emisi, bagian dari listrik Kaltim, listrik per orang, penduduk, pelanggan PLN, rasio elektrifikasi, dan asal listrik Kaltim.
   2. Gulir panel ke kartu **Rekomendasi untuk Pemkot Samarinda**. Buka satu butir (butir pertama sudah terbuka): prioritas, kategori, isi, dampak yang diharapkan.
-  3. Klik "Semua wilayah", lalu klik **Kutai Barat**. Tunjuk "Desa belum dilayani PLN" (21 desa) dan buka rekomendasi pertamanya, yang pada salinan tersimpan saat ini berjudul "Usulkan listrik PLN untuk 21 desa belum berlistrik". Samarinda, yang listriknya sudah merata, mendapat saran pertama tentang PLTS atap di gedung pemerintah.
+  3. Klik "Semua wilayah", lalu klik **Kutai Barat**. Tunjuk "Desa belum dilayani PLN" (21 desa) dan buka rekomendasi pertamanya, yang pada salinan tersimpan saat ini berjudul "Usulkan penyambungan listrik PLN untuk 21 desa". Samarinda, yang listriknya sudah merata, mendapat saran pertama tentang PLTS atap di gedung pemerintah.
 - **Ucapan.** *"Untuk tiap kabupaten dan kota ada rekomendasi bagi pemerintah daerah. Claude menulisnya dari data wilayah itu saja, jadi Kutai Barat yang punya desa belum berlistrik mendapat saran yang berbeda dari Samarinda. Tulisan di kartu menyebut bahwa ini ditulis AI dan perlu diperiksa."*
 - **Catatan.** Kartu menulis "Ditulis AI (model) pada ..." bila rekomendasi dari Claude, dan "Berbasis aturan" bila AI tidak ada. Keduanya sah untuk demo.
 
@@ -66,9 +68,9 @@ Lakukan 15 menit sebelum mulai, bukan di depan juri.
 
 ### 5. Hujan (4:30 sampai 5:00)
 
-- **Aksi.** Pada pembesaran gedung (15 atau lebih), nyalakan saklar **Hujan** di kartu "Lapisan dan suasana peta". Garis hujan turun di atas gedung. Bila saat demo memang sedang hujan di Samarinda, hujan menyala sendiri (mode otomatis) dan keterangan di bawah saklar menulis "Sedang hujan di sini menurut prakiraan Open-Meteo".
+- **Aksi.** Pada pembesaran gedung (15 atau lebih), klik **Lapisan dan tampilan** di ujung kanan baris satuan legenda. Kartu kontrol terbuka di samping legenda. Nyalakan saklar **Hujan** di baris Cahaya. Garis hujan turun di atas gedung. Bila saat demo memang sedang hujan di Samarinda, hujan menyala sendiri (mode otomatis) dan keterangan di bawah saklar menulis "Sedang hujan di sini menurut prakiraan Open-Meteo".
 - **Ucapan.** *"Saklar hujan bawaannya otomatis: peta ikut hujan bila prakiraan di pusat peta mengatakan sedang hujan. Di tampilan provinsi efeknya sengaja tidak tampak, supaya tidak menutupi kolom."*
-- **Catatan.** Matikan lagi saklarnya sebelum ke bagian chat.
+- **Catatan.** Matikan lagi saklarnya, lalu tutup "Lapisan dan tampilan" (klik tombol yang sama) sebelum ke bagian chat, supaya legenda kembali satu kartu.
 
 ### 6. Chat yang menggerakkan peta (5:00 sampai 6:15)
 
@@ -76,7 +78,7 @@ Buka tombol chat di pojok kanan bawah. Pakai pertanyaan di bawah, berurutan. Jaw
 
 | Pertanyaan | Yang terjadi kira-kira | Yang ditunjukkan |
 |---|---|---|
-| "Wilayah mana emisinya paling tinggi?" | Claude memanggil `list_regions`, lalu aksi `show_all_regions` dan `set_metric`. Peta kembali ke seluruh Kaltim dan mengurutkan menurut emisi. | Angka datang dari alat, bukan ingatan |
+| "Wilayah mana emisinya paling tinggi?" | Claude memanggil `list_regions`, lalu aksi `set_metric` dan `fly_to_region` ke wilayah tertinggi (Samarinda). Peta terbang ke wilayah itu, di sebelah kiri panel chat. Pertanyaan yang membandingkan semua wilayah memakai `show_all_regions`: seluruh Kaltim tampil di sebelah kiri panel chat. | Angka datang dari alat, bukan ingatan |
 | "Tunjukkan gedung sekolah di Samarinda" | `find_places` mencari sekolah, lima tempat ditandai di peta, lalu aksi `select_building_at` memilih satu gedung dan panel gedung terbuka dengan jenis Sekolah. | Chat menggerakkan peta dan membuka panel |
 | "Kalau gedung ini pakai panel surya?" | `simulate_solar` dengan data gedung terpilih, lalu aksi `open_tab` membuka tab Surya. | Angka chat sama dengan angka tab Surya |
 | "Besok hujan? Berapa listrik suryanya?" | `get_weather`, lalu tab Cuaca terbuka. | Prakiraan dan produksi panel |
