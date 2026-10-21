@@ -1,6 +1,8 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import type { Server } from "bun";
 import { createServer } from "../../src/server/index.ts";
+import { env } from "../../src/server/env.ts";
+import { publicMapboxToken } from "../../src/server/routes/config.ts";
 import type { RegionSummary } from "../../src/shared/types.ts";
 import { fakeDeps } from "./fakes.ts";
 
@@ -56,10 +58,15 @@ describe("data routes", () => {
     expect(body.year).toBe(2023);
   });
 
-  test("GET /api/config returns the mapbox token field", async () => {
+  test("GET /api/config returns the configured public mapbox token", async () => {
     const res = await get("/api/config");
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { mapboxToken: unknown };
-    expect(typeof body.mapboxToken).toBe("string");
+    expect(await res.json()).toEqual({ mapboxToken: publicMapboxToken(env.mapboxToken) });
+  });
+
+  test("only a public (pk.) mapbox token is ever sent to the browser", () => {
+    expect(publicMapboxToken("pk.abc.def")).toBe("pk.abc.def");
+    expect(publicMapboxToken("sk.abc.def")).toBe("");
+    expect(publicMapboxToken("")).toBe("");
   });
 });

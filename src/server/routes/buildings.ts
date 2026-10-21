@@ -1,7 +1,7 @@
 import { estimateBuilding } from "../../shared/estimate.ts";
 import type { BuildingEstimate, BuildingInput, BuildingType } from "../../shared/types.ts";
 import type { AppDeps } from "../index.ts";
-import { type RouteTable, error, json, safe } from "../http.ts";
+import { type RouteTable, error, json, methodNotAllowed, safe } from "../http.ts";
 import { cachedPoi, estimateCacheKey } from "../services/cache.ts";
 
 const BUILDING_TYPES: readonly BuildingType[] = [
@@ -54,6 +54,7 @@ function parseInput(body: unknown): { input: BuildingInput } | { problem: string
 export function buildingRoutes(deps: AppDeps): RouteTable {
   return {
     "/api/buildings/estimate": {
+      GET: () => methodNotAllowed("POST"),
       POST: safe(async (req) => {
         let body: unknown;
         try {

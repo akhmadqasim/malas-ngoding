@@ -8,6 +8,11 @@ export function error(message: string, status: number): Response {
   return Response.json({ error: message }, { status });
 }
 
+/** 405 with the `Allow` header, for a known path called with the wrong method. */
+export function methodNotAllowed(allow: string): Response {
+  return Response.json({ error: `Metode tidak diizinkan. Gunakan ${allow}.` }, { status: 405, headers: { Allow: allow } });
+}
+
 /** `server` lets a slow handler raise its idle timeout with `server.timeout(req, seconds)`. */
 export type Handler = (req: BunRequest, server: Server<undefined>) => Response | Promise<Response>;
 /** A route table entry: one handler for every method, or one handler per method. */

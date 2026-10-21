@@ -25,6 +25,16 @@ const post = (s: Server<undefined>, body: unknown) =>
     body: typeof body === "string" ? body : JSON.stringify(body),
   });
 
+describe("GET /api/buildings/estimate", () => {
+  test("answers 405 with an Allow header, not 404", async () => {
+    const s = start(fakeDeps());
+    const res = await fetch(new URL("/api/buildings/estimate", s.url));
+    expect(res.status).toBe(405);
+    expect(res.headers.get("allow")).toBe("POST");
+    expect(((await res.json()) as { error: string }).error).toContain("POST");
+  });
+});
+
 describe("POST /api/buildings/estimate", () => {
   let server: Server<undefined>;
   let warn: ReturnType<typeof spyOn>;
