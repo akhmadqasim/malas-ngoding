@@ -3,6 +3,7 @@ import "mapbox-gl/dist/mapbox-gl.css";
 import { useEffect, useRef } from "react";
 import { api, type PlantCollection, type RegionCollection } from "../api.ts";
 import { useAppStore } from "../store.ts";
+import { rainVisible, startAutoRain } from "./autoRain.ts";
 import { abortIntro, flyToProvince, flyToRegion, GLOBE_VIEW, introFlight, startIdleOrbit, stopIdleOrbit } from "./camera.ts";
 import {
   applyLightPreset,
@@ -187,6 +188,7 @@ export function MapView({ token, regions, plants, onIntroStart, onIntroEnd, onRe
     let introStarted = false;
     let introDone = false;
     let backgroundClick = false;
+    let stopAutoRain: (() => void) | undefined;
 
     loadGuard = setTimeout(() => fail(FAILURE.slow), LOAD_GUARD_MS);
     map.once("idle", () => clearTimeout(loadGuard));
@@ -202,7 +204,7 @@ export function MapView({ token, regions, plants, onIntroStart, onIntroEnd, onRe
     /** The overcast tint follows the rain: none from afar, fading in with it toward building zoom. */
     const updateOvercast = () => {
       const el = overcast.current;
-      if (el) el.style.opacity = String(overcastOpacity(useAppStore.getState().rain === "on", presetTone(preset), map.getZoom()));
+      if (el) el.style.opacity = String(overcastOpacity(rainVisible(useAppStore.getState()), presetTone(preset), map.getZoom()));
     };
     map.on("zoom", updateOvercast);
 
@@ -229,7 +231,7 @@ export function MapView({ token, regions, plants, onIntroStart, onIntroEnd, onRe
       applyLightPreset(map, next);
       const tone = presetTone(next);
       setRegionTone(map, tone);
-      setRainEffect(map, useAppStore.getState().rain === "on", tone, baseFog ?? null);
+      setRainEffect(map, rainVisible(useAppStore.getState()), tone, baseFog ?? null);
       updateOvercast();
       useAppStore.getState().setLightPreset(next);
     };
@@ -263,7 +265,7 @@ export function MapView({ token, regions, plants, onIntroStart, onIntroEnd, onRe
       // Plant markers go under the region names: a name may sit over a marker, and a marker never costs a name.
       addPlants(map, plants, now.layers.plants, { below: REGION_LABEL_LAYER });
       setRegionsVisible(map, now.layers.regions);
-      setRainEffect(map, now.rain === "on", presetTone(preset), baseFog ?? null);
+      setRainEffect(map, rainVisible(now), presetTone(preset), baseFog ?? null);
       updateOvercast();
       if (now.selectedRegionId) setSelectedRegion(map, now.selectedRegionId);
 
@@ -280,6 +282,7 @@ export function MapView({ token, regions, plants, onIntroStart, onIntroEnd, onRe
       }
 
       ready = true;
+      stopAutoRain ??= startAutoRain(map);
       useAppStore.getState().setMap(map);
       // Test hook for scripts/smoke.ts (waits for idle, projects points). Read-only use only.
       (window as TestWindow).__malasMap = map;
@@ -320,8 +323,8 @@ export function MapView({ token, regions, plants, onIntroStart, onIntroEnd, onRe
       if (s.metric !== prev.metric) setRegionMetric(map, s.metric);
       if (s.layers.regions !== prev.layers.regions) setRegionsVisible(map, s.layers.regions);
       if (s.layers.plants !== prev.layers.plants) setPlantsVisible(map, s.layers.plants);
-      if (s.rain !== prev.rain) {
-        setRainEffect(map, s.rain === "on", presetTone(preset), baseFog ?? null);
+      if (rainVisible(s) !== rainVisible(prev)) {
+        setRainEffect(map, rainVisible(s), presetTone(preset), baseFog ?? null);
         updateOvercast();
       }
       if (s.lightMode !== prev.lightMode) applyLight(resolvePreset(s.lightMode, new Date()));
@@ -350,6 +353,7 @@ export function MapView({ token, regions, plants, onIntroStart, onIntroEnd, onRe
       clearTimeout(loadGuard);
       clearTimeout(riseTimer);
       clearInterval(lightTimer);
+      stopAutoRain?.();
       unsubscribe();
       abortIntro();
       stopIdleOrbit();

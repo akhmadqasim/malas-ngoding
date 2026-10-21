@@ -446,12 +446,75 @@ const listen = (page: Page, sink: string[]) => {
   page.on("pageerror", (err) => sink.push(`pageerror (after "${lastCheck}"): ${err.message}`));
 };
 
+/** WITA time of an instant as Open-Meteo writes it ("2026-10-21T14:00"). */
+function witaHourText(ms: number): string {
+  return `${new Date(ms + 8 * 3600_000).toISOString().slice(0, 13)}:00`;
+}
+
+/**
+ * Answers every /api/weather call of the page with a fixed forecast, so the real weather at the view
+ * centre cannot switch the rain on in the middle of the rain checks (auto rain, map/autoRain.ts). "stale"
+ * is a cached forecast from three days ago that said rain: auto rain must ignore it.
+ */
+async function stubWeather(page: Page, sky: "dry" | "rain" | "stale") {
+  await page.unroute("**/api/weather?*");
+  const raining = sky !== "dry";
+  const at = sky === "stale" ? Date.now() - 3 * 86_400_000 : Date.now();
+  const hour = { time: witaHourText(at), ghiWm2: 200, cloudPct: raining ? 100 : 10, precipMm: raining ? 3 : 0, weatherCode: raining ? 63 : 1, pvKwh: 0 };
+  await page.route("**/api/weather?*", (route) =>
+    route.fulfill({
+      json: { hours: [hour], days: [], current: { raining, cloudPct: hour.cloudPct, precipMm: hour.precipMm, isDay: true }, stale: sky === "stale" },
+    }),
+  );
+}
+
+/** Rain drawn on the map, the Hujan switch, the note under it and the overcast tint. */
+const rainShown = (page: Page) =>
+  page.evaluate(() => ({
+    rain: (window as MapWindow).__malasMap!.getRain() != null,
+    switchOn: [...document.querySelectorAll<HTMLInputElement>('[role="switch"]')].some((el) => el.closest("label")?.textContent?.trim() === "Hujan" && el.checked),
+    note: document.querySelector(".layer__hint")?.textContent ?? null,
+    overcast: Number(getComputedStyle(document.querySelector(".overcast")!).opacity),
+  }));
+
+/** Jumps the camera to building zoom over a place, which counts as a big move for auto rain. */
+async function jumpClose(page: Page, center: [number, number]) {
+  await page.mouse.move(VIEW_W / 2, VIEW_H / 2); // restarts the idle wait, so the sway stays off
+  await page.evaluate((c) => (window as MapWindow).__malasMap!.jumpTo({ center: c, zoom: 16.6, pitch: 62, bearing: -24 }), center);
+  await waitForMapIdle(page, 12_000);
+  await page.waitForTimeout(1200); // the forecast answer, then the tint fades in
+}
+
+/**
+ * Live rain (Task 9): in auto mode the map rains when the forecast says it rains at the view centre now.
+ * Starts with the rain switch off (auto) at building zoom. A stale forecast that is days old is ignored;
+ * a fresh rainy one turns rain, tint, switch and note on; switching off while it really rains keeps it off.
+ */
+async function autoRainChecks(page: Page) {
+  await stubWeather(page, "stale");
+  await jumpClose(page, [116.8473, -1.2654]); // Balikpapan
+  const stale = await rainShown(page);
+  check(!stale.rain && !stale.switchOn, `auto rain ignores a forecast that is days old (rain ${stale.rain ? "on" : "off"})`);
+  await stubWeather(page, "rain");
+  await jumpClose(page, [117.4949, 0.1335]); // Bontang
+  const wet = await rainShown(page);
+  check(wet.rain && wet.switchOn && wet.overcast > 0.05, `auto rain: it rains at the view centre, so the map rains (rain ${wet.rain ? "on" : "off"}, tint ${wet.overcast.toFixed(2)})`);
+  check(wet.note === "Sedang hujan di sini menurut prakiraan Open-Meteo.", `the note says the rain is live (${wet.note ?? "none"})`);
+  await shot(page, "7-rain-live");
+  await flipSwitch(page, "Hujan");
+  await page.waitForTimeout(600);
+  const off = await rainShown(page);
+  check(!off.rain && !off.switchOn && off.note === null, `switching rain off while it really rains keeps it off (rain ${off.rain ? "on" : "off"})`);
+  await stubWeather(page, "dry");
+}
+
 const browser = await launchBrowser();
 
 try {
   console.log(`viewport ${VIEW_W}x${VIEW_H}`);
   const page = await browser.newPage({ viewport: { width: VIEW_W, height: VIEW_H }, deviceScaleFactor: 1 });
   listen(page, consoleProblems);
+  await stubWeather(page, "dry");
 
   await page.goto(BASE_URL, { waitUntil: "domcontentloaded" });
   await page.getByRole("heading", { name: "Malas Ngoding" }).waitFor({ timeout: 15_000 });
@@ -753,6 +816,7 @@ try {
   await flipSwitch(page, "Hujan");
   await page.waitForTimeout(300);
   check(!(await mapState(page)).haze, "switching the rain off clears the haze");
+  await autoRainChecks(page);
   await buildingChecks(page);
   await buildingHeapSoak(page);
   // Close it so its idle orbit does not keep streaming city tiles in the background during the next check.
