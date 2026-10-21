@@ -161,7 +161,7 @@ export async function runSetup(deps: SetupDeps, opts: SetupOptions = {}): Promis
 }
 
 /** host:port of a connection string; the user name and password are left out. */
-function databaseTarget(url: string): string {
+export function databaseTarget(url: string): string {
   try {
     const { hostname, port } = new URL(url);
     return port ? `${hostname}:${port}` : hostname;

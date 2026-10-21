@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mapboxTokenProblem, runSetup, type SetupDeps } from "../../scripts/setup.ts";
+import { databaseTarget, mapboxTokenProblem, runSetup, type SetupDeps } from "../../scripts/setup.ts";
 
 /** Deps that record every call, so a test can check the order and what was skipped. */
 function fakeDeps(over: Partial<SetupDeps> = {}) {
@@ -147,6 +147,17 @@ describe("runSetup", () => {
     await runSetup(t.deps, FAST);
     expect(t.text()).not.toContain("secret-value-123");
     expect(t.text()).not.toContain("postgres://");
+  });
+});
+
+describe("databaseTarget", () => {
+  test("keeps host and port and drops the user name, password and database name", () => {
+    const target = databaseTarget("postgres://malas:s3cret-pw@localhost:5433/malas_ngoding");
+    expect(target).toBe("localhost:5433");
+    expect(target).not.toContain("s3cret-pw");
+    expect(target).not.toContain("malas");
+    expect(databaseTarget("postgres://u:p@db.internal/x")).toBe("db.internal");
+    expect(databaseTarget("not a url")).toBe("database");
   });
 });
 
