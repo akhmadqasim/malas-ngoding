@@ -628,6 +628,7 @@ try {
   await shot(page, "6-back-list-mouse");
   await pickFromList(page, "keyboard", regionList.find((r) => r.id === "berau")!, regionIds);
   await shot(page, "6-back-list-keyboard");
+  await recommendationsAndMethodology(page);
 
   // Plants: a dot's tooltip names the plant, its fuel and its capacity; plants that would overlap on screen
   // merge into one marker whose tooltip lists them all.
@@ -773,6 +774,7 @@ try {
   check(true, "'Coba lagi' recovers once the token works");
   check(failErrors.length === 0, `no uncaught errors on the failure path (${failErrors.join("; ") || "none"})`);
   await failPage.close();
+  await recommendationsFailure();
 } catch (err) {
   failures.push(err instanceof Error ? err.message : String(err));
   console.error(err);
@@ -791,3 +793,181 @@ if (consoleProblems.length) {
 const failed = failures.length > 0 || consoleProblems.length > 0;
 console.log(failed ? `\nSMOKE FAILED (${failures.length} checks, ${consoleProblems.length} console problems)` : "\nSMOKE PASSED");
 process.exit(failed ? 1 : 0);
+
+// ---------- Recommendations and methodology (lane recs-ui) ----------
+
+/** The open region's recommendations: who wrote them, and every item's priority and category. */
+function recsState(page: Page) {
+  return page.evaluate(() => ({
+    source: document.querySelector(".recs__source")?.textContent ?? "",
+    metas: [...document.querySelectorAll(".rec__meta")].map((m) => m.textContent ?? ""),
+    expanded: [...document.querySelectorAll(".rec__trigger")].map((t) => t.getAttribute("aria-expanded") === "true"),
+  }));
+}
+
+/** Shows the recommendations section in the sheet's own scroll area. */
+function scrollToRecs(page: Page) {
+  return page.locator(".recs").evaluate((el) => el.scrollIntoView({ block: "start" }));
+}
+
+function pickRegionRow(page: Page, name: string) {
+  return page.locator(".ranking__row", { has: page.locator(".ranking__name", { hasText: new RegExp(`^${name}$`) }) }).click();
+}
+
+/** Light switch, then a quiet map for the shot. */
+async function lightFor(page: Page, label: "Siang" | "Malam" | "Otomatis") {
+  await page.getByRole("radio", { name: label }).click();
+  await waitForMapIdle(page, 12_000);
+  await page.waitForTimeout(600);
+}
+
+/**
+ * The region detail's "Rekomendasi untuk pemerintah daerah": the slow first answer (progress line and
+ * skeleton, no spinner), the rule-based label, AI items with model and date, priority and category on
+ * every item, opening an item with the keyboard; then the methodology sheet from "Tentang peta ini" (grid
+ * factors, asumsi rows, CC BY 3.0 IGO), by day and by night. Starts and ends on the overview.
+ */
+async function recommendationsAndMethodology(page: Page) {
+  // A slow answer from the rules: the loading view shows, then the "berbasis aturan" label.
+  await page.route("**/api/recommendations/**", async (route) => {
+    const res = await route.fetch();
+    const body = (await res.json()) as { model: string | null };
+    await new Promise((r) => setTimeout(r, 2500));
+    await route.fulfill({ response: res, json: { ...body, model: null } });
+  });
+  await pickRegionRow(page, "Kutai Barat");
+  await page.locator(".recs__loading").waitFor({ timeout: 2000 });
+  await page.waitForTimeout(1200);
+  await scrollToRecs(page);
+  const loading = await page.evaluate(() => ({
+    progress: document.querySelector(".recs [role=progressbar]") !== null,
+    rows: document.querySelectorAll(".recs__skeleton-item").length,
+    spinner: document.querySelector(".recs [class*=spinner]") !== null,
+    note: document.querySelector(".recs__note")?.textContent ?? "",
+  }));
+  check(
+    loading.progress && loading.rows === 3 && !loading.spinner && loading.note.includes("8 sampai 10 detik"),
+    "recommendations: a slow first answer shows a progress line and skeleton rows, no spinner",
+  );
+  await shot(page, "9-recs-loading");
+  await page.locator(".recs__list").waitFor({ timeout: 10_000 });
+  check((await recsState(page)).source.startsWith("Berbasis aturan"), "recommendations: rule-based items (model null) say 'Berbasis aturan'");
+  await page.unroute("**/api/recommendations/**");
+  await page.getByRole("button", { name: "Semua wilayah" }).click();
+  await page.waitForTimeout(1500);
+
+  // The server's own answer: Claude's items (cached by `bun run warm`, else written now, 8 to 10 s) name the
+  // model and the date; without an API key the rules answer. Then priority and category on every item.
+  await pickRegionRow(page, "Samarinda");
+  await page.locator(".recs__list").waitFor({ timeout: 60_000 });
+  await page.waitForTimeout(2600);
+  const recs = await recsState(page);
+  const byAi = /^Ditulis AI \(claude-[\w.-]+\) pada \d{1,2} \w+ \d{4}/.test(recs.source);
+  check(
+    byAi || recs.source.startsWith("Berbasis aturan"),
+    `recommendations: the items say who wrote them (${byAi ? "AI, with the model and the date" : "berbasis aturan"})`,
+  );
+  check(
+    recs.metas.length >= 3 &&
+      recs.metas.length <= 6 &&
+      recs.metas.every((m) => /^Prioritas [123], (energi terbarukan|efisiensi energi|tata ruang|akses listrik|kebijakan)$/.test(m)),
+    `recommendations: ${recs.metas.length} items, each with its priority and category`,
+  );
+  check(recs.expanded[0] === true && recs.expanded.slice(1).every((e) => !e), "recommendations: the most urgent item is open, the rest closed");
+  const second = page.locator(".rec__trigger").nth(1);
+  await second.focus();
+  await page.keyboard.press("Enter");
+  await page.waitForTimeout(400);
+  check(
+    (await second.getAttribute("aria-expanded")) === "true" && (await page.locator(".rec").nth(1).locator(".rec__impact-label").isVisible()),
+    "recommendations: Enter opens an item and shows its expected impact",
+  );
+  await scrollToRecs(page);
+  for (const light of ["Siang", "Malam"] as const) {
+    await lightFor(page, light);
+    await shot(page, `9-recs-${light.toLowerCase()}`);
+  }
+
+  // Methodology: from "Tentang peta ini", a side sheet over the map.
+  await page.getByRole("button", { name: "Tentang peta ini" }).click();
+  await page.getByRole("button", { name: "Cara menghitung dan sumber data" }).click();
+  const sheet = page.locator(".methodology");
+  await sheet.waitFor({ timeout: 3000 });
+  await page.locator(".methodology__table").first().waitFor({ timeout: 10_000 });
+  await page.waitForTimeout(400);
+  const method = await sheet.evaluate((el) => {
+    const r = el.getBoundingClientRect();
+    return {
+      text: el.textContent ?? "",
+      assumptions: el.querySelectorAll("tr[data-assumption]").length,
+      inside: r.left >= 0 && r.top >= 0 && r.right <= window.innerWidth && r.bottom <= window.innerHeight,
+      dialog: el.getAttribute("role") === "dialog",
+    };
+  });
+  check(method.dialog && method.inside, "methodology: opens as a dialog inside the viewport");
+  check(
+    method.text.includes("1,14 kg CO2/kWh, dipakai") &&
+      method.text.includes("0,87 kg CO2/kWh") &&
+      method.text.includes("Sistem Mahakam") &&
+      method.text.includes("data 2019"),
+    "methodology: names the official 1,14 factor (Sistem Mahakam, 2019) it uses and the 0,87 mix average",
+  );
+  check(method.text.includes("CC BY 3.0 IGO") && method.text.includes("geoBoundaries"), "methodology: credits geoBoundaries under CC BY 3.0 IGO");
+  check(method.assumptions > 0, `methodology: ${method.assumptions} asumsi rows are marked`);
+  await shot(page, "9-method-malam");
+  await page.keyboard.press("Escape");
+  await page.locator(".drawer__backdrop").waitFor({ state: "detached", timeout: 3000 }).catch(() => {});
+  check((await sheet.count()) === 0, "methodology: Escape closes the sheet");
+  // The sheet is modal, so the light switch waits until it is closed.
+  await page.keyboard.press("Escape");
+  await lightFor(page, "Siang");
+  await page.getByRole("button", { name: "Tentang peta ini" }).click();
+  await page.getByRole("button", { name: "Cara menghitung dan sumber data" }).click();
+  await page.locator(".methodology__table").first().waitFor({ timeout: 10_000 });
+  await page.waitForTimeout(400);
+  await shot(page, "9-method-siang");
+  await page.locator(".methodology__body").evaluate((el) => (el.scrollTop = el.scrollHeight));
+  await page.waitForTimeout(300);
+  await shot(page, "9-method-sources");
+  await page.keyboard.press("Escape");
+  await page.locator(".drawer__backdrop").waitFor({ state: "detached", timeout: 3000 });
+  await page.keyboard.press("Escape");
+  await page.locator(".map-about").waitFor({ state: "detached", timeout: 3000 });
+  // Focus went back to "Tentang peta ini"; leave no tool focused (its tooltip would stay up for later checks).
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+  await lightFor(page, "Otomatis");
+  // Back with the keyboard, as the list checks before this one left it: later checks expect keyboard
+  // focus (the map tools show their tooltips right away only then).
+  await page.mouse.move(VIEW_W - 120, 90); // off the regions, so only the keyboard points
+  await page.getByRole("button", { name: "Semua wilayah" }).focus();
+  await page.keyboard.press("Enter");
+  await page.waitForTimeout(1500);
+}
+
+/**
+ * A failed recommendations request: one sentence and "Coba lagi", which then loads the items. Own page,
+ * because the browser logs a failed request as a console error.
+ */
+async function recommendationsFailure() {
+  const p = await browser.newPage({ viewport: { width: VIEW_W, height: VIEW_H }, deviceScaleFactor: 1 });
+  const errors: string[] = [];
+  p.on("pageerror", (err) => errors.push(err.message));
+  await p.route("**/api/recommendations/**", (route) => route.abort("failed"));
+  await p.goto(BASE_URL, { waitUntil: "domcontentloaded" });
+  await p.getByRole("button", { name: "Lewati intro" }).click({ timeout: 30_000 });
+  await p.locator(".ui-layer").waitFor({ timeout: 40_000 });
+  await p.waitForTimeout(1500);
+  await pickRegionRow(p, "Balikpapan");
+  const alert = p.locator(".recs [role=alert]");
+  await alert.waitFor({ timeout: 10_000 });
+  await p.waitForTimeout(2600);
+  await scrollToRecs(p);
+  check((await alert.textContent())?.includes("Rekomendasi belum bisa dimuat.") === true, "recommendations: a failed request says so and offers 'Coba lagi'");
+  await shot(p, "9-recs-failure");
+  await p.unroute("**/api/recommendations/**");
+  await alert.getByRole("button", { name: "Coba lagi" }).click();
+  await p.locator(".recs__list").waitFor({ timeout: 60_000 });
+  check(true, "recommendations: 'Coba lagi' loads the items");
+  check(errors.length === 0, `recommendations: no uncaught errors on the failure path (${errors.join("; ") || "none"})`);
+  await p.close();
+}
