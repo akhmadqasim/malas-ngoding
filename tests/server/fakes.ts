@@ -117,6 +117,7 @@ export function fakeDeps(poiAnswer: PoiHit | null | Error = null, upstreams: Fak
   const meteoCalls: Array<[number, number]> = [];
   const chatSessions = new Set<string>();
   const chatMessages: FakeChatMessage[] = [];
+  let lastWrite = 0;
   const nasaAnswer = upstreams.nasa ?? { pshByMonth: Array<number>(12).fill(4.8), pshYear: 4.8 };
   const meteoAnswer = upstreams.meteo ?? new Error("meteo not expected");
   const deps: AppDeps = {
@@ -180,7 +181,9 @@ export function fakeDeps(poiAnswer: PoiHit | null | Error = null, upstreams: Fak
         return { items: row.items, model: String(row.model), generatedAt: ages.get(`recommendations:${id}`) ?? new Date() };
       },
       recommendationsSet: async (id, items, model) => {
-        const at = new Date();
+        // Each write is stamped later than the one before, as rows written seconds apart are in the database.
+        lastWrite = Math.max(Date.now(), lastWrite + 1);
+        const at = new Date(lastWrite);
         stored.set(`recommendations:${id}`, JSON.parse(JSON.stringify({ items, model })));
         ages.set(`recommendations:${id}`, at);
         return at;

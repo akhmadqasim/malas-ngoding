@@ -7,15 +7,15 @@ import type { RegionPlant } from "../../src/server/db.ts";
 import type { Handler } from "../../src/server/http.ts";
 import { createServer } from "../../src/server/index.ts";
 import { recommendationRoutes } from "../../src/server/routes/recommendations.ts";
+import { describeRegionFacts, SYSTEM_PROMPT } from "../../src/server/services/recommendationPrompt.ts";
+import { ruleBasedRecommendations } from "../../src/server/services/recommendationRules.ts";
 import {
   buildRegionFacts,
   createClaudeRecommender,
-  describeRegionFacts,
   GENERATION_BUDGET_MS,
   parseRecommendationItems,
   type RecommendationWriter,
   type RegionFacts,
-  ruleBasedRecommendations,
 } from "../../src/server/services/recommendations.ts";
 import type { GridMix, RecommendationItem, Recommendations, RegionSummary } from "../../src/shared/types.ts";
 import { type FakeUpstreams, fakeDeps } from "./fakes.ts";
@@ -69,6 +69,18 @@ function fakeWriter(answer: RecommendationItem[] | Error, model = "claude-sonnet
     return { items: answer, model };
   };
   return { fn, calls };
+}
+
+/** A writer that answers after `ms`, counting calls that started and finished. */
+function slowWriter(answer: RecommendationItem[], ms = 30) {
+  const counts = { started: 0, finished: 0 };
+  const fn: RecommendationWriter = async () => {
+    counts.started++;
+    await Bun.sleep(ms);
+    counts.finished++;
+    return { items: answer, model: "claude-sonnet-5-5" };
+  };
+  return { fn, counts };
 }
 
 /** A Messages API reply as JSON, the way the API sends it. */
@@ -227,6 +239,19 @@ describe("GET /api/recommendations/:regionId", () => {
     expect(body.items).toEqual(VALID);
   });
 
+  test("concurrent misses for one region share one Claude call", async () => {
+    const writer = slowWriter(VALID);
+    const { server, fake } = start({ recommender: writer.fn });
+    const bodies = await Promise.all([get(server, "paser"), get(server, "paser"), get(server, "paser")].map(async (r) => (await r).json()));
+    expect(writer.counts.started).toBe(1);
+    expect(bodies[1]).toEqual(bodies[0]);
+    expect(bodies[2]).toEqual(bodies[0]);
+    expect(fake.stored.has("recommendations:paser")).toBe(true);
+    // Different regions still run on their own.
+    await Promise.all([get(server, "berau"), get(server, "bontang")]);
+    expect(writer.counts.started).toBe(3);
+  });
+
   test.each(["nope", "SAMARINDA", "kukar"])("unknown region id %p returns a 404 json error", async (id) => {
     const writer = fakeWriter(VALID);
     const { server } = start({ recommender: writer.fn });
@@ -280,6 +305,28 @@ describe("POST /api/recommendations/:regionId/refresh", () => {
     const body = (await (await refresh(server, "samarinda")).json()) as Recommendations;
     expect(body).toEqual({ regionId: "samarinda", items: VALID, model: "old-model", generatedAt: at.toISOString() });
     expect(writer.calls).toHaveLength(1);
+  });
+
+  test("repeated refreshes share one Claude call", async () => {
+    const writer = slowWriter(NEW);
+    const { server, fake } = start({ recommender: writer.fn });
+    await fake.deps.db.recommendationsSet("samarinda", VALID, "old-model");
+    const bodies = await Promise.all([refresh(server, "samarinda"), refresh(server, "samarinda")].map(async (r) => (await r).json()));
+    expect(writer.counts.started).toBe(1);
+    expect((bodies[0] as Recommendations).items).toEqual(NEW);
+    expect(bodies[1]).toEqual(bodies[0]);
+    // Once it has finished, a new refresh asks Claude again.
+    await refresh(server, "samarinda");
+    expect(writer.counts.started).toBe(2);
+  });
+
+  test("a refresh while NASA POWER is down keeps the cached copy and does not call Claude", async () => {
+    const writer = fakeWriter(NEW);
+    const { server, fake } = start({ recommender: writer.fn, nasa: new Error("nasa down") });
+    const at = await fake.deps.db.recommendationsSet("samarinda", VALID, "old-model");
+    const body = (await (await refresh(server, "samarinda")).json()) as Recommendations;
+    expect(body).toEqual({ regionId: "samarinda", items: VALID, model: "old-model", generatedAt: at.toISOString() });
+    expect(writer.calls).toHaveLength(0);
   });
 
   test("a Claude failure with nothing cached gives rule-based items", async () => {
@@ -368,6 +415,25 @@ describe("createClaudeRecommender", () => {
   });
 });
 
+describe("SYSTEM_PROMPT", () => {
+  test("forbids invented scenarios and keeps impacts on per-kWh and per-kWp units", () => {
+    expect(SYSTEM_PROMPT).toContain("skenario");
+    expect(SYSTEM_PROMPT).toContain("per kWh yang dihemat atau per 1 kWp yang dipasang");
+    expect(SYSTEM_PROMPT).toContain("Dasar hitungan dampak harus sesuai dengan tindakannya");
+    expect(SYSTEM_PROMPT).toContain("jangan dipakai untuk PLTS komunal di desa yang belum berlistrik");
+    expect(SYSTEM_PROMPT).toContain("dalam poin persentase");
+  });
+
+  test("asks for labelled averages, no growth forecasts, matching verbs, real actions and qualified absences", () => {
+    expect(SYSTEM_PROMPT).toContain("termasuk rata-rata");
+    expect(SYSTEM_PROMPT).toContain("Jangan meramalkan pertumbuhan");
+    expect(SYSTEM_PROMPT).toContain("judulnya juga memakai \"Usulkan\" atau \"Ajukan\"");
+    expect(SYSTEM_PROMPT).toContain("hanya berisi koordinasi atau pemutakhiran data");
+    expect(SYSTEM_PROMPT).toContain("dalam data kami");
+    expect(SYSTEM_PROMPT).toContain('jangan menulis "Dataan"');
+  });
+});
+
 describe("parseRecommendationItems", () => {
   test("accepts 3 to 6 items, trims the text and orders them by priority", () => {
     const messy = [{ ...VALID[2]!, title: "  Masukkan potensi surya ke RTRW \n" }, VALID[0]!, VALID[1]!];
@@ -402,13 +468,18 @@ describe("buildRegionFacts", () => {
   test("compares the region with all kabupaten/kota", () => {
     const f = facts("kutai-kartanegara");
     const totalKwh = REGIONS.reduce((a, r) => a + r.kwhYear, 0);
-    const totalPeople = REGIONS.reduce((a, r) => a + (r.population ?? 0), 0);
+    const comparable = REGIONS.filter((r) => r.id !== "penajam-paser-utara");
+    const comparableKwh = comparable.reduce((a, r) => a + r.kwhYear, 0);
+    const comparablePeople = comparable.reduce((a, r) => a + (r.population ?? 0), 0);
     expect(f.region.name).toBe("Kutai Kartanegara");
     expect(f.comparison.regionCount).toBe(10);
     expect(f.comparison.kwhRank).toBe(2);
     expect(f.comparison.kwhSharePct).toBeCloseTo((1_195_500_000 / totalKwh) * 100, 9);
     expect(f.comparison.kwhPerCapita).toBeCloseTo(1_195_500_000 / 845_620, 9);
-    expect(f.comparison.kwhPerCapitaAll).toBeCloseTo(totalKwh / totalPeople, 9);
+    expect(f.comparison.kwhPerCapitaAll).toBeCloseTo(comparableKwh / comparablePeople, 9);
+    expect(f.comparison.kwhPerCapitaCount).toBe(9);
+    expect(f.comparison.kwhPerCapitaRank).toBe(3);
+    expect(f.comparison.kwhPerCapitaVsAll).toBe("above");
     expect(f.comparison.kwhPerCustomer).toBeCloseTo(1_195_500_000 / 245_946, 9);
     // 100, 99.62, 94.82, 94.43, 92.83, 92.31, 89.58, then Kutai Kartanegara at 89.32.
     expect(f.comparison.electrificationRank).toBe(8);
@@ -424,6 +495,21 @@ describe("buildRegionFacts", () => {
     expect(solar.govTariffRpPerKwh).toBe(1699.53);
     expect(solar.savingRpPerKwpYear).toBeCloseTo(yieldKwh * 1699.53, 6);
     expect(solar.paybackYears).toBeCloseTo(15_000_000 / (yieldKwh * 1699.53), 9);
+  });
+
+  test("leaves PPU, whose projected population includes IKN, out of the per-person average and ranks", () => {
+    // 1.264 kWh per person with PPU, 1.333 without; Balikpapan (1.334) is then level with the average.
+    const avg = facts("balikpapan").comparison.kwhPerCapitaAll!;
+    expect(avg).toBeGreaterThan(1333);
+    expect(avg).toBeLessThan(1334);
+    expect(facts("balikpapan").comparison.kwhPerCapitaVsAll).toBe("similar");
+    expect(facts("paser").comparison.kwhPerCapitaVsAll).toBe("below");
+    const ppu = facts("penajam-paser-utara").comparison;
+    expect(ppu.kwhPerCapitaComparable).toBe(false);
+    expect(ppu.kwhPerCapitaRank).toBeNull();
+    expect(ppu.kwhPerCapitaVsAll).toBeNull();
+    // Mahakam Ulu is last of the 9 comparable regions, not of 10.
+    expect(facts("mahakam-ulu").comparison.kwhPerCapitaRank).toBe(9);
   });
 
   test("returns null for an unknown region", () => {
@@ -485,8 +571,17 @@ describe("describeRegionFacts", () => {
 
   test("says when no listed plant lies in the region, without claiming there is none", () => {
     const text = describeRegionFacts(facts("mahakam-ulu"));
-    expect(text).toContain("Tidak ada pembangkit utama dalam daftar riset");
+    expect(text).toContain("Dalam data kami, tidak ada pembangkit utama");
     expect(text).toContain("tidak memuat PLTD");
+  });
+
+  test("names the regions left out of the per-person average, and calls a near-equal figure level with it", () => {
+    const text = describeRegionFacts(facts("balikpapan"));
+    expect(text).toContain("rata-rata 9 kabupaten/kota 1.333 kWh (perkiraan; tanpa Penajam Paser Utara");
+    expect(text).toContain("setara dengan rata-rata");
+    expect(text).not.toContain("di atas rata-rata");
+    expect(describeRegionFacts(facts("kutai-barat"))).toContain("di atas rata-rata");
+    expect(describeRegionFacts(facts("penajam-paser-utara"))).toContain("tidak layak dibandingkan");
   });
 
   test("flags the solar assumption when NASA POWER was unavailable", () => {
@@ -514,6 +609,8 @@ describe("ruleBasedRecommendations", () => {
     expect(communal?.category).toBe("akses_listrik");
     expect(communal?.priority).toBe(1);
     expect(communal?.body).toContain("11 desa");
+    expect(communal?.body).toContain("belum terverifikasi");
+    expect(communal?.impact).not.toContain("tanpa menunggu");
     expect(items[0]?.priority).toBe(1);
   });
 
@@ -530,7 +627,7 @@ describe("ruleBasedRecommendations", () => {
     const pv = ruleBasedRecommendations(facts("samarinda")).find((i) => i.category === "energi_terbarukan");
     expect(pv?.title).toContain("PLTS atap");
     expect(pv?.title).toContain("pemerintah");
-    expect(pv?.body).toContain("66%");
+    expect(pv?.body.startsWith("Batu bara menyumbang 66% listrik Kalimantan Timur")).toBe(true);
     expect(pv?.body).toContain("1.332 kWh");
     expect(`${pv?.body} ${pv?.impact}`).toContain("perkiraan");
   });
@@ -548,6 +645,8 @@ describe("ruleBasedRecommendations", () => {
   test("use per person above the Kaltim figure leads to an efficiency item", () => {
     expect(ruleBasedRecommendations(facts("kutai-barat")).some((i) => i.category === "efisiensi")).toBe(true);
     expect(ruleBasedRecommendations(facts("paser")).some((i) => i.category === "efisiensi")).toBe(false);
+    // Level with the average once PPU is left out: no efficiency item from the rules.
+    expect(ruleBasedRecommendations(facts("balikpapan")).some((i) => i.category === "efisiensi")).toBe(false);
   });
 
   test("every text that quotes an estimated quantity says perkiraan", () => {
@@ -611,6 +710,33 @@ describe("warmCaches", () => {
     const summary = await warmCaches(fake.deps, silent);
     expect(summary.aiStored).toBe(0);
     expect(summary.failures.length).toBeGreaterThan(0);
+  });
+
+  test("with refresh it regenerates every region, and a failed refresh keeps the old copy", async () => {
+    const writer = fakeWriter(VALID);
+    const fake = fakeDeps(null, { recommender: writer.fn });
+    await warmCaches(fake.deps, silent);
+    const again = await warmCaches(fake.deps, silent, { refresh: true });
+    expect(again.aiCreated).toBe(10);
+    expect(writer.calls).toHaveLength(20);
+
+    fake.deps.recommender = fakeWriter(new Error("anthropic down")).fn;
+    const failed = await warmCaches(fake.deps, silent, { refresh: true });
+    expect(failed.aiCreated).toBe(0);
+    expect(failed.aiStored).toBe(10);
+    expect(failed.failures).toHaveLength(10);
+  });
+
+  test("a database failure is thrown only after the other workers have finished", async () => {
+    const writer = slowWriter(VALID);
+    const fake = fakeDeps(null, { recommender: writer.fn });
+    const labelPoint = fake.deps.db.regionLabelPoint;
+    fake.deps.db.regionLabelPoint = async (id) => {
+      if (id === "bontang") throw new Error("db down");
+      return labelPoint(id);
+    };
+    await expect(warmCaches(fake.deps, silent)).rejects.toThrow(/db down/);
+    expect(writer.counts.finished).toBe(writer.counts.started);
   });
 
   test("a database failure is thrown", async () => {
