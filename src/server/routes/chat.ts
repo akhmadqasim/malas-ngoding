@@ -57,6 +57,9 @@ const BUILDING_TYPES: Record<BuildingType, true> = {
   industri: true,
 };
 const TYPE_SOURCES: readonly string[] = ["poi", "footprint", "user"];
+/** Client-supplied assumption texts that reach the prompt: the first 5, each cut to 200 characters. */
+const MAX_ASSUMPTIONS = 5;
+const MAX_ASSUMPTION_CHARS = 200;
 
 const isNum = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
@@ -75,9 +78,12 @@ function parseBuilding(v: unknown): SelectedBuilding | null | undefined {
   const region = v.region ?? null;
   if (region !== null && !(isObject(region) && isShortText(region.id) && isShortText(region.name))) return undefined;
   const assumptions = v.assumptions ?? [];
-  if (!Array.isArray(assumptions) || assumptions.length > 20 || !assumptions.every((a) => isShortText(a, 300))) {
-    return undefined;
-  }
+  if (!Array.isArray(assumptions) || !assumptions.every((a) => typeof a === "string")) return undefined;
+  const kept = (assumptions as string[])
+    .map((a) => a.trim())
+    .filter((a) => a !== "")
+    .slice(0, MAX_ASSUMPTIONS)
+    .map((a) => a.slice(0, MAX_ASSUMPTION_CHARS));
   return {
     type: type as BuildingType,
     typeSource: typeSource as SelectedBuilding["typeSource"],
@@ -86,7 +92,7 @@ function parseBuilding(v: unknown): SelectedBuilding | null | undefined {
     kwhYear,
     co2KgYear,
     region: region === null ? null : { id: region.id as string, name: region.name as string },
-    assumptions: assumptions as string[],
+    assumptions: kept,
   };
 }
 

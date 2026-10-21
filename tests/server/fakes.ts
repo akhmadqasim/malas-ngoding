@@ -151,7 +151,11 @@ export function fakeDeps(poiAnswer: PoiHit | null | Error = null, upstreams: Fak
         chatMessages
           .filter((m) => m.sessionId === sessionId)
           .slice(-limit)
-          .map((m) => ({ role: m.role, text: typeof m.content.text === "string" ? m.content.text : "" })),
+          .map((m) => ({
+            role: m.role,
+            text: typeof m.content.text === "string" ? m.content.text : "",
+            actions: Array.isArray(m.content.actions) ? (m.content.actions as { name: string; input: Record<string, unknown> }[]) : [],
+          })),
       addChatMessage: async (sessionId, role, content) => {
         if (!chatSessions.has(sessionId)) throw new Error("chat session does not exist");
         chatMessages.push({ sessionId, role, content: JSON.parse(JSON.stringify(content)) });

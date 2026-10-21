@@ -229,9 +229,9 @@ describe.skipIf(!reachable)("db", () => {
         else await addChatMessage(id, "assistant", { text: `jawab ${i}`, actions: [action] });
       }
       expect(await chatHistory(id, 3)).toEqual([
-        { role: "user", text: "tanya 2" },
-        { role: "assistant", text: "jawab 3" },
-        { role: "user", text: "tanya 4" },
+        { role: "user", text: "tanya 2", actions: [] },
+        { role: "assistant", text: "jawab 3", actions: [action] },
+        { role: "user", text: "tanya 4", actions: [] },
       ]);
       expect(await chatHistory(id, 20)).toHaveLength(5);
       expect(await chatHistory(crypto.randomUUID(), 20)).toEqual([]);

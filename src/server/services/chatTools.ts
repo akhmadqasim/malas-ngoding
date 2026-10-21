@@ -19,6 +19,13 @@ export const DEFAULT_FOOTPRINT_M2 = 150;
 /** Solar size get_weather uses when Claude does not pass one. */
 const DEFAULT_KWP = 1;
 const MAX_KWP = 10_000;
+/** Server-tool calls run per Claude reply; the rest get an error result (map actions are not counted). */
+export const MAX_SERVER_TOOLS_PER_REPLY = 6;
+/**
+ * Points the upstream tools (Tilequery, NASA POWER, Open-Meteo) accept: Kalimantan Timur (lng 113.8 to
+ * 119.0, lat -2.4 to 2.6) with about a degree of margin, so border areas still work.
+ */
+export const KALTIM_AREA = { minLng: 112.5, maxLng: 120.5, minLat: -3.5, maxLat: 3.8 } as const;
 
 const LAYERS = ["regions", "plants", "buildings"] as const;
 const METRICS = ["co2", "kwh"] as const;
@@ -67,7 +74,7 @@ const SERVER_TOOL_DEFINITIONS: Anthropic.Tool[] = [
   {
     name: "estimate_building_at",
     description:
-      "Rough electricity and CO2 estimate for the building at a point, without selecting it. It reads the nearest map POI within 25 m to tell the building type (for example a school) and assumes a 150 m2 footprint, so its numbers can differ from the building panel, which measures the real footprint. When the app state has a selected building, use that instead. Good for checking what is at a place before showing it.",
+      "Rough electricity and CO2 estimate for the building at a point, without selecting it. It reads the nearest map POI within 25 m to tell the building type (for example a school) and assumes a 150 m2 footprint, so its numbers can differ from the building panel, which measures the real footprint. When the app state has a selected building, use that instead. Good for checking what is at a place before showing it. Only for points in or near Kalimantan Timur.",
     input_schema: {
       type: "object",
       properties: { lng: lngParam("the building"), lat: latParam("the building") },
@@ -77,7 +84,7 @@ const SERVER_TOOL_DEFINITIONS: Anthropic.Tool[] = [
   {
     name: "simulate_solar",
     description:
-      "Rooftop solar for a building: system size (kWp) and panel count, yearly production, share of the building's electricity covered, battery size, cost, yearly saving, payback years and CO2 avoided. For the selected building, use the exact values given in the app state. Use backupHours 4 unless the user asks for another backup time.",
+      "Rooftop solar for a building: system size (kWp) and panel count, yearly production, share of the building's electricity covered, battery size, cost, yearly saving, payback years and CO2 avoided. For the selected building, use the exact values given in the app state. Use backupHours 4 unless the user asks for another backup time. Only for points in or near Kalimantan Timur.",
     input_schema: {
       type: "object",
       properties: {
@@ -93,7 +100,7 @@ const SERVER_TOOL_DEFINITIONS: Anthropic.Tool[] = [
   {
     name: "get_weather",
     description:
-      "Weather forecast for the coming days at a point (rain, cloud) and the expected solar production per day for a system of kWp kilowatt-peak. Days are labelled \"hari ini\", \"besok\" and \"lusa\". Pass the kWp from simulate_solar when you have it; without it 1 kWp is used.",
+      "Weather forecast for the coming days at a point (rain, cloud) and the expected solar production per day for a system of kWp kilowatt-peak. Days are labelled \"hari ini\", \"besok\" and \"lusa\". Pass the kWp from simulate_solar when you have it; without it 1 kWp is used. Only for points in or near Kalimantan Timur.",
     input_schema: {
       type: "object",
       properties: {
@@ -196,6 +203,17 @@ function point(i: Record<string, unknown>): { lng: number; lat: number } | { pro
   if (!inRange(i.lng, -180, 180)) return { problem: "lng harus berupa angka dari -180 sampai 180." };
   if (!inRange(i.lat, -90, 90)) return { problem: "lat harus berupa angka dari -90 sampai 90." };
   return { lng: i.lng, lat: i.lat };
+}
+
+/** A point for a tool that calls an upstream API: it must lie in or near Kalimantan Timur. */
+function kaltimPoint(lng: number, lat: number): { problem: string } | null {
+  const a = KALTIM_AREA;
+  if (lng >= a.minLng && lng <= a.maxLng && lat >= a.minLat && lat <= a.maxLat) return null;
+  return {
+    problem:
+      `Titik lng ${lng}, lat ${lat} berada jauh di luar Kalimantan Timur. Alat ini hanya untuk wilayah Kaltim ` +
+      `(lng ${a.minLng} sampai ${a.maxLng}, lat ${a.minLat} sampai ${a.maxLat}).`,
+  };
 }
 
 /** The value as one of `values`, ignoring case and spaces around it, or null. */
@@ -394,6 +412,8 @@ const SERVER_TOOLS: Record<ServerToolName, (deps: AppDeps, i: Record<string, unk
   estimate_building_at: async (deps, i) => {
     const p = point(i);
     if ("problem" in p) return p;
+    const far = kaltimPoint(p.lng, p.lat);
+    if (far) return far;
     const found = await cachedPoi(deps, p.lng, p.lat);
     const input: BuildingInput = {
       featureId: `chat:${poiCacheKey(p.lng, p.lat)}`,
@@ -436,6 +456,8 @@ const SERVER_TOOLS: Record<ServerToolName, (deps: AppDeps, i: Record<string, unk
   simulate_solar: async (deps, i) => {
     const parsed = parseSolarInput(i);
     if ("problem" in parsed) return parsed;
+    const far = kaltimPoint(parsed.input.lng, parsed.input.lat);
+    if (far) return far;
     const sim = await simulateSolarAt(deps, parsed.input);
     if (sim.kWp <= 0) {
       return { result: { kWp: 0, note: "Atap terlalu kecil untuk dipasangi panel surya.", assumptions: sim.assumptions } };
@@ -464,6 +486,8 @@ const SERVER_TOOLS: Record<ServerToolName, (deps: AppDeps, i: Record<string, unk
   get_weather: async (deps, i) => {
     const p = point(i);
     if ("problem" in p) return p;
+    const far = kaltimPoint(p.lng, p.lat);
+    if (far) return far;
     const given = i.kWp !== undefined && i.kWp !== null;
     if (given && !(inRange(i.kWp, 0, MAX_KWP) && i.kWp > 0)) {
       return { problem: `kWp harus berupa angka lebih dari 0 dan paling besar ${fmtNumber(MAX_KWP)}.` };
@@ -513,16 +537,22 @@ const failure = (id: string, problem: string): Anthropic.ToolResultBlockParam =>
   is_error: true,
 });
 
+const TOO_MANY_TOOLS =
+  `Terlalu banyak permintaan data dalam satu balasan: paling banyak ${MAX_SERVER_TOOLS_PER_REPLY} yang dijalankan. ` +
+  "Permintaan ini tidak dijalankan; jawab dengan data yang sudah ada atau minta lagi di langkah berikutnya.";
+
 /**
  * Runs the tool calls of one Claude reply. Map actions are checked and handed to `onAction` right away,
- * in the order Claude asked for them; server tools run concurrently. Returns one result per call, in the
- * same order, to send back in a single user message. Never throws: a failing tool becomes an error result.
+ * in the order Claude asked for them; server tools run concurrently, at most MAX_SERVER_TOOLS_PER_REPLY
+ * of them. Returns one result per call, in the same order, to send back in a single user message.
+ * Never throws: a failing or skipped tool becomes an error result.
  */
 export async function runToolCalls(
   deps: AppDeps,
   calls: Anthropic.ToolUseBlock[],
   onAction: (action: ChatAction) => void,
 ): Promise<Anthropic.ToolResultBlockParam[]> {
+  let serverCalls = 0;
   return Promise.all(
     calls.map(async (call): Promise<Anthropic.ToolResultBlockParam> => {
       const input = asObject(call.input);
@@ -536,6 +566,9 @@ export async function runToolCalls(
       if (!Object.hasOwn(SERVER_TOOLS, call.name)) {
         return failure(call.id, `Alat "${call.name.slice(0, 80)}" tidak ada. Alat yang tersedia: ${ALL_TOOL_NAMES}.`);
       }
+      // Counted before the first await, so the cap follows the order of the calls.
+      serverCalls += 1;
+      if (serverCalls > MAX_SERVER_TOOLS_PER_REPLY) return failure(call.id, TOO_MANY_TOOLS);
       try {
         const out = await SERVER_TOOLS[call.name as ServerToolName](deps, input);
         return "problem" in out ? failure(call.id, out.problem) : result(call.id, out.result);

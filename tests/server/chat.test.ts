@@ -410,33 +410,100 @@ describe("POST /api/chat", () => {
     ]);
   });
 
-  test("sends the last 20 messages as plain text turns that start with a user turn", async () => {
+  /** Runs one question after the given stored history and returns the messages sent to Claude. */
+  async function sentAfter(history: { role: "user" | "assistant"; content: Record<string, unknown> }[]) {
     const model = fakeModel([{ text: "Baik." }]);
     const { server, fake } = start({ chat: model.model });
     fake.chatSessions.add(SESSION);
-    for (let i = 0; i < 25; i++) {
-      const user = i % 2 === 0;
-      fake.chatMessages.push({
-        sessionId: SESSION,
-        role: user ? "user" : "assistant",
-        // Message 9 is an answer that only moved the map: it has no text to replay.
-        content: user ? { text: `tanya ${i}` } : { text: i === 9 ? "" : `jawab ${i}`, actions: [] },
-      });
-    }
+    for (const m of history) fake.chatMessages.push({ sessionId: SESSION, ...m });
+    await chat(server, body("Pertanyaan baru"));
+    return model.calls[0]!.messages;
+  }
+  const isQuestion = (m: Anthropic.MessageParam | undefined) =>
+    m?.role === "user" && Array.isArray(m.content) && m.content.at(-1)?.type === "text";
+
+  test("sends the last 20 messages as strict question and answer pairs", async () => {
+    const history = Array.from({ length: 25 }, (_, i) =>
+      i % 2 === 0
+        ? { role: "user" as const, content: { text: `tanya ${i}` } }
+        : // Message 9 has neither text nor actions: question 8 then has no answer.
+          { role: "assistant" as const, content: { text: i === 9 ? "" : `jawab ${i}`, actions: [] } },
+    );
+    const model = fakeModel([{ text: "Baik." }]);
+    const { server, fake } = start({ chat: model.model });
+    fake.chatSessions.add(SESSION);
+    for (const m of history) fake.chatMessages.push({ sessionId: SESSION, ...m });
     fake.chatMessages.push({ sessionId: "0b9c4d1e-2f3a-4b5c-8d6e-7f8091a2b3c4", role: "user", content: { text: "sesi lain" } });
     await chat(server, body("Pertanyaan baru"));
 
     const sent = model.calls[0]!.messages;
-    // Messages 5 to 24 are the last 20; 5 is an answer (a turn may not start with one) and 9 has no text.
-    expect(sent).toHaveLength(19);
+    // The last 20 are messages 5 to 24. Answer 5 has no question, question 8 no answer, and question 24 no
+    // answer yet, so pairs 6/7 and 10/11 ... 22/23 remain, then the new question.
+    expect(sent).toHaveLength(17);
     expect(sent[0]).toEqual({ role: "user", content: "tanya 6" });
     expect(sent[1]).toEqual({ role: "assistant", content: "jawab 7" });
-    expect(sent.slice(0, -1).every((m) => typeof m.content === "string")).toBe(true);
-    expect(sent.some((m) => m.content === "jawab 9" || m.content === "sesi lain")).toBe(false);
-    expect(sent.at(-2)).toEqual({ role: "user", content: "tanya 24" });
-    const last = sent.at(-1)!;
-    expect(last.role).toBe("user");
-    expect(Array.isArray(last.content) && last.content.at(-1)).toEqual({ type: "text", text: "Pertanyaan baru" });
+    expect(sent[2]).toEqual({ role: "user", content: "tanya 10" });
+    expect(sent.at(-2)).toEqual({ role: "assistant", content: "jawab 23" });
+    sent.slice(0, -1).forEach((m, i) => expect(m.role).toBe(i % 2 === 0 ? "user" : "assistant"));
+    expect(sent.some((m) => ["tanya 8", "tanya 24", "sesi lain"].includes(m.content as string))).toBe(false);
+    expect(isQuestion(sent.at(-1))).toBe(true);
+    expect((sent.at(-1)!.content as Anthropic.TextBlockParam[]).at(-1)).toEqual({ type: "text", text: "Pertanyaan baru" });
+  });
+
+  test("a history that ends with an unanswered question drops it, so the turns still alternate", async () => {
+    const sent = await sentAfter([
+      { role: "user", content: { text: "Berapa emisi Samarinda?" } },
+      { role: "assistant", content: { text: "Sekitar 1,6 juta ton CO2 per tahun (perkiraan).", actions: [] } },
+      { role: "user", content: { text: "Bagaimana dengan Berau?" } },
+    ]);
+    expect(sent).toHaveLength(3);
+    expect(sent.slice(0, 2)).toEqual([
+      { role: "user", content: "Berapa emisi Samarinda?" },
+      { role: "assistant", content: "Sekitar 1,6 juta ton CO2 per tahun (perkiraan)." },
+    ]);
+    expect(isQuestion(sent[2])).toBe(true);
+  });
+
+  test("an answer that only moved the map is replayed as a short map note", async () => {
+    const sent = await sentAfter([
+      { role: "user", content: { text: "Tunjukkan Kukar dan sembunyikan pembangkit" } },
+      {
+        role: "assistant",
+        content: {
+          text: "",
+          actions: [
+            { name: "fly_to_region", input: { region: "kutai-kartanegara" } },
+            { name: "toggle_layer", input: { layer: "plants", visible: false } },
+          ],
+        },
+      },
+    ]);
+    expect(sent[1]).toEqual({ role: "assistant", content: "(peta: fly_to_region kutai-kartanegara; toggle_layer plants false)" });
+    expect(sent).toHaveLength(3);
+  });
+
+  test("two answers in a row are merged into one turn", async () => {
+    const sent = await sentAfter([
+      { role: "user", content: { text: "Halo" } },
+      { role: "assistant", content: { text: "Halo juga.", actions: [] } },
+      { role: "assistant", content: { text: "Ada yang bisa dibantu?", actions: [] } },
+    ]);
+    expect(sent.slice(0, 2)).toEqual([
+      { role: "user", content: "Halo" },
+      { role: "assistant", content: "Halo juga.\n\nAda yang bisa dibantu?" },
+    ]);
+  });
+
+  test("a reply that only moves the map still says something", async () => {
+    const model = fakeModel([{ tools: [{ name: "fly_to_region", input: { region: "Kukar" } }] }, { text: "" }]);
+    const { server, fake } = start({ chat: model.model });
+    const events = await chat(server, body("Tunjukkan Kukar"));
+    expect(eventNames(events)).toEqual(["action", "text", "done"]);
+    expect(streamedText(events)).toBe("Sudah saya tampilkan di peta.");
+    expect(fake.chatMessages.at(-1)?.content).toEqual({
+      text: "Sudah saya tampilkan di peta.",
+      actions: [{ name: "fly_to_region", input: { region: "kutai-kartanegara" } }],
+    });
   });
 
   test("puts the app state in front of the question: time, view, region and the selected building", async () => {
@@ -460,6 +527,24 @@ describe("POST /api/chat", () => {
     // Exact values for the tools: the roof is the footprint (floor area / floors) and the point is the map centre.
     expect(state).toContain('{"lat":-0.5,"lng":117.15,"roofAreaM2":400,"kwhYear":145600}');
     expect(state).toContain("Tinggi bangunan tidak ada di data peta");
+  });
+
+  test("client-supplied assumptions reach the prompt as at most 5 texts of at most 200 characters", async () => {
+    const model = fakeModel([{ text: "Baik." }]);
+    const { server } = start({ chat: model.model });
+    const assumptions = Array.from({ length: 7 }, (_, i) => `asumsi${i} ${"x".repeat(250)}`);
+    const context = { ...CONTEXT, selectedBuilding: { ...BUILDING, assumptions } };
+    await chat(server, body("Halo", context));
+
+    const state = (model.calls[0]!.messages.at(-1)!.content as Anthropic.TextBlockParam[])[0]!.text;
+    for (let i = 0; i < 5; i++) {
+      const head = `asumsi${i} `;
+      // Cut at exactly 200 characters: 192 x's survive, the 193rd does not.
+      expect(state).toContain(head + "x".repeat(200 - head.length));
+      expect(state).not.toContain(head + "x".repeat(201 - head.length));
+    }
+    expect(state).not.toContain("asumsi5");
+    expect(state).not.toContain("asumsi6");
   });
 
   test("with nothing selected the app state says so", async () => {
@@ -639,6 +724,7 @@ describe("POST /api/chat", () => {
     ["selectedBuilding has an unknown type", body("Halo", { ...CONTEXT, selectedBuilding: { ...BUILDING, type: "kastil" } })],
     ["selectedBuilding has a text kWh", body("Halo", { ...CONTEXT, selectedBuilding: { ...BUILDING, kwhYear: "banyak" } })],
     ["selectedBuilding has zero floors", body("Halo", { ...CONTEXT, selectedBuilding: { ...BUILDING, floors: 0 } })],
+    ["selectedBuilding assumptions are not text", body("Halo", { ...CONTEXT, selectedBuilding: { ...BUILDING, assumptions: [1] } })],
   ])("invalid body (%s) returns 400 with an Indonesian error and never calls Claude", async (_name, payload) => {
     const model = fakeModel([{ text: "tidak boleh" }]);
     const { server, fake } = start({ chat: model.model });
@@ -718,10 +804,45 @@ describe("chat server tools", () => {
     expect(json.assumptions.some((a: string) => /POI/.test(a))).toBe(true);
   });
 
-  test("estimate_building_at outside Kaltim says so and still estimates", async () => {
-    const { json } = await callTool("estimate_building_at", { lng: 106.8, lat: -6.2 });
+  test("estimate_building_at just outside Kaltim (inside the margin) says so and still estimates", async () => {
+    // Central Kalimantan, west of the Kaltim border: inside the margin, but no Kaltim region.
+    const { json, result } = await callTool("estimate_building_at", { lng: 113.2, lat: 0.5 });
+    expect(result?.is_error).toBeUndefined();
     expect(json.region).toBe("Di luar Kalimantan Timur");
     expect(json.kwhYear).toBeGreaterThan(0);
+  });
+
+  test.each([
+    ["estimate_building_at", { lng: 106.8, lat: -6.2 }],
+    ["simulate_solar", { lat: -6.2, lng: 106.8, roofAreaM2: 100, kwhYear: 5000, backupHours: 4 }],
+    ["get_weather", { lat: -6.2, lng: 106.8 }],
+    ["get_weather", { lat: 0.5, lng: 121 }],
+  ])("%s for a point far outside Kaltim (%j) returns an error result without calling the upstream", async (name, input) => {
+    const { result, fake } = await callTool(name, input, { meteo: forecastFromToday() });
+    expect(result?.is_error).toBe(true);
+    expect(String(result?.content)).toContain("di luar Kalimantan Timur");
+    expect(fake.poiCalls).toHaveLength(0);
+    expect(fake.nasaCalls).toHaveLength(0);
+    expect(fake.meteoCalls).toHaveLength(0);
+  });
+
+  test("one reply runs at most 6 server tools; the rest get an error result and map actions are not counted", async () => {
+    const tools = [
+      ...Array.from({ length: 4 }, () => ({ name: "list_regions", input: {} })),
+      { name: "fly_to_region", input: { region: "Kukar" } },
+      ...Array.from({ length: 4 }, () => ({ name: "get_grid_mix", input: {} })),
+    ];
+    const model = fakeModel([{ tools }, { text: "Selesai." }]);
+    const { server } = start({ chat: model.model });
+    const events = await chat(server, body("Semua data sekaligus"));
+
+    expect(actions(events)).toEqual([{ name: "fly_to_region", input: { region: "kutai-kartanegara" } }]);
+    const results = toolResults(model.calls[1]);
+    expect(results).toHaveLength(9);
+    expect(results.map((r) => r.tool_use_id)).toEqual(tools.map((_, i) => `toolu_1_${i}`));
+    // Server calls 1-6 run (positions 0-3, 5, 6); the action at 4 is not counted; 7 and 8 are refused.
+    expect(results.map((r) => r.is_error === true)).toEqual([false, false, false, false, false, false, false, true, true]);
+    expect(String(results[7]?.content)).toContain("paling banyak 6");
   });
 
   test("simulate_solar gives the same numbers as POST /api/solar/simulate", async () => {

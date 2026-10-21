@@ -72,6 +72,8 @@ export interface ChatContext {
 export interface HistoryTurn {
   role: "user" | "assistant";
   text: string;
+  /** Map actions of an answer; replayed as a note when the answer has no text. */
+  actions?: { name: string; input: Record<string, unknown> }[];
 }
 
 const WITA_TIME = new Intl.DateTimeFormat("id-ID", {
@@ -119,21 +121,45 @@ export function describeContext(context: ChatContext, now: Date): string {
   return lines.join("\n");
 }
 
+/** An answer that only moved the map, as text: "(peta: fly_to_region kutai-kartanegara)". */
+function actionsNote(actions: NonNullable<HistoryTurn["actions"]>): string {
+  const parts = actions.map((a) => [a.name, ...Object.values(a.input ?? {}).map(String)].join(" "));
+  return parts.length > 0 ? `(peta: ${parts.join("; ")})` : "";
+}
+
 /**
- * The conversation for Claude: earlier text turns (a replay has to start with a user turn, and turns
- * without text are left out), then the new question with the app state in front of it.
+ * Earlier turns as strict question and answer pairs. A question with no answer after it (the answer
+ * failed or was cut off) is dropped, an answer with no question before it is dropped, two answers in a
+ * row are merged, and an answer that only moved the map is replayed as a short map note.
  */
+function pairedTurns(history: HistoryTurn[]): HistoryTurn[] {
+  const out: HistoryTurn[] = [];
+  for (const turn of history) {
+    const text = turn.text.trim() !== "" ? turn.text : turn.role === "assistant" ? actionsNote(turn.actions ?? []) : "";
+    if (text === "") continue;
+    const last = out.at(-1);
+    if (turn.role === "user") {
+      if (last?.role === "user") out.pop();
+      out.push({ role: "user", text });
+    } else if (last?.role === "user") {
+      out.push({ role: "assistant", text });
+    } else if (last) {
+      last.text = `${last.text}\n\n${text}`;
+    }
+  }
+  if (out.at(-1)?.role === "user") out.pop();
+  return out;
+}
+
+/** The conversation for Claude: earlier question and answer pairs, then the new question with the app state in front of it. */
 export function buildMessages(
   history: HistoryTurn[],
   message: string,
   context: ChatContext,
   now: Date,
 ): Anthropic.MessageParam[] {
-  const turns = history.filter((t) => t.text.trim() !== "");
-  const firstUser = turns.findIndex((t) => t.role === "user");
-  const replay = firstUser === -1 ? [] : turns.slice(firstUser);
   return [
-    ...replay.map((t): Anthropic.MessageParam => ({ role: t.role, content: t.text })),
+    ...pairedTurns(history).map((t): Anthropic.MessageParam => ({ role: t.role, content: t.text })),
     {
       role: "user",
       content: [
@@ -163,6 +189,7 @@ export const LAST_CALL_NOTICE =
 const CUT_NOTE = "(Jawaban terpotong karena terlalu panjang. Coba minta jawaban yang lebih singkat.)";
 const TOO_MANY_STEPS_NOTE = "Maaf, pertanyaan ini butuh terlalu banyak langkah. Coba tanyakan dengan lebih spesifik.";
 const EMPTY_NOTE = "Maaf, saya belum bisa menjawab. Coba ulangi pertanyaannya dengan kata lain.";
+const ACTIONS_ONLY_NOTE = "Sudah saya tampilkan di peta.";
 
 /** A friendly Indonesian message for a failed chat request. */
 export function chatErrorMessage(err: unknown): string {
@@ -283,6 +310,7 @@ export async function runChat(opts: {
     console.error("chat failed:", describeError(err));
     return { status: "error", message: chatErrorMessage(err) };
   }
-  if (text === "" && actions.length === 0) say(EMPTY_NOTE);
+  // The user never sees the map move, or nothing happen, without words.
+  if (text === "") say(actions.length > 0 ? ACTIONS_ONLY_NOTE : EMPTY_NOTE);
   return { status: "done", text, actions };
 }

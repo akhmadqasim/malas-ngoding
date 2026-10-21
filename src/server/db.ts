@@ -259,19 +259,30 @@ export async function ensureChatSession(id: string): Promise<void> {
   await sql`INSERT INTO chat_sessions (id) VALUES (${id}) ON CONFLICT (id) DO NOTHING`;
 }
 
-/** The last `limit` messages of a session, oldest first, as role and text ("" when a message has no text). */
-export async function chatHistory(sessionId: string, limit: number): Promise<{ role: ChatRole; text: string }[]> {
+/** A stored chat message as the history needs it. `actions` are the map actions of an answer ([] if none). */
+export interface ChatHistoryRow {
+  role: ChatRole;
+  text: string;
+  actions: { name: string; input: Record<string, unknown> }[];
+}
+
+/** The last `limit` messages of a session, oldest first ("" when a message has no text). */
+export async function chatHistory(sessionId: string, limit: number): Promise<ChatHistoryRow[]> {
   const rows = await sql`
-    SELECT role, content->>'text' AS text FROM (
+    SELECT role, content->>'text' AS text, content->'actions' AS actions FROM (
       SELECT id, role, content FROM chat_messages
       WHERE session_id = ${sessionId}
       ORDER BY id DESC LIMIT ${limit}
     ) recent
     ORDER BY id`;
-  return rows.map((r: Record<string, unknown>) => ({
-    role: r.role as ChatRole,
-    text: typeof r.text === "string" ? r.text : "",
-  }));
+  return rows.map((r: Record<string, unknown>) => {
+    const actions: unknown = typeof r.actions === "string" ? JSON.parse(r.actions) : r.actions;
+    return {
+      role: r.role as ChatRole,
+      text: typeof r.text === "string" ? r.text : "",
+      actions: Array.isArray(actions) ? (actions as ChatHistoryRow["actions"]) : [],
+    };
+  });
 }
 
 /** Stores one chat message. The session row must exist (see `ensureChatSession`). */
