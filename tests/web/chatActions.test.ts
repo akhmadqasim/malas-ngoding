@@ -149,6 +149,23 @@ describe("runAction", () => {
     expect(picked).toEqual([[117.1, -0.5]]);
   });
 
+  test("a cleared queue (stop, a new conversation) drops the actions still waiting", async () => {
+    const queue = actionQueue();
+    await runAction({ name: "fly_to_region", input: { region: "kutai-kartanegara" } }, target);
+    // The pick waits for the region flight; a fly_to waits behind it.
+    const pick = queue((alive) => runAction({ name: "select_building_at", input: { lng: 117.1, lat: -0.5 } }, target, { alive }));
+    const fly = queue((alive) => runAction({ name: "fly_to", input: { lng: 117.2, lat: -0.4, zoom: 15 } }, target, { alive }));
+    await Bun.sleep(10);
+    queue.clear();
+    startMoving(); // the region flight starts after all
+    expect(await pick).toBe("skipped");
+    expect(await fly).toBeNull();
+    expect(picked).toEqual([]);
+    expect(flights.map((f) => f.center)).toEqual([[117.15, -0.5]]); // only the region flight
+    // The queue keeps working for the next answer.
+    expect(await queue((alive) => runAction({ name: "set_metric", input: { metric: "kwh" } }, target, { alive }))).toBe("ok");
+  });
+
   test("a pick that a flight cut short is tried once more", async () => {
     let calls = 0;
     useAppStore.setState({

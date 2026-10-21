@@ -97,6 +97,7 @@ const CITY_ZOOM = 14;
 /** The closest a fit to the marked places goes (one street block). */
 const PLACES_MAX_ZOOM = 16;
 
+const always = () => true;
 const isNum = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
 const lngLatOf = (i: Record<string, unknown>): [number, number] | null =>
   isNum(i.lng) && isNum(i.lat) && Math.abs(i.lng) <= 180 && Math.abs(i.lat) <= 90 ? [i.lng, i.lat] : null;
@@ -169,10 +170,11 @@ export function forgetMarkedPlaces(): void {
  * Moves the camera so every marked place is in view, clear of the panels. A region flight the same answer
  * asked for starts first, so it cannot override the fit. False when nothing is marked.
  */
-export async function fitMarkedPlaces(target: ActionTarget = appTarget): Promise<boolean> {
+export async function fitMarkedPlaces(target: ActionTarget = appTarget, alive: () => boolean = always): Promise<boolean> {
   const map = target.getState().map;
   if (!map || marked.length === 0) return false;
   await afterRegionFlightStarts(map);
+  if (!alive() || marked.length === 0) return false;
   if (marked.length === 1) {
     const only = marked[0]!;
     flyTo(map, target, [only.lng, only.lat], PLACES_MAX_ZOOM);
@@ -213,9 +215,11 @@ export async function fitMarkedPlaces(target: ActionTarget = appTarget): Promise
  * least goes there. A pick the presenter interrupted (the store closed the panel) is not retried. Returns
  * "failed" when no building was selected.
  */
-async function selectBuilding(target: ActionTarget, lngLat: [number, number]): Promise<ActionOutcome> {
+async function selectBuilding(target: ActionTarget, lngLat: [number, number], alive: () => boolean = always): Promise<ActionOutcome> {
   const map = target.getState().map;
   if (map) await afterRegionFlightStarts(map);
+  // The answer was stopped or the conversation started over while this waited.
+  if (!alive()) return "skipped";
   const place = markedAt(lngLat);
   const hint: BuildingHint | undefined = place ? { type: place.type, name: place.name } : undefined;
   const select = () => target.getState().selectBuildingAt(lngLat, hint);
@@ -264,8 +268,9 @@ function placesOf(v: unknown): MarkedPlace[] {
 export async function runAction(
   action: ChatAction,
   target: ActionTarget = appTarget,
-  opts: { replay?: boolean } = {},
+  opts: { replay?: boolean; alive?: () => boolean } = {},
 ): Promise<ActionOutcome> {
+  const alive = opts.alive ?? always;
   const state = target.getState();
   const input = action.input ?? {};
   const did = (ok: boolean): ActionOutcome => (ok ? "ok" : "skipped");
@@ -303,13 +308,14 @@ export async function runAction(
         const at = lngLatOf(input);
         if (!at || !isNum(input.zoom) || !state.map) return "skipped";
         await afterRegionFlightStarts(state.map);
+        if (!alive()) return "skipped";
         flyTo(state.map, target, at, Math.min(22, Math.max(0, input.zoom)));
         return "ok";
       }
       case "select_building_at": {
         const at = lngLatOf(input);
         if (!at) return "skipped";
-        return await selectBuilding(target, at);
+        return await selectBuilding(target, at, alive);
       }
       case "toggle_layer": {
         const layer = oneOf(input.layer, LAYERS);
@@ -341,7 +347,7 @@ export async function runAction(
         target.showPlaces(state.map, places, (lngLat) => {
           void selectBuilding(target, lngLat).catch(() => {});
         });
-        if (opts.replay) await fitMarkedPlaces(target);
+        if (opts.replay) await fitMarkedPlaces(target, alive);
         return "ok";
       }
       default:
@@ -355,15 +361,26 @@ export async function runAction(
 
 /**
  * Runs map actions one after another, in the order the answer gave them: a region flight has started
- * before a building pick takes the camera over, never the other way round.
+ * before a building pick takes the camera over, never the other way round. `clear()` (stop, a new
+ * conversation) drops the jobs still waiting, which resolve to null, and tells a running one through
+ * `alive` that it should not move the camera any more.
  */
 export function actionQueue() {
   let tail: Promise<unknown> = Promise.resolve();
-  return <T>(job: () => Promise<T>): Promise<T> => {
-    const next = tail.then(job, job);
+  let generation = 0;
+  const enqueue = <T>(job: (alive: () => boolean) => Promise<T>): Promise<T | null> => {
+    const mine = generation;
+    const alive = () => mine === generation;
+    const run = () => (alive() ? job(alive) : Promise.resolve(null));
+    const next = tail.then(run, run);
     tail = next.catch(() => {});
     return next;
   };
+  return Object.assign(enqueue, {
+    clear: () => {
+      generation++;
+    },
+  });
 }
 
 /** Camera actions after which the view already shows what the answer is about. */

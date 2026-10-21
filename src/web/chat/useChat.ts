@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { KALTIM_VIEW } from "../map/camera.ts";
 import { type ActionOutcome, actionQueue, fitMarkedPlaces, forgetMarkedPlaces, needsPlacesFit, runAction } from "../map/actions.ts";
-import { type AppState, useAppStore } from "../store.ts";
+import { type AppState, claimCamera, useAppStore } from "../store.ts";
 import { clearPlaces } from "./placesLayer.ts";
 import { browserStorage, type ChatMessage, loadChat, newChat, saveChat, type StoredChat } from "./session.ts";
 import { type ChatAction, type ChatRequest, type StreamEvent, streamChat } from "./sse.ts";
@@ -100,11 +100,11 @@ export function useChat(opts: { fetch?: typeof fetch } = {}): UseChat {
         else if (event.type === "action") {
           const index = actions.push(event.action) - 1;
           update(answer.id, (m) => ({ ...m, actions: [...m.actions, event.action] }));
-          void queue.current(() => runAction(event.action)).then((outcome) => record(answer.id, index, outcome));
+          void queue.current((alive) => runAction(event.action, undefined, { alive })).then((outcome) => record(answer.id, index, outcome ?? "skipped"));
         } else if (event.type === "done") {
           update(answer.id, (m) => ({ ...m, status: "done" }));
           // Places were marked but the camera never went to one: bring them into view.
-          if (needsPlacesFit(actions)) void queue.current(() => fitMarkedPlaces());
+          if (needsPlacesFit(actions)) void queue.current((alive) => fitMarkedPlaces(undefined, alive));
         } else update(answer.id, (m) => ({ ...m, status: "error", error: event.message }));
       };
       const actions: ChatAction[] = [];
@@ -120,7 +120,16 @@ export function useChat(opts: { fetch?: typeof fetch } = {}): UseChat {
 
   const send = useCallback((text: string) => ask(text, chat.sessionId), [ask, chat.sessionId]);
 
-  const stop = useCallback(() => running.current?.abort(), []);
+  /** Drops the map actions still to come; a chat building pick in flight gives the camera back. */
+  const dropActions = useCallback(() => {
+    queue.current.clear();
+    claimCamera();
+  }, []);
+
+  const stop = useCallback(() => {
+    running.current?.abort();
+    dropActions();
+  }, [dropActions]);
 
   const retry = useCallback(
     (answerId: string) => {
@@ -138,17 +147,20 @@ export function useChat(opts: { fetch?: typeof fetch } = {}): UseChat {
   const reset = useCallback(() => {
     running.current?.abort();
     running.current = null;
+    dropActions();
     const map = useAppStore.getState().map;
     if (map) clearPlaces(map);
     forgetMarkedPlaces();
     setChat(newChat());
-  }, []);
+  }, [dropActions]);
 
   const replay = useCallback(
     (answerId: string, index: number) => {
       const action = chat.messages.find((m) => m.id === answerId)?.actions[index];
       if (!action) return;
-      void queue.current(() => runAction(action, undefined, { replay: true })).then((outcome) => record(answerId, index, outcome));
+      void queue.current((alive) => runAction(action, undefined, { replay: true, alive })).then((outcome) =>
+        record(answerId, index, outcome ?? "skipped"),
+      );
     },
     [chat.messages, record],
   );
