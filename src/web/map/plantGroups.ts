@@ -1,5 +1,3 @@
-import type { ExpressionSpecification } from "mapbox-gl";
-
 /*
  * Plants that would overlap on screen are drawn as one group marker with their count. Unlike Mapbox's own
  * clustering, which regroups at whole zoom levels (the count pops into dots), the groups here are worked out
@@ -15,8 +13,6 @@ export const GROUP_RADIUS_PX = 18;
 export const FADE_ZOOMS = 0.6;
 /** A group that would show for less than this many zoom levels is skipped: its parts show straight away. */
 const MIN_LIFE_ZOOMS = FADE_ZOOMS;
-/** Zoom range the opacity expressions cover, in quarter-zoom stops; beyond it the ends hold. */
-const OPACITY_ZOOMS = [3, 15] as const;
 const NEVER = 99;
 
 export interface GroupInput<P> {
@@ -116,27 +112,8 @@ export function plantGroups<P>(plants: GroupInput<P>[], radiusPx = GROUP_RADIUS_
   return out.sort((a, b) => a.id - b.id);
 }
 
-/** How visible a marker is at `zoom`, 0..1: the same ramps the map draws (`markerOpacity`). */
+/** How visible a marker is at `zoom`, 0..1. plantsLayer writes it into feature-state on every zoom. */
 export function visibility(node: { appear: number; split: number }, zoom: number): number {
   const ramp = (v: number) => Math.min(1, Math.max(0, v));
   return ramp(0.5 + (zoom - node.appear) / FADE_ZOOMS) * ramp(0.5 + (node.split - zoom) / FADE_ZOOMS);
-}
-
-/**
- * Opacity of a marker by zoom: fades in around `appear`, out around `split` (feature properties), times
- * `base` (planned plants are fainter). Mapbox allows `zoom` only as the input of a top-level interpolate,
- * so the ramps are written out at quarter-zoom stops; between stops Mapbox interpolates linearly.
- */
-export function markerOpacity(base: ExpressionSpecification | number = 1): ExpressionSpecification {
-  const ramp = (v: ExpressionSpecification): ExpressionSpecification => ["min", 1, ["max", 0, v]];
-  const stops: (number | ExpressionSpecification)[] = [];
-  for (let z = OPACITY_ZOOMS[0]; z <= OPACITY_ZOOMS[1]; z += 0.25) {
-    stops.push(z, [
-      "*",
-      base,
-      ramp(["+", 0.5, ["/", ["-", z, ["get", "appear"]], FADE_ZOOMS]]),
-      ramp(["+", 0.5, ["/", ["-", ["get", "split"], z], FADE_ZOOMS]]),
-    ]);
-  }
-  return ["interpolate", ["linear"], ["zoom"], ...stops] as ExpressionSpecification;
 }

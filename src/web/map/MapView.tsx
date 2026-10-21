@@ -7,7 +7,7 @@ import { abortIntro, flyToProvince, flyToRegion, GLOBE_VIEW, introFlight, startI
 import {
   applyLightPreset,
   basemapLight,
-  basemapTheme,
+  BASEMAP_THEME,
   type LightPreset,
   lightPresetFor,
   overcastOpacity,
@@ -15,7 +15,7 @@ import {
   resolvePreset,
   setRainEffect,
 } from "./effects.ts";
-import { addPlants, removePlants, setPlantsVisible } from "./plantsLayer.ts";
+import { addPlants, removePlants, setPlantsLanded, setPlantsVisible } from "./plantsLayer.ts";
 import { basemapLabelConfig, REGION_LABEL_LAYER } from "./regionLabels.ts";
 import {
   addRegions,
@@ -94,6 +94,31 @@ function idleOrTimeout(map: mapboxgl.Map, capMs: number): Promise<void> {
 
 type TestWindow = Window & { __malasMap?: mapboxgl.Map };
 
+/** Room around a framed region, so the sheet, the dock and the map tools never cover any of it. */
+const FRAME_GAP_PX = 24;
+
+/**
+ * Camera padding measured from the chrome on screen: left of the sheet's right edge, above the dock's
+ * highest card, right of the map tools. Falls back to a fixed frame when the chrome is not there.
+ */
+function chromePadding(): { top: number; bottom: number; left: number; right: number } {
+  const rect = (sel: string) => document.querySelector(sel)?.getBoundingClientRect();
+  const sheet = rect(".sheet");
+  const cards = [rect(".legend"), rect(".controls")].filter((r): r is DOMRect => r !== undefined);
+  const tools = rect(".map-tools");
+  const w = window.innerWidth;
+  const h = window.innerHeight;
+  const dockTop = cards.length ? Math.min(...cards.map((r) => r.top)) : h - 80;
+  // On narrow screens the sheet sits on top and the dock spans the bottom: frame between them.
+  const sheetBeside = sheet ? sheet.right < w / 2 : false;
+  return {
+    top: (sheet && !sheetBeside ? sheet.bottom : 0) + FRAME_GAP_PX,
+    bottom: Math.max(h - dockTop, 0) + FRAME_GAP_PX,
+    left: (sheet && sheetBeside ? sheet.right : 0) + FRAME_GAP_PX,
+    right: (tools ? w - tools.left : 0) + FRAME_GAP_PX,
+  };
+}
+
 export function MapView({ token, regions, plants, onIntroStart, onIntroEnd, onRegionHover, onRegionPointer, onFailure }: Props) {
   const container = useRef<HTMLDivElement>(null);
   const overcast = useRef<HTMLDivElement>(null);
@@ -137,7 +162,7 @@ export function MapView({ token, regions, plants, onIntroStart, onIntroEnd, onRe
         config: {
           basemap: {
             lightPreset: basemapLight(preset),
-            theme: basemapTheme(preset),
+            theme: BASEMAP_THEME,
             show3dLandmarks: false,
             showPointOfInterestLabels: false,
             showTransitLabels: false,
@@ -259,7 +284,10 @@ export function MapView({ token, regions, plants, onIntroStart, onIntroEnd, onRe
       // Test hook for scripts/smoke.ts (waits for idle, projects points). Read-only use only.
       (window as TestWindow).__malasMap = map;
 
-      if (introDone) riseRegions(map, regions);
+      if (introDone) {
+        riseRegions(map, regions);
+        setPlantsLanded(map);
+      }
       if (introStarted) return;
       introStarted = true;
 
@@ -275,6 +303,10 @@ export function MapView({ token, regions, plants, onIntroStart, onIntroEnd, onRe
       riseRegions(map, regions);
       introDone = true;
       updateBasemapLabels();
+      // Plant markers wait for the landed, idle map (setPlantsLanded explains why).
+      idleOrTimeout(map, IDLE_WAIT_MS).then(() => {
+        if (!disposed && !failed) setPlantsLanded(map);
+      });
       handlers.current.onIntroEnd();
       startIdleOrbit(map);
     };
@@ -305,7 +337,7 @@ export function MapView({ token, regions, plants, onIntroStart, onIntroEnd, onRe
             .catch(() => (bounds ? centerOf(bounds) : null))
             .then((centroid) => {
               // Skip when the user picked another region while the request was out.
-              if (!disposed && centroid && useAppStore.getState().selectedRegionId === id) flyToRegion(map, centroid, { bounds });
+              if (!disposed && centroid && useAppStore.getState().selectedRegionId === id) flyToRegion(map, centroid, { bounds, padding: chromePadding() });
             });
         } else {
           flyToProvince(map);

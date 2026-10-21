@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { FADE_ZOOMS, markerOpacity, partZoom, plantGroups, visibility } from "../../src/web/map/plantGroups.ts";
+import { FADE_ZOOMS, partZoom, plantGroups, visibility } from "../../src/web/map/plantGroups.ts";
 
 const p = (name: string, lng: number, lat: number, capacityMw = 10) => ({ lng, lat, capacityMw, props: { name } });
 
@@ -46,9 +46,4 @@ describe("plant groups part smoothly as the map zooms in", () => {
     expect(partZoom(18 / (512 * 2 ** 9))).toBeCloseTo(9, 6);
   });
 
-  test("the opacity expression is one top-level zoom interpolate", () => {
-    const e = markerOpacity() as unknown[];
-    expect(e[0]).toBe("interpolate");
-    expect(e[2]).toEqual(["zoom"]);
-  });
 });

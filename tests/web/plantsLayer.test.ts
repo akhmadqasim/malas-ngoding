@@ -10,6 +10,7 @@ function fakeMap(existing: string[] = []) {
   const specs = new Map<string, { layout?: Record<string, unknown>; paint?: Record<string, unknown> }>();
   const images = new Map<string, { width: number; height: number }>();
   const sources = new Set<string>();
+  const opacity = new Map<number, number>();
   const map = {
     addSource: (id: string) => void sources.add(id),
     getSource: (id: string) => (sources.has(id) ? {} : undefined),
@@ -28,9 +29,13 @@ function fakeMap(existing: string[] = []) {
     addInteraction: () => {},
     removeInteraction: () => {},
     getCanvas: () => ({ style: { cursor: "" } }),
+    getZoom: () => 6.55,
+    on: () => {},
+    off: () => {},
+    setFeatureState: (target: { id: number }, state: { o: number }) => void opacity.set(target.id, state.o),
     triggerRepaint: () => {},
   };
-  return { map: map as unknown as MapboxMap, order, specs, images };
+  return { map: map as unknown as MapboxMap, order, specs, images, opacity };
 }
 
 const plants: PlantCollection = {
@@ -67,6 +72,15 @@ describe("plant markers never cost a region name", () => {
     expect(specs.get(PLANT_CLUSTER_LAYER)?.layout?.["text-ignore-placement"]).toBe(true);
     removePlants(map);
     expect(order).toEqual(["regions-extrusion", "region-labels"]);
+  });
+
+  test("each marker's opacity is written to feature-state for the current zoom, not left to a paint expression", () => {
+    const { map, specs, opacity } = fakeMap();
+    addPlants(map, plants, true);
+    expect(specs.get(PLANT_LAYER)?.paint?.["icon-opacity"]).toEqual(["coalesce", ["feature-state", "o"], 0]);
+    // Two plants far apart: both fully shown at the province view.
+    expect([...opacity.values()].filter((o) => o === 1)).toHaveLength(2);
+    removePlants(map);
   });
 
   test("only the marker images of the fuels present are added, and all of them are removed", () => {
