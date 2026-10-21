@@ -1514,6 +1514,15 @@ async function buildingHeapSoak(page: Page) {
  */
 async function chatChecks(page: Page) {
   const sse = (events: [string, unknown][]) => events.map(([e, d]) => `event: ${e}\ndata: ${JSON.stringify(d)}\n\n`).join("");
+  // The panel ends above any dock card under it.
+  const chatCoversDock = () =>
+    page.evaluate((cards) => {
+      const p = document.querySelector(".chat__card")!.getBoundingClientRect();
+      return cards.some((sel) => {
+        const r = document.querySelector(sel)?.getBoundingClientRect();
+        return Boolean(r && r.left < p.right && r.right > p.left && r.top < p.bottom && r.bottom > p.top);
+      });
+    }, DOCK_CARDS);
   const reply = (body: string) => (route: import("playwright").Route) =>
     route.fulfill({ status: 200, headers: { "content-type": "text/event-stream" }, body });
   await page.evaluate((view) => (window as MapWindow).__malasMap!.jumpTo(view), KALTIM_VIEW);
@@ -1526,6 +1535,8 @@ async function chatChecks(page: Page) {
   await panel.waitFor({ timeout: 3000 });
   const prompts = await panel.locator(".chat__prompt").count();
   check(prompts === 4, `the empty chat offers the 4 suggested questions (${prompts})`);
+  await page.waitForTimeout(400); // the panel finishes sliding in
+  check(!(await chatCoversDock()), "the empty chat panel does not cover the legend or the map controls");
   const focused = await page.evaluate(() => document.activeElement?.getAttribute("aria-label"));
   check(focused === "Pertanyaan untuk asisten AI", `opening the chat puts the cursor in the question box (${focused})`);
 
@@ -1554,15 +1565,7 @@ async function chatChecks(page: Page) {
   await page.waitForTimeout(2200);
   await shot(page, "9-chat-answer");
 
-  // The panel ends above any dock card under it.
-  const overlap = await page.evaluate((cards) => {
-    const p = document.querySelector(".chat__card")!.getBoundingClientRect();
-    return cards.some((sel) => {
-      const r = document.querySelector(sel)?.getBoundingClientRect();
-      return r && r.left < p.right && r.right > p.left && r.top < p.bottom && r.bottom > p.top;
-    });
-  }, DOCK_CARDS);
-  check(!overlap, "the chat panel does not cover the legend or the map controls");
+  check(!(await chatCoversDock()), "with an answer, the chat panel does not cover the legend or the map controls");
 
   await page.unroute("**/api/chat");
   await page.route("**/api/chat", reply(sse([["error", { message: "Asisten AI sedang sibuk. Coba lagi sebentar lagi." }]])));

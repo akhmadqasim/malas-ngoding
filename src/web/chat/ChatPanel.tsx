@@ -35,8 +35,11 @@ function useDockClearance(panel: RefObject<HTMLElement | null>, open: boolean, b
     if (!open) return;
     const dock = document.querySelector(".dock-slot");
     const measure = () => {
-      const p = panel.current?.getBoundingClientRect();
-      if (!p) return;
+      const el = panel.current;
+      if (!el) return;
+      // Layout position, not the bounding box: the panel slides in 16 px from the right, and measured mid-slide
+      // a card that ends just under its left edge would be missed.
+      const p = { left: el.offsetLeft, right: el.offsetLeft + el.offsetWidth };
       const under = dock
         ? [...dock.children].map((c) => c.getBoundingClientRect()).filter((r) => r.height > 0 && r.left < p.right && r.right > p.left)
         : [];
