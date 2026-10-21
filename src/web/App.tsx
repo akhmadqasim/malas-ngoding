@@ -14,6 +14,7 @@ import { METRIC_TEXT } from "./metrics.ts";
 import { DURATION, EASE_OUT } from "./motion.ts";
 import { Legend } from "./panels/Legend.tsx";
 import { MapControls } from "./panels/MapControls.tsx";
+import { MapTools } from "./panels/MapTools.tsx";
 import { RegionPanel } from "./panels/RegionPanel.tsx";
 import { type Metric, useAppStore } from "./store.ts";
 
@@ -124,6 +125,9 @@ export function App() {
             >
               <motion.div className="sheet-slot" variants={assemble(0, -16)}>
                 <RegionPanel regions={regionList} />
+              </motion.div>
+              <motion.div className="tools-slot" variants={assemble(0, 12)}>
+                <MapTools />
               </motion.div>
               <div className="dock-slot">
                 <motion.div variants={assemble(12, 0)}>

@@ -3,7 +3,7 @@ import "mapbox-gl/dist/mapbox-gl.css";
 import { useEffect, useRef } from "react";
 import { api, type PlantCollection, type RegionCollection } from "../api.ts";
 import { useAppStore } from "../store.ts";
-import { abortIntro, FLY_MS, flyToRegion, GLOBE_VIEW, introFlight, KALTIM_VIEW, startIdleOrbit, stopIdleOrbit } from "./camera.ts";
+import { abortIntro, flyToProvince, flyToRegion, GLOBE_VIEW, introFlight, startIdleOrbit, stopIdleOrbit } from "./camera.ts";
 import {
   applyLightPreset,
   basemapTheme,
@@ -152,8 +152,9 @@ export function MapView({ token, regions, plants, onIntroStart, onIntroEnd, onRe
       return;
     }
     useAppStore.getState().setLightPreset(preset);
-    map.addControl(new mapboxgl.AttributionControl({ compact: true }), "bottom-right");
-    map.addControl(new mapboxgl.NavigationControl({ visualizePitch: true, showCompass: true }), "bottom-right");
+    // The Mapbox wordmark and the full attribution stay on screen (Mapbox terms), on one line under the
+    // sheet. Zoom, compass and the rest are our own tools (panels/MapTools.tsx).
+    map.addControl(new mapboxgl.AttributionControl({ compact: false }), "bottom-left");
 
     let styleLoaded = false;
     let ready = false;
@@ -306,7 +307,7 @@ export function MapView({ token, regions, plants, onIntroStart, onIntroEnd, onRe
               if (!disposed && centroid && useAppStore.getState().selectedRegionId === id) flyToRegion(map, centroid, { bounds });
             });
         } else {
-          map.flyTo({ ...KALTIM_VIEW, duration: FLY_MS, curve: 1.2, essential: true });
+          flyToProvince(map);
         }
       }
     });

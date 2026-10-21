@@ -1,20 +1,8 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import type { Map as MapboxMap } from "mapbox-gl";
 import type { PlantCollection } from "../../src/web/api.ts";
-import { addPlants, PLANT_LAYER, PULSE_IDLE_MS, pulseWantsFrame, removePlants } from "../../src/web/map/plantsLayer.ts";
+import { addPlants, PLANT_CLUSTER_LAYER, PLANT_LAYER, plantClusterHtml, plantPopupHtml, removePlants } from "../../src/web/map/plantsLayer.ts";
 import { clearTokenCache } from "../../src/web/theme.ts";
-
-describe("plant pulse repaints only while a marker is drawn", () => {
-  test("keeps asking for frames right after Mapbox drew a marker", () => {
-    expect(pulseWantsFrame(10_000, 9_990)).toBe(true);
-    expect(pulseWantsFrame(10_000, 10_000 - PULSE_IDLE_MS + 1)).toBe(true);
-  });
-  test("stops when no marker has been drawn for a while (all plants off screen)", () => {
-    expect(PULSE_IDLE_MS).toBeLessThanOrEqual(500);
-    expect(pulseWantsFrame(10_000, 10_000 - PULSE_IDLE_MS)).toBe(false);
-    expect(pulseWantsFrame(10_000, Number.NEGATIVE_INFINITY)).toBe(false);
-  });
-});
 
 /** Just enough of mapboxgl.Map to add and remove the plant layers, keeping the layer order. */
 function fakeMap(existing: string[] = []) {
@@ -71,9 +59,12 @@ describe("plant markers never cost a region name", () => {
     const { map, order, specs } = fakeMap(["regions-extrusion", "region-labels"]);
     addPlants(map, plants, true, { below: "region-labels" });
     // A name may sit over a marker (its ink halo keeps it legible); the marker stays visible around it.
-    expect(order).toEqual(["regions-extrusion", PLANT_LAYER, "region-labels"]);
-    expect(specs.get(PLANT_LAYER)?.layout?.["icon-ignore-placement"]).toBe(true);
-    expect(specs.get(PLANT_LAYER)?.layout?.["icon-allow-overlap"]).toBe(true);
+    expect(order).toEqual(["regions-extrusion", PLANT_LAYER, PLANT_CLUSTER_LAYER, "region-labels"]);
+    for (const id of [PLANT_LAYER, PLANT_CLUSTER_LAYER]) {
+      expect(specs.get(id)?.layout?.["icon-ignore-placement"]).toBe(true);
+      expect(specs.get(id)?.layout?.["icon-allow-overlap"]).toBe(true);
+    }
+    expect(specs.get(PLANT_CLUSTER_LAYER)?.layout?.["text-ignore-placement"]).toBe(true);
     removePlants(map);
     expect(order).toEqual(["regions-extrusion", "region-labels"]);
   });
@@ -81,8 +72,31 @@ describe("plant markers never cost a region name", () => {
   test("only the marker images of the fuels present are added, and all of them are removed", () => {
     const { map, images } = fakeMap();
     addPlants(map, plants, true);
-    expect([...images.keys()].sort()).toEqual(["plant-batubara", "plant-gas"]);
+    expect([...images.keys()].sort()).toEqual(["plant-batubara", "plant-cluster", "plant-gas"]);
     removePlants(map);
     expect(images.size).toBe(0);
+  });
+});
+
+describe("plant tooltips", () => {
+  const props = (name: string, fuel: string, capacityMw: number, status = "operating", approx = false) =>
+    ({ name, fuel, capacityMw, status, approx, source: "t" }) as never;
+
+  test("one plant: name, fuel and capacity in MW, and its status when it is not operating", () => {
+    const html = plantPopupHtml(props("PLTU <Teluk>", "batubara", 2200, "planned", true));
+    expect(html).toContain("PLTU &lt;Teluk&gt;");
+    expect(html).toContain("Batu bara");
+    expect(html).toContain('<span class="num">2.200</span> MW');
+    expect(html).toContain("Rencana");
+    expect(html).toContain("Lokasi perkiraan");
+    expect(plantPopupHtml(props("PLTG", "gas", 40))).not.toContain("plant-popup__note");
+  });
+
+  test("a cluster lists its plants, largest first", () => {
+    const html = plantClusterHtml([props("Kecil", "gas", 40), props("Besar", "batubara", 220), props("Sedang", "surya", 100)]);
+    expect(html).toContain("3 pembangkit berdekatan");
+    expect(html.indexOf("Besar")).toBeLessThan(html.indexOf("Sedang"));
+    expect(html.indexOf("Sedang")).toBeLessThan(html.indexOf("Kecil"));
+    expect(html).toContain('data-fuel="surya"');
   });
 });

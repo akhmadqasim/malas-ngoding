@@ -133,12 +133,12 @@ export function labelLift(): ExpressionSpecification {
 /**
  * Full or nothing by zoom, never in between: the camera of a selected region rests anywhere from zoom 7.5
  * to 10.5, and a fade band there left a ghosted name. Shown only while the columns are the map: below
- * LANDED_LABEL_ZOOM the basemap names the geography, from PLACE_LABEL_ZOOM the place names are back. The
- * labels are only revealed once the columns stand, after the intro, so the landed handover is the one
- * that applies.
+ * GLOBE_LABEL_ZOOM the columns are a small cluster on the globe and carry no names (after the intro the
+ * basemap names return only below LANDED_LABEL_ZOOM, so that band shows the columns alone); from
+ * PLACE_LABEL_ZOOM the place names are back.
  */
 export function labelOpacity(): ExpressionSpecification {
-  return ["step", ["zoom"], 0, LANDED_LABEL_ZOOM, 1, PLACE_LABEL_ZOOM, 0];
+  return ["step", ["zoom"], 0, GLOBE_LABEL_ZOOM, 1, PLACE_LABEL_ZOOM, 0];
 }
 
 /** Adds the labels, hidden. `setRegionLabelsShown` reveals them once the columns stand still. */

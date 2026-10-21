@@ -115,9 +115,7 @@ describe("label opacity", () => {
   test("full or nothing, only while the columns are the map: never half-faded", () => {
     // A selected region's camera can rest anywhere from zoom 7.5 to 10.5; a fade band there left a ghost.
     // On the globe the basemap names the geography instead, and from city zoom the place names return.
-    // The labels are only revealed once the columns stand (after the intro), so they hand over at the
-    // landed zoom: a small zoom-out from the province view keeps our names, not the basemap's.
-    expect(labelOpacity()).toEqual(["step", ["zoom"], 0, LANDED_LABEL_ZOOM, 1, PLACE_LABEL_ZOOM, 0]);
+    expect(labelOpacity()).toEqual(["step", ["zoom"], 0, GLOBE_LABEL_ZOOM, 1, PLACE_LABEL_ZOOM, 0]);
   });
 });
 

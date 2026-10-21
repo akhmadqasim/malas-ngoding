@@ -70,6 +70,11 @@ export function abortIntro(): void {
   finishIntro?.(false);
 }
 
+/** Flies back to the whole province (the overview), at its resting bearing, where the idle sway belongs. */
+export function flyToProvince(map: MapboxMap): void {
+  map.flyTo({ ...KALTIM_VIEW, duration: prefersReducedMotion() ? 0 : FLY_MS, curve: 1.2, essential: true });
+}
+
 export interface FlyOptions {
   /** The region's bounding box; when given, the zoom is chosen so the region fills the view. */
   bounds?: LngLatBoundsLike;

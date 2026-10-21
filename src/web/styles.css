@@ -70,13 +70,15 @@
   --color-outline-light: #1c222c;
 
   /* Power plants by fuel. */
-  --color-fuel-batubara: #3e444c;
-  --color-fuel-gas: #e58a3e;
-  --color-fuel-diesel: #a86a3d;
-  --color-fuel-surya: #f2d45c;
-  --color-fuel-air: #4fa3d9;
-  --color-fuel-biomassa: #79a94f;
-  --color-fuel-lainnya: #7b8794;
+  /* Mid-tone hues away from the amber and teal ramps, so a dot reads on either column, by day and by
+     night (coal was a charcoal that read as a hole in the map). */
+  --color-fuel-batubara: #c4456a;
+  --color-fuel-gas: #8a63d2;
+  --color-fuel-diesel: #9c7a5b;
+  --color-fuel-surya: #f2c94c;
+  --color-fuel-air: #3a9ad9;
+  --color-fuel-biomassa: #6aa84f;
+  --color-fuel-lainnya: #8b95a1;
 
   /* Rain (Mapbox setRain): bright streaks in every light, the slate haze that the daytime streaks show
      against (map fog), and the overcast tint that dims the whole scene while it rains. */
@@ -722,6 +724,103 @@
   color: var(--faint);
 }
 
+/* ---------- Map tools (bottom right) ---------- */
+
+/* Above the spot the chat button takes in the bottom-right corner (Task 8). */
+.tools-slot {
+  position: absolute;
+  right: var(--layout-inset);
+  bottom: calc(var(--layout-inset) + --spacing(18));
+  pointer-events: none;
+}
+/* A floating control group: radius sm, the tools inside it radius xs. */
+.map-tools {
+  gap: --spacing(0.5);
+  padding: --spacing(1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  box-shadow: var(--overlay-shadow);
+  pointer-events: auto;
+}
+.map-tools .map-tool {
+  width: --spacing(8);
+  height: --spacing(8);
+  border-radius: var(--radius-xs);
+  --button-fg: var(--muted);
+  --button-bg-hover: var(--surface-secondary);
+  --button-bg-pressed: var(--surface-secondary);
+}
+.map-tools .map-tool:hover {
+  color: var(--foreground);
+}
+.map-tools .map-tool svg {
+  width: --spacing(4);
+  height: --spacing(4);
+  margin: 0;
+}
+.map-tools .map-tools__rule {
+  width: --spacing(5);
+  margin: --spacing(0.5) auto;
+  background: var(--border);
+}
+
+/* "Tentang peta ini": where the map and the numbers come from. */
+.map-about {
+  max-width: --spacing(72);
+}
+.map-about p {
+  margin: --spacing(2) 0 0;
+  font-size: var(--text-xs);
+  line-height: var(--leading-relaxed);
+  color: var(--muted);
+}
+.map-about a {
+  color: var(--foreground);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.map-about__title {
+  margin: 0;
+  font-size: var(--text-sm);
+  font-weight: var(--font-weight-semibold);
+}
+.map-about .map-about__note {
+  color: var(--faint);
+}
+
+/* The Mapbox wordmark and the full attribution, on one line in the bottom-left corner under the sheet
+   (Mapbox terms: both stay visible). */
+.app .mapboxgl-ctrl-bottom-left {
+  display: flex;
+  align-items: center;
+  gap: --spacing(1);
+}
+.app .mapboxgl-ctrl-bottom-left .mapboxgl-ctrl {
+  float: none;
+  clear: none;
+}
+.app .mapboxgl-ctrl-bottom-left .mapboxgl-ctrl:has(.mapboxgl-ctrl-logo) {
+  order: -1;
+}
+.app .mapboxgl-ctrl-attrib.mapboxgl-compact-show,
+.app .mapboxgl-ctrl-attrib {
+  margin: 0 0 --spacing(2.5);
+  padding: 0 --spacing(1.5);
+  border-radius: var(--radius-xs);
+  background: var(--surface);
+  color: var(--muted);
+  font-family: var(--font-sans);
+  font-size: var(--text-2xs);
+  line-height: var(--text-2xs--line-height);
+}
+.app .mapboxgl-ctrl-attrib a {
+  color: inherit;
+}
+.app .mapboxgl-ctrl-attrib a:hover {
+  color: var(--foreground);
+}
+
 /* ---------- Map overlays ---------- */
 
 .map-tooltip {
@@ -770,11 +869,11 @@
   display: flex;
   align-items: center;
   gap: --spacing(1.5);
+  margin-top: --spacing(0.5);
   font-size: var(--text-xs);
   color: var(--muted);
 }
 .plant-popup__name {
-  margin-top: --spacing(1);
   font-size: var(--text-sm);
   line-height: var(--text-sm--line-height);
   font-weight: var(--font-weight-semibold);
@@ -790,6 +889,33 @@
   font-weight: var(--font-weight-medium);
   font-stretch: var(--font-stretch-readout);
   color: var(--foreground);
+}
+/* The plants of a cluster: dot, name, capacity. */
+.plant-list {
+  display: grid;
+  gap: --spacing(1);
+  margin: --spacing(1.5) 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--text-xs);
+}
+.plant-list li {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  column-gap: --spacing(2);
+}
+.plant-list__mw {
+  color: var(--muted);
+  white-space: nowrap;
+}
+.plant-list__mw .num {
+  color: var(--foreground);
+  font-weight: var(--font-weight-medium);
+}
+.plant-popup .fuel-dot {
+  width: --spacing(2);
+  height: --spacing(2);
 }
 .plant-popup__note {
   margin-top: --spacing(0.5);

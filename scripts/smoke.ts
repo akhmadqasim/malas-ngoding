@@ -4,7 +4,9 @@
  * It opens the app in Chromium, lets the intro play (basemap names on the globe), checks the regions,
  * plants, layout, the region names across the whole idle sway (CO2 and kWh), the sway keeping its arc
  * after a gesture near north, the basemap names after the intro, the hover preview, click,
- * metric switch, picking from the list and coming back (mouse and keyboard), the rain reveal and overcast
+ * metric switch, picking from the list and coming back (mouse and keyboard, focus back on the row), the
+ * plant and cluster tooltips, the map tools (keyboard, tooltips, north, back to the province), the Mapbox
+ * wordmark and attribution, the rain reveal and overcast
  * tint at building zoom, the Cahaya light switch and the "Coba lagi" failure path, and exits non-zero on
  * any failed check, console error or console warning (known Mapbox warnings are listed, not counted).
  *
@@ -114,6 +116,8 @@ const intersects = (a: Box, b: Box) => a.x1 < b.x2 && b.x1 < a.x2 && a.y1 < b.y2
  */
 /** The cards of the bottom dock (legend, map controls): checked for layout, and no region name may hide under one. */
 const DOCK_CARDS = [".legend", ".controls"];
+/** Every panel over the map, the map tools included: no region name may hide under one. */
+const PANELS = [".sheet", ...DOCK_CARDS, ".map-tools"];
 
 const labelLayout = (page: Page) =>
   page.evaluate((panels) => {
@@ -135,7 +139,7 @@ const labelLayout = (page: Page) =>
       return { x1: r.left, y1: r.top, x2: r.right, y2: r.bottom };
     };
     return { boxes, panels: panels.map(rect) };
-  }, [".sheet", ...DOCK_CARDS]);
+  }, PANELS);
 
 /** The four largest regions: their names must never yield (controller ruling, fix round 4). */
 const MAJOR_NAMES = ["samarinda", "kutai-kartanegara", "balikpapan", "kutai-timur"];
@@ -407,15 +411,14 @@ try {
   check(overview.regionLabels === 10, `all 10 region names stand on their columns (got ${overview.regionLabels})`);
   check(overview.placeLabels === false, "no basemap place names over the columns at the province view");
   // After the intro a small zoom-out keeps the basemap names off the standing columns; well out they return.
-  const placeLabelsAt = (zoom: number) =>
-    page.evaluate(
-      ({ view, zoom }) => {
-        const map = (window as MapWindow).__malasMap!;
-        map.jumpTo({ ...view, zoom });
-        return map.getConfigProperty("basemap", "showPlaceLabels") as boolean;
-      },
-      { view: KALTIM_VIEW, zoom },
-    );
+  // Each view settles (tiles loaded, frame drawn) before the next jump, as it would for a person zooming:
+  // jumping on within milliseconds made Chromium log WebGL warnings from abandoned globe tiles.
+  const placeLabelsAt = async (zoom: number) => {
+    await page.evaluate(({ view, zoom }) => (window as MapWindow).__malasMap!.jumpTo({ ...view, zoom }), { view: KALTIM_VIEW, zoom });
+    await waitForMapIdle(page, 15_000);
+    await page.waitForTimeout(300);
+    return page.evaluate(() => (window as MapWindow).__malasMap!.getConfigProperty("basemap", "showPlaceLabels") as boolean);
+  };
   const smallOut = await placeLabelsAt(5.1);
   const farOut = await placeLabelsAt(LANDED_LABEL_ZOOM - 0.2);
   check(!smallOut && farOut, `after the intro, place names stay off the columns at zoom 5.1 (${smallOut ? "on" : "off"}) and return below zoom ${LANDED_LABEL_ZOOM} (${farOut ? "on" : "off"})`);
@@ -432,6 +435,7 @@ try {
     };
     return {
       sheet: box(document.querySelector(".sheet")!),
+      tools: document.querySelector(".map-tools") ? box(document.querySelector(".map-tools")!) : null,
       dock: cards.map((sel) => {
         const el = document.querySelector<HTMLElement>(sel);
         return el ? { sel, ...box(el), overflow: el.scrollWidth - el.clientWidth } : { sel, missing: true as const };
@@ -460,6 +464,12 @@ try {
     check(card.left >= 0 && card.top >= 0 && card.right <= vw - 80 && card.bottom <= vh, `${card.sel} fits and leaves the right edge free (right ${Math.round(card.right)} of ${vw})`);
     check(card.overflow <= 1, `${card.sel} content does not overflow (by ${card.overflow}px)`);
   }
+  check(
+    layout.tools !== null &&
+      layout.tools.right <= vw && layout.tools.bottom <= vh && layout.tools.left >= vw - 80 &&
+      [sheet, ...layout.dock].every((p) => "missing" in p || !intersects({ x1: p.left, y1: p.top, x2: p.right, y2: p.bottom }, { x1: layout.tools!.left, y1: layout.tools!.top, x2: layout.tools!.right, y2: layout.tools!.bottom })),
+    `the map tools sit in the free right edge and touch no panel (${layout.tools ? `left ${Math.round(layout.tools.left)} of ${vw}` : "missing"})`,
+  );
   check(layout.sheetScroll <= 1, `all ten regions fit in the sheet without scrolling (hidden ${layout.sheetScroll}px)`);
   await shot(page, "2-overview");
   await screen(page, "map.png");
@@ -530,6 +540,67 @@ try {
   await shot(page, "6-back-list-mouse");
   await pickFromList(page, "keyboard", regionList.find((r) => r.id === "berau")!, regionIds);
   await shot(page, "6-back-list-keyboard");
+
+  // Plants: a dot's tooltip names the plant, its fuel and its capacity; plants that would overlap on screen
+  // merge into one marker whose tooltip lists them all.
+  await page.keyboard.press("Shift");
+  await page.evaluate((view) => (window as MapWindow).__malasMap!.jumpTo(view), KALTIM_VIEW);
+  await waitForMapIdle(page);
+  await page.waitForTimeout(800);
+  const markers = await page.evaluate(() => {
+    const map = (window as MapWindow).__malasMap!;
+    type Marker = { geometry: { coordinates: [number, number] }; properties: Record<string, unknown> };
+    const at = (f: Marker) => map.project(f.geometry.coordinates);
+    const one = map.queryRenderedFeatures({ layers: ["plants"] })[0] as unknown as Marker | undefined;
+    const many = map.queryRenderedFeatures({ layers: ["plant-clusters"] })[0] as unknown as Marker | undefined;
+    return {
+      one: one && { ...at(one), name: String(one.properties.name) },
+      many: many && { ...at(many), count: Number(many.properties.point_count) },
+    };
+  });
+  if (markers.one) {
+    await page.mouse.move(markers.one.x, markers.one.y, { steps: 3 });
+    await page.waitForTimeout(500);
+    const text = (await page.locator(".map-popup").textContent()) ?? "";
+    check(text.includes(markers.one.name) && /\d MW/.test(text) && /Batu bara|Gas|Surya|Diesel|Air|Biomassa|Lainnya/.test(text), `hovering a plant shows its name, fuel and MW (${text.replace(/\s+/g, " ").trim().slice(0, 80)})`);
+  } else check(false, "a single plant marker is on screen at the province view");
+  if (markers.many) {
+    await page.mouse.move(markers.many.x, markers.many.y, { steps: 3 });
+    await page.waitForTimeout(600);
+    const listed = await page.locator(".map-popup .plant-list li").count();
+    check(listed === markers.many.count && markers.many.count > 1, `a cluster's tooltip lists all ${markers.many.count} of its plants (listed ${listed})`);
+  } else check(false, "overlapping plants merge into a cluster marker at the province view");
+  await page.mouse.move(sheet.left + 30, sheet.top + 20);
+
+  // Map tools: our own group, each tool with a tooltip on keyboard focus; north, then back to the province.
+  await page.getByRole("button", { name: "Perbesar" }).focus();
+  await page.keyboard.press("ArrowDown");
+  const tip = page.getByRole("tooltip");
+  await tip.waitFor({ timeout: 3000 }).catch(() => {});
+  check((await tip.textContent().catch(() => null)) === "Perkecil", "arrow keys move through the map tools and each one shows its tooltip");
+  await page.getByRole("button", { name: "Hadapkan ke utara" }).click();
+  await page.waitForTimeout(1500);
+  const north = await page.evaluate(() => (window as MapWindow).__malasMap!.getBearing());
+  check(Math.abs(north) < 0.5, `the compass turns the map to north (bearing ${north.toFixed(1)}°)`);
+  await page.getByRole("button", { name: "Kembali ke seluruh Kalimantan Timur" }).click();
+  await page.waitForTimeout(2600);
+  const home = await page.evaluate(() => {
+    const map = (window as MapWindow).__malasMap!;
+    return { bearing: map.getBearing(), zoom: map.getZoom() };
+  });
+  check(
+    Math.abs(home.bearing - KALTIM_VIEW.bearing) < 0.5 && Math.abs(home.zoom - KALTIM_VIEW.zoom) < 0.05,
+    `the province tool flies back to the overview (bearing ${home.bearing.toFixed(1)}°, zoom ${home.zoom.toFixed(2)})`,
+  );
+  const attribution = await page.evaluate(() => {
+    const visible = (sel: string) => {
+      const el = document.querySelector<HTMLElement>(sel);
+      const r = el?.getBoundingClientRect();
+      return Boolean(el && r && r.width > 0 && r.bottom <= window.innerHeight && getComputedStyle(el).visibility !== "hidden");
+    };
+    return { logo: visible(".mapboxgl-ctrl-logo"), text: document.querySelector(".mapboxgl-ctrl-attrib")?.textContent ?? "", shown: visible(".mapboxgl-ctrl-attrib") };
+  });
+  check(attribution.logo && attribution.shown && attribution.text.includes("Mapbox") && attribution.text.includes("OpenStreetMap"), "the Mapbox wordmark and the full attribution are on screen");
 
   // Rain: switched on at the province view it stays invisible (density 0) and the legend explains why.
   await flipSwitch(page, "Hujan");
