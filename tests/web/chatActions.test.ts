@@ -25,6 +25,7 @@ function fakeMap() {
     startMoving: () => moveStart.splice(0).forEach((f) => f()),
     getPitch: () => 55,
     getBearing: () => -14,
+    getZoom: () => 6.55,
     cameraForBounds: () => undefined,
   };
   return { map: map as unknown as MapboxMap, flights, startMoving: map.startMoving };
@@ -69,6 +70,7 @@ beforeEach(() => {
       marked = { places, pick };
     },
     reducedMotion: () => false,
+    viewPadding: () => undefined,
   };
 });
 
@@ -121,6 +123,12 @@ describe("runAction", () => {
     expect(flights[0]).toMatchObject({ center: [117.1, -0.5], zoom: 17, pitch: 60, duration: 2000 });
   });
 
+  test("camera moves keep the point clear of the open panels", async () => {
+    const padding = { top: 24, bottom: 24, left: 384, right: 400 };
+    await runAction({ name: "fly_to", input: { lng: 117.1, lat: -0.5, zoom: 16 } }, { ...target, viewPadding: () => padding });
+    expect((flights[0] as Flight & { padding?: unknown }).padding).toEqual(padding);
+  });
+
   test("fly_to jumps when the user prefers reduced motion", async () => {
     await runAction({ name: "fly_to", input: { lng: 117.1, lat: -0.5, zoom: 10 } }, { ...target, reducedMotion: () => true });
     expect(flights[0]?.duration).toBe(0);
@@ -129,6 +137,18 @@ describe("runAction", () => {
   test("select_building_at selects the building through the store (it flies and opens the panel)", async () => {
     expect(await runAction({ name: "select_building_at", input: { lng: 117.151, lat: -0.501 } }, target)).toBe(true);
     expect(picked).toEqual([[117.151, -0.501]]);
+  });
+
+  test("when no building could be picked far from the point, it still flies there", async () => {
+    useAppStore.setState({ selectBuildingAt: async () => useAppStore.setState({ buildingStatus: "empty" }) });
+    expect(await runAction({ name: "select_building_at", input: { lng: 117.151, lat: -0.501 } }, target)).toBe(true);
+    expect(flights[0]).toMatchObject({ center: [117.151, -0.501], zoom: 17.5, pitch: 60 });
+  });
+
+  test("a building that was found leaves the camera to lane buildings", async () => {
+    useAppStore.setState({ selectBuildingAt: async () => useAppStore.setState({ buildingStatus: "loading" }) });
+    await runAction({ name: "select_building_at", input: { lng: 117.151, lat: -0.501 } }, target);
+    expect(flights).toHaveLength(0);
   });
 
   test("a failing building lookup does not throw into the chat", async () => {

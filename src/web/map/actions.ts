@@ -3,6 +3,7 @@ import { api } from "../api.ts";
 import { type MarkedPlace, showPlaces } from "../chat/placesLayer.ts";
 import type { ChatAction } from "../chat/sse.ts";
 import { type AppState, type LayerKey, type Metric, type PanelTab, type RainMode, useAppStore } from "../store.ts";
+import { BUILDING_ZOOM, buildingViewPadding, type Padding } from "./buildings.ts";
 import { FLY_MS, flyToProvince, flyToRegion } from "./camera.ts";
 
 // Turns the map actions of the AI chat (server `action` events) into store and camera calls.
@@ -15,6 +16,23 @@ export interface ActionTarget {
   /** Marks found places on the map; a click on one selects the building there. */
   showPlaces: (map: MapboxMap, places: MarkedPlace[], onPick: (lngLat: [number, number]) => void) => void;
   reducedMotion: () => boolean;
+  /** Screen padding that keeps a point clear of the open panels, the chat included; none in tests. */
+  viewPadding: () => Padding | undefined;
+}
+
+/** Gap between a panel and the point the camera frames next to it, in px. */
+const PANEL_GAP = 24;
+
+/** Lane buildings' padding (sheet, building panel), widened so the open chat panel never covers the point. */
+function panelsPadding(): Padding | undefined {
+  if (typeof document === "undefined") return undefined;
+  const pad = buildingViewPadding();
+  const w = window.innerWidth;
+  const chat = document.querySelector(".chat")?.getBoundingClientRect();
+  if (chat && chat.width > 0 && chat.width < w / 2) pad.right = Math.max(pad.right, w - chat.left + PANEL_GAP);
+  // Never pad the view away entirely (narrow windows).
+  if (pad.left + pad.right > w * 0.8) [pad.left, pad.right] = [PANEL_GAP, PANEL_GAP];
+  return pad;
 }
 
 export const appTarget: ActionTarget = {
@@ -26,6 +44,7 @@ export const appTarget: ActionTarget = {
       .catch(() => null),
   showPlaces,
   reducedMotion: () => typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches,
+  viewPadding: panelsPadding,
 };
 
 const LAYERS: readonly LayerKey[] = ["regions", "plants", "buildings"];
@@ -33,6 +52,8 @@ const METRICS: readonly Metric[] = ["co2", "kwh"];
 const RAIN: readonly RainMode[] = ["auto", "on", "off"];
 const TABS: readonly PanelTab[] = ["energi", "emisi", "surya", "cuaca"];
 const MAX_PLACES = 10;
+/** Closer than this the view already shows streets and buildings. */
+const CITY_ZOOM = 14;
 
 const isNum = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
 const lngLatOf = (i: Record<string, unknown>): [number, number] | null =>
@@ -41,11 +62,13 @@ const oneOf = <T extends string>(v: unknown, values: readonly T[]): T | null =>
   typeof v === "string" && (values as readonly string[]).includes(v) ? (v as T) : null;
 
 function flyTo(map: MapboxMap, target: ActionTarget, center: [number, number], zoom: number): void {
+  const padding = target.viewPadding();
   map.flyTo({
     center,
     zoom,
     // Tilted close in, so buildings read as 3D; the province view keeps its own tilt.
     pitch: zoom >= 14 ? 60 : zoom >= 9 ? 50 : map.getPitch(),
+    ...(padding ? { padding } : {}),
     duration: target.reducedMotion() ? 0 : FLY_MS,
     curve: 1.2,
     essential: true,
@@ -76,11 +99,17 @@ function afterRegionFlightStarts(map: MapboxMap): Promise<void> {
   });
 }
 
-/** Selects the building at a point as a click would: the camera flies there and the building panel opens. */
+/**
+ * Selects the building at a point as a click would: the camera flies there and the building panel opens.
+ * When no building could be picked without the camera ever going there (the map's building layer is not
+ * ready), it still flies there, so the answer's place is on screen.
+ */
 async function selectBuilding(target: ActionTarget, lngLat: [number, number]): Promise<void> {
   const map = target.getState().map;
   if (map) await afterRegionFlightStarts(map);
   await target.getState().selectBuildingAt(lngLat);
+  const after = target.getState();
+  if (after.map && after.buildingStatus === "empty" && after.map.getZoom() < CITY_ZOOM) flyTo(after.map, target, lngLat, BUILDING_ZOOM);
 }
 
 function placesOf(v: unknown): MarkedPlace[] {
