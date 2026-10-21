@@ -74,6 +74,20 @@ export interface RegionHandlers {
   onHover?: (id: string | null) => void;
   /** The pointer moved while over a region: position the tooltip without re-rendering. */
   onPointer?: (point: { x: number; y: number }) => void;
+  /**
+   * The top of some columns moved (a rise, hover lift, selection, metric swap or the Wilayah switch). Called
+   * with the columns that changed, every animation frame while they move, so the plant pins can stand on them.
+   */
+  onColumnTops?: (tops: ColumnTop[]) => void;
+}
+
+/** Where a column's top is now: its province-view height and the flattening curve it follows by zoom. */
+export interface ColumnTop {
+  id: string;
+  /** Height at the province view in metres (feature-state `h`); 0 while the columns are hidden. */
+  h: number;
+  /** Drawn in the selected column's layers, which flatten sooner (FLATTEN_SELECTED). */
+  selected: boolean;
 }
 
 const dimColor = (tone: Tone) => token(tone === "light" ? "--color-dim-light" : "--color-dim-dark");
@@ -123,6 +137,22 @@ function applySelectionFilters(map: MapboxMap, selected: string | null) {
   const own: FilterSpecification = ["==", ["get", "id"], selected ?? ""];
   for (const id of [REGION_LAYER, RIM_LAYER]) if (map.getLayer(id)) map.setFilter(id, others);
   for (const id of [SELECTED_LAYER, SELECTED_RIM_LAYER]) if (map.getLayer(id)) map.setFilter(id, own);
+  if (state && state.drawnSelected !== selected) {
+    const changed = [state.drawnSelected, selected].filter((id): id is string => id !== null);
+    state.drawnSelected = selected;
+    emitTops(changed);
+  }
+}
+
+/** Tells `onColumnTops` where the tops of these columns (all, by default) are now. */
+function emitTops(ids?: Iterable<string>) {
+  const s = state;
+  if (!s?.handlers.onColumnTops) return;
+  const list = ids ? [...ids] : s.regions.map((r) => r.id);
+  if (!list.length) return;
+  s.handlers.onColumnTops(
+    list.map((id) => ({ id, h: s.visible ? (s.values.get(valueKey("h", id)) ?? 0) : 0, selected: s.drawnSelected === id })),
+  );
 }
 
 // --- Animation ----------------------------------------------------------------------------------
@@ -164,6 +194,11 @@ interface LayerState {
   fc: RegionCollection;
   onMouseMove: (e: MapMouseEvent) => void;
   onZoom: () => void;
+  handlers: RegionHandlers;
+  /** The region drawn in the selected column's layers (it keeps them for a while after a deselect). */
+  drawnSelected: string | null;
+  /** The Wilayah switch. */
+  visible: boolean;
 }
 let state: LayerState | null = null;
 
@@ -185,6 +220,7 @@ function tick(now: number) {
     if (p >= 1) s.tweens.delete(key);
   }
   for (const [id, values] of writes) s.map.setFeatureState({ source: REGION_SOURCE, id }, values);
+  emitTops([...writes].flatMap(([id, values]) => (values.h === undefined ? [] : [id])));
   s.frame = s.tweens.size ? requestAnimationFrame(tick) : 0;
   // Everything stands still: the labels, which float at the resting heights, can show again.
   if (!s.frame && s.labelsPending && !s.swapPending) {
@@ -364,8 +400,12 @@ export function addRegions(
     fc,
     onMouseMove,
     onZoom,
+    handlers,
+    drawnSelected: null,
+    visible: true,
   };
   writeIntensity();
+  emitTops();
   addRegionLabels(map, fc, metric);
   map.on("mousemove", onMouseMove);
   map.on("zoom", onZoom);
@@ -497,6 +537,10 @@ export function setRegionTone(map: MapboxMap, tone: Tone): void {
 }
 
 export function setRegionsVisible(map: MapboxMap, visible: boolean): void {
+  if (state && state.map === map && state.visible !== visible) {
+    state.visible = visible;
+    emitTops();
+  }
   for (const layer of [...COLUMN_LAYERS, ...RIM_LAYERS, OUTLINE_LAYER]) {
     if (map.getLayer(layer)) map.setLayoutProperty(layer, "visibility", visible ? "visible" : "none");
   }

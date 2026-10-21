@@ -4,6 +4,7 @@ import type { RegionCollection } from "../../src/web/api.ts";
 import {
   addRegions,
   REGION_LAYER,
+  type ColumnTop,
   type RegionHandlers,
   removeRegions,
   riseRegions,
@@ -345,6 +346,59 @@ describe("region labels", () => {
     expect(visibility.get(REGION_LABEL_LAYER)).toBe("none");
     setRegionsVisible(map, true);
     expect(visibility.get(REGION_LABEL_LAYER)).toBe("visible");
+    removeRegions(map);
+  });
+});
+
+describe("column tops for the plant pins", () => {
+  function withTops() {
+    const f = fakeMap();
+    const reports: ColumnTop[][] = [];
+    addRegions(f.map, fc, "co2", { onColumnTops: (tops) => reports.push(tops) });
+    /** The last reported top of a column. */
+    const top = (id: string) => reports.flat().filter((t) => t.id === id).at(-1);
+    return { ...f, reports, top };
+  }
+
+  test("every column starts on the ground, then reports each frame of its rise until it stands", () => {
+    const { map, reports, top, state } = withTops();
+    expect(reports[0]?.map((t) => t.id).sort()).toEqual(["paser", "samarinda"]);
+    expect(top("samarinda")).toEqual({ id: "samarinda", h: 0, selected: false });
+    riseRegions(map, fc);
+    step(400);
+    const midway = top("samarinda")!.h;
+    expect(midway).toBeGreaterThan(0);
+    flush();
+    expect(top("samarinda")!.h).toBeGreaterThan(midway);
+    expect(top("samarinda")!.h).toBe(Number(state("samarinda").h));
+    removeRegions(map);
+  });
+
+  test("a hover lift and a selection move the tops; the selected column reports its own curve", () => {
+    const { map, top, state } = withTops();
+    riseRegions(map, fc);
+    flush();
+    setRegionHover(map, "paser");
+    flush();
+    expect(top("paser")!.h).toBe(Number(state("paser").h));
+    setRegionHover(map, null);
+    setSelectedRegion(map, "paser");
+    expect(top("paser")!.selected).toBe(true);
+    flush();
+    expect(top("samarinda")).toEqual({ id: "samarinda", h: 0, selected: false });
+    expect(top("paser")!.h).toBe(Number(state("paser").h));
+    removeRegions(map);
+  });
+
+  test("with the columns switched off every top is on the ground, and back where it stands when on", () => {
+    const { map, top, state } = withTops();
+    riseRegions(map, fc);
+    flush();
+    setRegionsVisible(map, false);
+    expect(top("samarinda")!.h).toBe(0);
+    expect(top("paser")!.h).toBe(0);
+    setRegionsVisible(map, true);
+    expect(top("samarinda")!.h).toBe(Number(state("samarinda").h));
     removeRegions(map);
   });
 });

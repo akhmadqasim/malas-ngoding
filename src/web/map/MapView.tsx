@@ -16,7 +16,7 @@ import {
   resolvePreset,
   setRainEffect,
 } from "./effects.ts";
-import { addPlants, removePlants, setPlantsLanded, setPlantsVisible } from "./plantsLayer.ts";
+import { addPlants, removePlants, setPlantLifts, setPlantsLanded, setPlantsVisible } from "./plantsLayer.ts";
 import { basemapLabelConfig, REGION_LABEL_LAYER } from "./regionLabels.ts";
 import {
   addRegions,
@@ -259,11 +259,13 @@ export function MapView({ token, regions, plants, onIntroStart, onIntroEnd, onRe
           onSelect: (id) => useAppStore.getState().selectRegion(id),
           onHover: (id) => handlers.current.onRegionHover(id),
           onPointer: (point) => handlers.current.onRegionPointer(point),
+          // The plant pins stand on the column tops and move with them.
+          onColumnTops: (tops) => setPlantLifts(map, tops),
         },
         presetTone(preset),
       );
-      // Plant markers go under the region names: a name may sit over a marker, and a marker never costs a name.
-      addPlants(map, plants, now.layers.plants, { below: REGION_LABEL_LAYER });
+      // Plant pins go under the region names: a name may sit over a pin, and a pin never costs a name.
+      addPlants(map, plants, now.layers.plants, { below: REGION_LABEL_LAYER, regions });
       setRegionsVisible(map, now.layers.regions);
       setRainEffect(map, rainVisible(now), presetTone(preset), baseFog ?? null);
       updateOvercast();

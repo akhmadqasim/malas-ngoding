@@ -43,7 +43,8 @@ async function preparePage(page: Page, metric: "co2" | "kwh") {
     (document.querySelector(".ui-layer") as HTMLElement).style.display = "none";
     // Only the columns and the ground are measured: outlines, top rims, plant markers and the region names
     // drawn on top of the columns go (the name covers most of small Balikpapan and pulled its sample to the halo).
-    for (const id of ["regions-outline", "regions-rim", "plants", "plant-clusters", "region-labels"]) map.setLayoutProperty(id, "visibility", "none");
+    const pins = map.getStyle().layers.flatMap((l) => (l.id.startsWith("plants-") ? [l.id] : []));
+    for (const id of ["regions-outline", "regions-rim", "region-labels", ...pins]) map.setLayoutProperty(id, "visibility", "none");
     for (const key of ["showPlaceLabels", "showRoadLabels", "showAdminBoundaries"]) map.setConfigProperty("basemap", key, false);
     map.jumpTo({ center: [116.6, 0.4], zoom: 6.15, pitch: 0, bearing: 0, padding: { top: 0, bottom: 0, left: 0, right: 0 } });
     type Shape = { type: "Polygon"; coordinates: number[][][] } | { type: "MultiPolygon"; coordinates: number[][][][] };

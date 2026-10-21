@@ -25,7 +25,7 @@ export function intensities(regions: RegionSummary[], metric: Metric): Map<strin
 export const columnHeight = (t: number) => MIN_HEIGHT_M + (MAX_HEIGHT_M - MIN_HEIGHT_M) * t;
 
 /** Zoom stops of the flattening and the share of the height left at each. */
-const FLATTEN: [number, number][] = [
+export const FLATTEN: [number, number][] = [
   [6.6, 1],
   [8, 0.3],
   [9.5, 0.08],
@@ -33,8 +33,14 @@ const FLATTEN: [number, number][] = [
 ];
 
 /** Flattens a height with zoom: full at the province view, gone at city zoom, so buildings take over. */
-export function columnZoomScale(height: ExpressionSpecification): ExpressionSpecification {
-  return ["interpolate", ["linear"], ["zoom"], 6.6, height, 8, ["*", height, 0.3], 9.5, ["*", height, 0.08], HIDE_ZOOM, 0];
+export function columnZoomScale(height: ExpressionSpecification | number): ExpressionSpecification {
+  return flattened(height, FLATTEN);
+}
+
+/** A height times the share left at each stop of a flattening curve, interpolated by zoom. */
+function flattened(height: ExpressionSpecification | number, flatten: [number, number][]): ExpressionSpecification {
+  const stops = flatten.flatMap(([z, k]) => [z, k === 1 ? height : k === 0 ? 0 : ["*", height, k]]);
+  return ["interpolate", ["linear"], ["zoom"], ...stops] as ExpressionSpecification;
 }
 
 /**
@@ -49,9 +55,8 @@ export const FLATTEN_SELECTED: [number, number][] = [
 ];
 
 /** Flattens a height with the selected column's curve (FLATTEN_SELECTED). */
-export function selectedZoomScale(height: ExpressionSpecification): ExpressionSpecification {
-  const stops = FLATTEN_SELECTED.flatMap(([z, k]) => [z, k === 1 ? height : k === 0 ? 0 : ["*", height, k]]);
-  return ["interpolate", ["linear"], ["zoom"], ...stops] as ExpressionSpecification;
+export function selectedZoomScale(height: ExpressionSpecification | number): ExpressionSpecification {
+  return flattened(height, FLATTEN_SELECTED);
 }
 
 /** Metres per screen pixel at a zoom (512 px tiles, at the equator: Kaltim lies on it). */
@@ -64,4 +69,18 @@ export const metresPerPixel = (zoom: number) => 78_271.5 / 2 ** zoom;
 export function columnZoomScaleShift(height: ExpressionSpecification, px: number, flatten = FLATTEN): ExpressionSpecification {
   const stops = flatten.flatMap(([z, k]) => [z, ["+", k === 1 ? height : ["*", height, k], px * metresPerPixel(z)]]);
   return ["interpolate", ["linear"], ["zoom"], ...stops] as ExpressionSpecification;
+}
+
+/** The share of a column's resting height left at `zoom`: the flattening curve, as the layers interpolate it. */
+export function flattenShare(zoom: number, flatten = FLATTEN): number {
+  if (zoom <= flatten[0]![0]) return flatten[0]![1];
+  for (let i = 1; i < flatten.length; i++) {
+    const [z1, k1] = flatten[i]!;
+    const [z0, k0] = flatten[i - 1]!;
+    if (zoom <= z1) {
+      const t = (zoom - z0) / (z1 - z0);
+      return k0 * (1 - t) + k1 * t;
+    }
+  }
+  return flatten.at(-1)![1];
 }

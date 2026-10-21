@@ -70,3 +70,24 @@ export function calmShapes(fc: RegionCollection): RegionCollection {
     }),
   };
 }
+
+/** Whether a point lies inside a polygon's rings (even-odd, so holes count). */
+function insideRings(lng: number, lat: number, rings: Ring[]): boolean {
+  let hit = false;
+  for (const ring of rings)
+    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+      const [xi, yi] = [ring[i]![0]!, ring[i]![1]!];
+      const [xj, yj] = [ring[j]![0]!, ring[j]![1]!];
+      if (yi > lat !== yj > lat && lng < ((xj - xi) * (lat - yi)) / (yj - yi) + xi) hit = !hit;
+    }
+  return hit;
+}
+
+/** The id of the region whose shape holds the point, or null (at sea, or outside the province). */
+export function regionAt(fc: RegionCollection, lng: number, lat: number): string | null {
+  for (const f of fc.features) {
+    const polys = f.geometry.type === "Polygon" ? [f.geometry.coordinates] : f.geometry.coordinates;
+    if (polys.some((p) => insideRings(lng, lat, p))) return f.properties.id;
+  }
+  return null;
+}

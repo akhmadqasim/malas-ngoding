@@ -25,6 +25,7 @@ import { KALTIM_VIEW, SWAY_DEG } from "../src/web/map/camera.ts";
 import { pvFromForecast, summariseDays } from "../src/shared/pvForecast.ts";
 import { basemapLight, lightPresetFor } from "../src/web/map/effects.ts";
 import { GLOBE_LABEL_ZOOM, LANDED_LABEL_ZOOM } from "../src/web/map/regionLabels.ts";
+import { FLATTEN } from "../src/web/map/columns.ts";
 
 const BASE_URL = Bun.env.BASE_URL ?? "http://localhost:3000";
 const SCREENS = "docs/technical/screens";
@@ -425,6 +426,104 @@ async function skipIntroIsClean(browser: Awaited<ReturnType<typeof launchBrowser
   await page.close();
 }
 
+/** A plant pin fully shown at this zoom, where it is drawn and where its column's top is on screen. */
+interface PinOnScreen {
+  name: string;
+  kind: string;
+  count: number;
+  column: string;
+  /** The plant's ground point on screen. */
+  x: number;
+  y: number;
+  /** Screen y of its column's top above the plant (the ground point on the ground). */
+  topY: number;
+  /** Screen y range where the pointer finds this pin, scanning up from the ground point; null if nowhere. */
+  hit: [number, number] | null;
+  /** The column height the pin layer stands on (its symbol-z-offset at the province view) and the column's own. */
+  liftH: number;
+  columnH: number;
+}
+
+/**
+ * Every plant pin fully shown at this zoom (plantGroups.ts fades them in and out), with where the pointer
+ * finds it. The pins are lifted onto the column tops, so they are found by scanning up from the ground point.
+ */
+function pinsOnScreen(page: Page): Promise<PinOnScreen[]> {
+  return page.evaluate(
+    ({ flatten }) => {
+      const map = (window as MapWindow).__malasMap!;
+      const layers = map.getStyle().layers.flatMap((l) => (l.id.startsWith("plants-") ? [l.id] : []));
+      if (!layers.length) return [];
+      const z = map.getZoom();
+      type Pin = { layer: { id: string }; geometry: { coordinates: [number, number] }; properties: Record<string, unknown> };
+      const full = (f: Pin) => Number(f.properties.appear) + 0.5 <= z && z <= Number(f.properties.split) - 0.5;
+      // The flattening of a column at this zoom (columns.ts FLATTEN; no region is selected here).
+      let share = flatten.at(-1)![1];
+      for (let i = 0; i < flatten.length; i++) {
+        const [z1, k1] = flatten[i]!;
+        if (z > z1) continue;
+        if (i === 0) share = k1;
+        else {
+          const [z0, k0] = flatten[i - 1]!;
+          share = k0 + ((k1 - k0) * (z - z0)) / (z1 - z0);
+        }
+        break;
+      }
+      const transform = (map as unknown as { transform: { locationPoint3D: (l: unknown, altitude: number) => { x: number; y: number } } }).transform;
+      const seen = new Set<unknown>();
+      const pins = (map.queryRenderedFeatures({ layers }) as unknown as Pin[]).filter((f) => full(f) && !seen.has(f.properties.node) && seen.add(f.properties.node));
+      return pins.flatMap((f) => {
+        const ground = map.project(f.geometry.coordinates);
+        if (ground.x < 0 || ground.y < 0 || ground.x > innerWidth || ground.y > innerHeight) return [];
+        const column = String(f.properties.column);
+        const columnH = column === "ground" ? 0 : Number(map.getFeatureState({ source: "regions", id: column })?.h ?? 0);
+        const lift = map.getPaintProperty(f.layer.id, "symbol-z-offset") as unknown;
+        // ["interpolate", ["linear"], ["zoom"], 6.6, h, ...] or 0.
+        const liftH = Array.isArray(lift) ? Number(lift[4]) : Number(lift);
+        const top = transform.locationPoint3D(map.unproject(ground), columnH * share);
+        let hit: [number, number] | null = null;
+        for (let dy = 0; dy <= 260; dy += 1) {
+          const y = ground.y - dy;
+          const under = map.queryRenderedFeatures([ground.x, y], { layers }) as unknown as Pin[];
+          if (!under.some((u) => u.properties.node === f.properties.node)) continue;
+          hit = hit ? [hit[0], y] : [y, y];
+        }
+        return [
+          {
+            name: String(f.properties.name ?? ""),
+            kind: String(f.properties.kind),
+            count: Number(f.properties.count),
+            column,
+            x: ground.x,
+            y: ground.y,
+            topY: top.y,
+            hit,
+            liftH,
+            columnH,
+          },
+        ];
+      });
+    },
+    { flatten: FLATTEN },
+  );
+}
+
+/**
+ * The pins stand on their columns: each pin layer is lifted to its column's height, and on screen the point
+ * of every pin sits on the top of its column (within 4 px), so no wall or rim runs through its head.
+ */
+async function pinsStandOnColumns(page: Page, label: string) {
+  const pins = await pinsOnScreen(page);
+  const onColumns = pins.filter((p) => p.column !== "ground" && p.columnH > 0);
+  check(onColumns.length >= 3, `${label}: plant pins stand on the columns (${onColumns.length} of ${pins.length} on screen)`);
+  const offLift = onColumns.filter((p) => Math.abs(p.liftH - p.columnH) > 2).map((p) => `${p.name || `group of ${p.count}`} ${p.liftH.toFixed(0)}/${p.columnH.toFixed(0)} m`);
+  check(offLift.length === 0, `${label}: every pin is lifted to its own column's height (${offLift.slice(0, 3).join("; ") || "all"})`);
+  const off = onColumns
+    .filter((p) => !p.hit || Math.abs(p.hit[0] - p.topY) > 4)
+    .map((p) => `${p.name || `group of ${p.count}`}: point at ${p.hit ? p.hit[0].toFixed(0) : "nowhere"}, top at ${p.topY.toFixed(0)}`);
+  check(off.length === 0, `${label}: the point of every pin is on its column's top (${off.slice(0, 3).join("; ") || "all"})`);
+}
+
 const failures: string[] = [];
 const consoleProblems: string[] = [];
 /** The last check that ran, so a console problem says roughly where it happened. */
@@ -655,8 +754,9 @@ try {
     const map = (window as unknown as { __malasMap?: import("mapbox-gl").Map }).__malasMap;
     const feats = map?.queryRenderedFeatures({ layers: ["regions-extrusion"] }) ?? [];
     const ids = new Set(feats.map((f) => (f as unknown as { properties?: { id?: string } }).properties?.id));
-    const plants = map?.queryRenderedFeatures({ layers: ["plants"] }) ?? [];
-    return { regions: ids.size, plants: plants.length };
+    const pinLayers = map?.getStyle().layers.flatMap((l) => (l.id.startsWith("plants-") ? [l.id] : [])) ?? [];
+    const plants = (map?.queryRenderedFeatures({ layers: pinLayers }) ?? []).filter((f) => (f as unknown as { properties?: { kind?: string } }).properties?.kind === "plant");
+    return { regions: ids.size, plants: pinLayers.length ? plants.length : 0 };
   });
   check(columns.regions === 10, `10 regions rendered (got ${columns.regions})`);
   check(columns.plants > 0, `plants rendered (got ${columns.plants})`);
@@ -752,6 +852,25 @@ try {
   await page.evaluate((view) => (window as MapWindow).__malasMap!.jumpTo(view), KALTIM_VIEW);
   await page.waitForTimeout(1200);
 
+  // The plant pins stand on the column tops: at the province view, at the pitch-60 hero view at both ends
+  // of the sway, and while a column is lifted by a hover in the list (the pins follow every frame).
+  await pinsStandOnColumns(page, "province view");
+  for (const bearing of [KALTIM_VIEW.bearing - SWAY_DEG, KALTIM_VIEW.bearing + SWAY_DEG]) {
+    await page.keyboard.press("Shift");
+    await page.evaluate((view) => (window as MapWindow).__malasMap!.jumpTo(view), { ...KALTIM_VIEW, pitch: 60, bearing });
+    await waitForMapIdle(page);
+    await page.waitForTimeout(700);
+    await pinsStandOnColumns(page, `pitch 60, bearing ${bearing}°`);
+  }
+  await page.keyboard.press("Shift");
+  await page.evaluate((view) => (window as MapWindow).__malasMap!.jumpTo(view), KALTIM_VIEW);
+  await page.waitForTimeout(700);
+  await page.locator(".ranking__row", { has: page.locator(".ranking__name", { hasText: /^Samarinda$/ }) }).hover();
+  await page.waitForTimeout(700);
+  await pinsStandOnColumns(page, "Samarinda lifted by a hover in the list");
+  await page.mouse.move(sheet.left + 30, sheet.top + 20);
+  await page.waitForTimeout(700);
+
   // Hover and click Paser through the map, not the panel. It is the southernmost region, so no other
   // column stands in front of it, and it has no power plant marker on top.
   const point = await page.evaluate(() => {
@@ -800,39 +919,55 @@ try {
   await shot(page, "6-back-list-keyboard");
   await recommendationsAndMethodology(page);
 
-  // Plants: a dot's tooltip names the plant, its fuel and its capacity; plants that would overlap on screen
-  // merge into one marker whose tooltip lists them all.
+  // Plants: a pin's tooltip names the plant, its fuel and its capacity; plants that would overlap on screen
+  // merge into one group pin whose tooltip lists them all. The pointer goes to the pin's head, up on its
+  // column, and the tooltip opens beside the pin, never over its head.
   await page.keyboard.press("Shift");
   await page.evaluate((view) => (window as MapWindow).__malasMap!.jumpTo(view), KALTIM_VIEW);
   await waitForMapIdle(page);
   await page.waitForTimeout(800);
-  const markers = await page.evaluate(() => {
-    const map = (window as MapWindow).__malasMap!;
-    type Marker = { geometry: { coordinates: [number, number] }; properties: Record<string, unknown> };
-    const at = (f: Marker) => map.project(f.geometry.coordinates);
-    // Markers fade in and out by zoom (plantGroups.ts); only one fully shown at this zoom counts.
-    const z = map.getZoom();
-    const full = (f: Marker) => Number(f.properties.appear) + 0.5 <= z && z <= Number(f.properties.split) - 0.5;
-    const pick = (layer: string) => (map.queryRenderedFeatures({ layers: [layer] }) as unknown as Marker[]).find(full);
-    const one = pick("plants");
-    const many = pick("plant-clusters");
-    return {
-      one: one && { ...at(one), name: String(one.properties.name) },
-      many: many && { ...at(many), count: Number(many.properties.count) },
-    };
-  });
-  if (markers.one) {
-    await page.mouse.move(markers.one.x, markers.one.y, { steps: 3 });
-    await page.waitForTimeout(500);
-    const text = (await page.locator(".map-popup").textContent()) ?? "";
-    check(text.includes(markers.one.name) && /\d MW/.test(text) && /Batu bara|Gas|Surya|Diesel|Air|Biomassa|Lainnya/.test(text), `hovering a plant shows its name, fuel and MW (${text.replace(/\s+/g, " ").trim().slice(0, 80)})`);
-  } else check(false, "a single plant marker is on screen at the province view");
-  if (markers.many) {
-    await page.mouse.move(markers.many.x, markers.many.y, { steps: 3 });
+  const pins = (await pinsOnScreen(page)).filter((p) => p.hit);
+  /** Hovers a pin's head; returns the tooltip text and whether the tooltip leaves the head in view. */
+  const hoverHead = async (pin: PinOnScreen) => {
+    const head = { x: pin.x, y: pin.hit![1] + 3 };
+    await page.mouse.move(head.x, head.y, { steps: 3 });
     await page.waitForTimeout(600);
+    const text = (await page.locator(".map-popup").textContent().catch(() => null)) ?? "";
+    const box = await page.locator(".map-popup").boundingBox().catch(() => null);
+    const clear = !!box && !(head.x > box.x && head.x < box.x + box.width && head.y > box.y && head.y < box.y + box.height);
+    return { text, clear };
+  };
+  const singles = pins.filter((p) => p.kind === "plant");
+  let single: { pin: PinOnScreen; text: string; clear: boolean } | null = null;
+  // A pin's head may sit behind a nearer pin; the first few are tried until one is the topmost.
+  for (const pin of singles.slice(0, 4)) {
+    const seen = await hoverHead(pin);
+    single = { pin, ...seen };
+    if (seen.text.includes(pin.name)) break;
+  }
+  if (single) {
+    const { pin, text, clear } = single;
+    check(
+      text.includes(pin.name) && /\d MW/.test(text) && /Batu bara|Gas|Surya|Diesel|Air|Biomassa|Lainnya/.test(text),
+      `hovering a plant pin's head shows its name, fuel and MW (${text.replace(/\s+/g, " ").trim().slice(0, 80)})`,
+    );
+    check(clear, `the plant tooltip opens beside the pin, not over its head (${pin.name})`);
+  } else check(false, "a single plant pin is on screen at the province view");
+  const many = pins.find((p) => p.kind === "group");
+  if (many) {
+    const { clear } = await hoverHead(many);
     const listed = await page.locator(".map-popup .plant-list li").count();
-    check(listed === markers.many.count && markers.many.count > 1, `a cluster's tooltip lists all ${markers.many.count} of its plants (listed ${listed})`);
-  } else check(false, "overlapping plants merge into a cluster marker at the province view");
+    check(listed === many.count && many.count > 1, `a group pin's tooltip lists all ${many.count} of its plants (listed ${listed})`);
+    check(clear, "the group tooltip opens beside the pin, not over its head");
+    // A click on the group zooms in until its plants have parted.
+    await page.mouse.click(many.x, many.hit![1] + 3);
+    await page.waitForTimeout(1400);
+    const zoomed = await page.evaluate(() => (window as MapWindow).__malasMap!.getZoom());
+    check(zoomed > KALTIM_VIEW.zoom + 0.5, `clicking a group pin zooms in until its plants part (zoom ${zoomed.toFixed(2)})`);
+    await page.keyboard.press("Shift");
+    await page.evaluate((view) => (window as MapWindow).__malasMap!.jumpTo(view), KALTIM_VIEW);
+    await waitForMapIdle(page);
+  } else check(false, "overlapping plants merge into a group pin at the province view");
   await page.mouse.move(sheet.left + 30, sheet.top + 20);
 
   // Map tools: our own group, each tool with a tooltip on keyboard focus; north, then back to the province.

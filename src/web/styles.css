@@ -691,6 +691,11 @@
   background: var(--fuel);
   box-shadow: var(--shadow-dot);
 }
+/* In the legend key the dot is the map's pin: a round head with its point down. */
+.fuel-key .fuel-dot {
+  border-radius: var(--radius-full) var(--radius-full) 0 var(--radius-full);
+  transform: rotate(45deg);
+}
 [data-fuel="batubara"] {
   --fuel: var(--color-fuel-batubara);
 }
