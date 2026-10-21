@@ -14,6 +14,8 @@ export const KALTIM_VIEW = {
 export const GLOBE_VIEW = { center: [101, -2] as [number, number], zoom: 2, pitch: 0, bearing: 0 };
 
 const INTRO_MS = 6000;
+/** Camera moves after the intro (docs/research/design/00-direction.md section 6). */
+export const FLY_MS = 2000;
 
 const prefersReducedMotion = () =>
   typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -87,8 +89,8 @@ export function flyToRegion(map: MapboxMap, centroid: [number, number], opts: Fl
     pitch,
     bearing: opts.bearing ?? map.getBearing(),
     padding,
-    duration: prefersReducedMotion() ? 0 : 2400,
-    curve: 1.3,
+    duration: prefersReducedMotion() ? 0 : FLY_MS,
+    curve: 1.2,
     essential: true,
   });
 }

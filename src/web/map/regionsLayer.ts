@@ -1,38 +1,34 @@
 import type { ExpressionSpecification, GeoJSONSourceSpecification, Map as MapboxMap, MapMouseEvent } from "mapbox-gl";
 import type { RegionCollection } from "../api.ts";
 import type { Metric } from "../store.ts";
+import { rampTokens, token } from "../theme.ts";
 import type { RegionSummary } from "../../shared/types.ts";
 
 export const REGION_SOURCE = "regions";
 export const REGION_LAYER = "regions-extrusion";
 const OUTLINE_LAYER = "regions-outline";
+const INTERACTIONS = ["regions-enter", "regions-leave", "regions-click"] as const;
 
 /** Tallest and shortest column at the province view, in metres. Scaled down again as the user zooms in. */
 const MAX_HEIGHT_M = 75_000;
 const MIN_HEIGHT_M = 4_000;
 /** Above this zoom the city and its buildings matter more than the columns, so they flatten out and hide. */
 const HIDE_ZOOM = 12;
+/** Map motion in ms (docs/research/design/00-direction.md section 6). */
+const MS = { rise: 1600, riseStagger: 110, hover: 300, select: 900, sink: 380, swapRise: 900, swapStagger: 40 } as const;
 
-/** Low to high intensity. CO2 burns from dusky violet to coal-ember; electricity runs from deep blue to bright current. */
-export const RAMPS: Record<Metric, readonly [string, string, string, string]> = {
-  co2: ["#4a3f7a", "#b8487a", "#ff6a3d", "#ffc65c"],
-  kwh: ["#1f4a7a", "#2a8fc4", "#3fd6e0", "#c8fbff"],
-};
-/** Unselected regions while one is selected: a cool mid grey that recedes on both day and night maps. */
-const DIM_COLOR = "#56637d";
+/** Light ground (the day preset) or dark ground (dawn, dusk, night). Outlines and dimmed columns follow it. */
+export type Tone = "dark" | "light";
 
-export interface RegionHover {
-  id: string;
-  name: string;
-  value: number;
-  point: { x: number; y: number };
-}
 export interface RegionHandlers {
   onSelect?: (id: string | null) => void;
-  onHover?: (hover: RegionHover | null) => void;
+  /** The region under the pointer changed (null when the pointer left all regions). Not called on every move. */
+  onHover?: (id: string | null) => void;
+  /** The pointer moved while over a region: position the tooltip without re-rendering. */
+  onPointer?: (point: { x: number; y: number }) => void;
 }
 
-const metricValue = (r: RegionSummary, metric: Metric) => (metric === "co2" ? r.co2KgYear : r.kwhYear);
+export const metricValue = (r: RegionSummary, metric: Metric) => (metric === "co2" ? r.co2KgYear : r.kwhYear);
 
 /** 0..1 per region. Square root so small regions (Mahakam Ulu) still read, and Samarinda does not dwarf all. */
 export function intensities(regions: RegionSummary[], metric: Metric): Map<string, number> {
@@ -42,15 +38,20 @@ export function intensities(regions: RegionSummary[], metric: Metric): Map<strin
 
 const heightFor = (t: number) => MIN_HEIGHT_M + (MAX_HEIGHT_M - MIN_HEIGHT_M) * t;
 
-function colorExpression(metric: Metric): ExpressionSpecification {
-  const [a, b, c, d] = RAMPS[metric];
+const selected: ExpressionSpecification = ["boolean", ["feature-state", "selected"], false];
+
+function colorExpression(metric: Metric, tone: Tone): ExpressionSpecification {
+  const stops = rampTokens(metric);
+  const ramp = stops.flatMap((color, i) => [i / (stops.length - 1), color]);
   return [
     "case",
     ["boolean", ["feature-state", "dim"], false],
-    DIM_COLOR,
-    ["interpolate", ["linear"], ["coalesce", ["feature-state", "t"], 0], 0, a, 0.4, b, 0.75, c, 1, d],
+    token(tone === "light" ? "--color-dim-light" : "--color-dim-dark"),
+    ["interpolate", ["linear"], ["coalesce", ["feature-state", "t"], 0], ...ramp] as ExpressionSpecification,
   ];
 }
+
+const outlineColor = (tone: Tone) => token(tone === "light" ? "--color-outline-light" : "--color-paper");
 
 // --- Height animation -------------------------------------------------------------------------
 // Heights live in feature-state `h`, so animating them only updates paint buffers (no re-tiling).
@@ -65,6 +66,7 @@ interface LayerState {
   map: MapboxMap;
   regions: RegionSummary[];
   metric: Metric;
+  tone: Tone;
   heights: Map<string, number>;
   tweens: Map<string, Tween>;
   frame: number;
@@ -72,12 +74,11 @@ interface LayerState {
   selected: string | null;
   /** False until `riseRegions()`: columns stay flat while the intro flies in. */
   risen: boolean;
+  onMouseMove: (e: MapMouseEvent) => void;
 }
 let state: LayerState | null = null;
-let onMouseMove: ((e: MapMouseEvent) => void) | null = null;
 
 const easeOutCubic = (x: number) => 1 - (1 - x) ** 3;
-const easeInOutCubic = (x: number) => (x < 0.5 ? 4 * x ** 3 : 1 - (-2 * x + 2) ** 3 / 2);
 
 function tick(now: number) {
   if (!state) return;
@@ -116,13 +117,35 @@ function writeIntensity() {
   }
 }
 
+/** Moves the hover lift to `id` (or clears it). Shared by map hover and list hover. */
+function applyHover(id: string | null) {
+  const s = state;
+  if (!s || s.hovered === id) return;
+  const previous = s.hovered;
+  s.hovered = id;
+  if (previous) {
+    s.map.setFeatureState({ source: REGION_SOURCE, id: previous }, { hover: false });
+    animateTo(previous, targetHeight(previous), MS.hover);
+  }
+  if (id) {
+    s.map.setFeatureState({ source: REGION_SOURCE, id }, { hover: true });
+    animateTo(id, targetHeight(id), MS.hover);
+  }
+}
+
 // --- Public API ---------------------------------------------------------------------------------
 
 /**
  * Adds the 10 regions as flat columns at height 0. Call `riseRegions()` to grow them (the intro does
- * this as the camera lands). Hover shows a glow and calls `onHover`; click calls `onSelect`.
+ * this as the camera lands). Hover lifts a column and calls `onHover`; click calls `onSelect`.
  */
-export function addRegions(map: MapboxMap, fc: RegionCollection, metric: Metric, handlers: RegionHandlers = {}): void {
+export function addRegions(
+  map: MapboxMap,
+  fc: RegionCollection,
+  metric: Metric,
+  handlers: RegionHandlers = {},
+  tone: Tone = "dark",
+): void {
   removeRegions(map);
   map.addSource(REGION_SOURCE, { type: "geojson", data: fc as unknown as GeoJSONSourceSpecification["data"], promoteId: "id" });
 
@@ -148,11 +171,12 @@ export function addRegions(map: MapboxMap, fc: RegionCollection, metric: Metric,
     slot: "middle",
     maxzoom: HIDE_ZOOM,
     paint: {
-      "fill-extrusion-color": colorExpression(metric),
+      "fill-extrusion-color": colorExpression(metric, tone),
       "fill-extrusion-height": zoomScaled(height),
       "fill-extrusion-base": 0,
-      "fill-extrusion-opacity": ["interpolate", ["linear"], ["zoom"], 10, 0.88, HIDE_ZOOM, 0],
-      "fill-extrusion-emissive-strength": ["case", ["boolean", ["feature-state", "hover"], false], 1, 0.72],
+      "fill-extrusion-opacity": ["interpolate", ["linear"], ["zoom"], 10, 0.9, HIDE_ZOOM, 0],
+      // High enough that the muted ramp shows its true colour under the night preset; no neon.
+      "fill-extrusion-emissive-strength": ["case", ["boolean", ["feature-state", "hover"], false], 1, 0.85],
       "fill-extrusion-vertical-gradient": true,
       "fill-extrusion-ambient-occlusion-intensity": 0.25,
     },
@@ -163,25 +187,31 @@ export function addRegions(map: MapboxMap, fc: RegionCollection, metric: Metric,
     source: REGION_SOURCE,
     slot: "middle",
     paint: {
-      "line-color": "#cfe3ff",
-      "line-opacity": ["interpolate", ["linear"], ["zoom"], 5, 0.25, 9, 0.5, 13, 0.15],
-      "line-width": ["interpolate", ["linear"], ["zoom"], 5, 0.6, 10, 1.6],
+      "line-color": outlineColor(tone),
+      "line-opacity": ["interpolate", ["linear"], ["zoom"], 5, ["case", selected, 0.95, 0.28], 9, ["case", selected, 0.95, 0.45], 13, ["case", selected, 0.5, 0.12]],
+      "line-width": ["interpolate", ["linear"], ["zoom"], 5, ["case", selected, 1.6, 0.6], 10, ["case", selected, 2.6, 1.4]],
       "line-emissive-strength": 1,
     },
   });
 
   const regions = fc.features.map((f) => f.properties);
-  state = { map, regions, metric, heights: new Map(), tweens: new Map(), frame: 0, hovered: null, selected: null, risen: false };
-  for (const r of regions) state.heights.set(r.id, 0);
-  writeIntensity();
-
-  const regionOf = (id: unknown) => state?.regions.find((r) => r.id === id);
-  const reportHover = (point: { x: number; y: number }) => {
-    const r = regionOf(state?.hovered);
-    if (r && state) handlers.onHover?.({ id: r.id, name: r.name, value: metricValue(r, state.metric), point: { x: point.x, y: point.y } });
+  const onMouseMove = (e: MapMouseEvent) => {
+    if (state?.hovered) handlers.onPointer?.({ x: e.point.x, y: e.point.y });
   };
-  // The tooltip follows the pointer while a region is hovered (mouseenter/leave track which one).
-  onMouseMove = (e) => reportHover(e.point);
+  state = {
+    map,
+    regions,
+    metric,
+    tone,
+    heights: new Map(regions.map((r) => [r.id, 0])),
+    tweens: new Map(),
+    frame: 0,
+    hovered: null,
+    selected: null,
+    risen: false,
+    onMouseMove,
+  };
+  writeIntensity();
   map.on("mousemove", onMouseMove);
 
   map.addInteraction("regions-enter", {
@@ -190,11 +220,10 @@ export function addRegions(map: MapboxMap, fc: RegionCollection, metric: Metric,
     handler: (e) => {
       const id = e.feature?.id;
       if (!state || typeof id !== "string") return;
-      state.hovered = id;
-      map.setFeatureState({ source: REGION_SOURCE, id }, { hover: true });
+      applyHover(id);
       map.getCanvas().style.cursor = "pointer";
-      animateTo(id, targetHeight(id), 450);
-      reportHover(e.point);
+      handlers.onHover?.(id);
+      handlers.onPointer?.({ x: e.point.x, y: e.point.y });
     },
   });
   map.addInteraction("regions-leave", {
@@ -202,12 +231,12 @@ export function addRegions(map: MapboxMap, fc: RegionCollection, metric: Metric,
     target: { layerId: REGION_LAYER },
     handler: (e) => {
       const id = e.feature?.id;
-      map.getCanvas().style.cursor = "";
-      handlers.onHover?.(null);
-      if (!state || typeof id !== "string") return;
-      state.hovered = null;
-      map.setFeatureState({ source: REGION_SOURCE, id }, { hover: false });
-      animateTo(id, targetHeight(id), 450);
+      // Moving straight from one region into the next can deliver the next one's enter first.
+      if (state && typeof id === "string" && state.hovered === id) {
+        applyHover(null);
+        map.getCanvas().style.cursor = "";
+        handlers.onHover?.(null);
+      }
       return false;
     },
   });
@@ -227,7 +256,7 @@ export function riseRegions(map: MapboxMap, fc: RegionCollection): void {
   state.risen = true;
   const west = new Map(fc.features.map((f) => [f.properties.id, firstLng(f.geometry)]));
   const order = [...state.regions].sort((a, b) => (west.get(a.id) ?? 0) - (west.get(b.id) ?? 0));
-  order.forEach((r, i) => animateTo(r.id, targetHeight(r.id), 1600, i * 110));
+  order.forEach((r, i) => animateTo(r.id, targetHeight(r.id), MS.rise, i * MS.riseStagger));
 }
 
 function firstLng(g: RegionCollection["features"][number]["geometry"]): number {
@@ -244,23 +273,37 @@ export function setRegionMetric(map: MapboxMap, metric: Metric): void {
   if (!state || state.map !== map || state.metric === metric) return;
   const s = state;
   s.metric = metric;
-  for (const r of s.regions) animateTo(r.id, (s.heights.get(r.id) ?? 0) * 0.3, 380);
+  for (const r of s.regions) animateTo(r.id, (s.heights.get(r.id) ?? 0) * 0.3, MS.sink);
   setTimeout(() => {
     if (state !== s) return;
-    map.setPaintProperty(REGION_LAYER, "fill-extrusion-color", colorExpression(metric));
+    map.setPaintProperty(REGION_LAYER, "fill-extrusion-color", colorExpression(s.metric, s.tone));
     writeIntensity();
-    s.regions.forEach((r, i) => animateTo(r.id, targetHeight(r.id), 900, i * 40));
-  }, 400);
+    s.regions.forEach((r, i) => animateTo(r.id, targetHeight(r.id), MS.swapRise, i * MS.swapStagger));
+  }, MS.sink + 20);
 }
 
-/** Highlights one region (others dim and step back), or clears the highlight with `null`. */
+/** Highlights one region (others dim and step back, its outline brightens), or clears it with `null`. */
 export function setSelectedRegion(map: MapboxMap, id: string | null): void {
   if (!state || state.map !== map || state.selected === id) return;
   state.selected = id;
   for (const r of state.regions) {
-    map.setFeatureState({ source: REGION_SOURCE, id: r.id }, { dim: id !== null && r.id !== id });
-    animateTo(r.id, targetHeight(r.id), 900);
+    map.setFeatureState({ source: REGION_SOURCE, id: r.id }, { dim: id !== null && r.id !== id, selected: r.id === id });
+    animateTo(r.id, targetHeight(r.id), MS.select);
   }
+}
+
+/** Lifts the column of a region hovered in the list (or clears the lift with `null`). */
+export function setRegionHover(map: MapboxMap, id: string | null): void {
+  if (!state || state.map !== map) return;
+  applyHover(id);
+}
+
+/** Matches outlines and dimmed columns to a light (day) or dark ground. */
+export function setRegionTone(map: MapboxMap, tone: Tone): void {
+  if (!state || state.map !== map || state.tone === tone) return;
+  state.tone = tone;
+  if (map.getLayer(REGION_LAYER)) map.setPaintProperty(REGION_LAYER, "fill-extrusion-color", colorExpression(state.metric, tone));
+  if (map.getLayer(OUTLINE_LAYER)) map.setPaintProperty(OUTLINE_LAYER, "line-color", outlineColor(tone));
 }
 
 export function setRegionsVisible(map: MapboxMap, visible: boolean): void {
@@ -269,12 +312,14 @@ export function setRegionsVisible(map: MapboxMap, visible: boolean): void {
   }
 }
 
+/** Stops the column animation, then removes the layers, source and interactions. */
 export function removeRegions(map: MapboxMap): void {
-  if (state?.frame) cancelAnimationFrame(state.frame);
-  state = null;
-  if (onMouseMove) map.off("mousemove", onMouseMove);
-  onMouseMove = null;
-  for (const id of ["regions-enter", "regions-leave", "regions-click"]) map.removeInteraction(id);
+  if (state) {
+    if (state.frame) cancelAnimationFrame(state.frame);
+    map.off("mousemove", state.onMouseMove);
+    state = null;
+  }
+  for (const id of INTERACTIONS) map.removeInteraction(id);
   for (const layer of [REGION_LAYER, OUTLINE_LAYER]) if (map.getLayer(layer)) map.removeLayer(layer);
   if (map.getSource(REGION_SOURCE)) map.removeSource(REGION_SOURCE);
 }

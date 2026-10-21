@@ -1,4 +1,5 @@
 import type { Map as MapboxMap } from "mapbox-gl";
+import { token } from "../theme.ts";
 
 export type LightPreset = "dawn" | "day" | "dusk" | "night";
 
@@ -18,6 +19,11 @@ export function lightPresetFor(date: Date): LightPreset {
   if (h >= 7 && h < 17) return "day";
   if (h >= 17 && h < 19) return "dusk";
   return "night";
+}
+
+/** Whether the basemap ground is light or dark under a preset; outlines and dimmed columns follow it. */
+export function presetTone(preset: LightPreset): "light" | "dark" {
+  return preset === "day" ? "light" : "dark";
 }
 
 /** Sets the basemap light to match the real time of day in WITA and returns the preset used. */
@@ -47,10 +53,10 @@ export function setRainEffect(map: MapboxMap, on: boolean): void {
   map.setRain({
     density: zoomBasedReveal(0.5),
     intensity: 1,
-    color: "#a8adbc",
+    color: token("--color-rain"),
     opacity: 0.7,
     vignette: zoomBasedReveal(1),
-    "vignette-color": "#464646",
+    "vignette-color": token("--color-rain-vignette"),
     direction: [0, 80],
     "droplet-size": [2.6, 18.2],
     "distortion-strength": 0.7,

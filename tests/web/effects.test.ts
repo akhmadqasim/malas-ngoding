@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { lightPresetFor, witaHour } from "../../src/web/map/effects.ts";
+import { lightPresetFor, presetTone, witaHour } from "../../src/web/map/effects.ts";
 
 // WITA is UTC+8, so 05:00 WITA is 21:00 UTC the day before.
 const wita = (hh: number, mm = 0) => new Date(Date.UTC(2026, 9, 21, hh - 8, mm));
@@ -19,4 +19,11 @@ describe("light preset follows WITA time", () => {
     expect(lightPresetFor(wita(19))).toBe("night");
     expect(lightPresetFor(wita(23, 30))).toBe("night");
   });
+  test("only the day preset has a light ground", () => {
+    expect(presetTone("day")).toBe("light");
+    expect(presetTone("dawn")).toBe("dark");
+    expect(presetTone("dusk")).toBe("dark");
+    expect(presetTone("night")).toBe("dark");
+  });
 });
+

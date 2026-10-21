@@ -1,31 +1,13 @@
 import mapboxgl, { type ExpressionSpecification, type GeoJSONSourceSpecification, type Map as MapboxMap } from "mapbox-gl";
 import type { PlantCollection, PlantProperties } from "../api.ts";
+import { token } from "../theme.ts";
+import { FUEL_LABELS, FUELS, fuelKey } from "./fuels.ts";
 import type { FuelType } from "../../shared/types.ts";
 import { fmtNumber } from "../../shared/format.ts";
 
 const SOURCE = "plants";
 export const PLANT_LAYER = "plants";
-
-export const FUEL_COLORS: Record<FuelType, string> = {
-  batubara: "#ff5a4e",
-  gas: "#ff9f1c",
-  diesel: "#b07a45",
-  surya: "#ffd23f",
-  air: "#3fa7ff",
-  biomassa: "#4cc76a",
-  lainnya: "#a0a8b8",
-};
-export const FUEL_LABELS: Record<FuelType, string> = {
-  batubara: "Batu bara",
-  gas: "Gas",
-  diesel: "Diesel",
-  surya: "Surya",
-  air: "Air",
-  biomassa: "Biomassa",
-  lainnya: "Lainnya",
-};
-/** Coal plants get a dark core inside their red ring: coal reads as soot, not as a bright light. */
-const COAL_CORE = "#2f3138";
+const INTERACTIONS = ["plants-enter", "plants-click", "plants-leave"] as const;
 
 const STATUS_LABEL: Record<string, string> = {
   operating: "Beroperasi",
@@ -38,76 +20,96 @@ const escapeHtml = (s: string) =>
 
 /** Popup body for one plant. Unverified sites and guessed coordinates say so plainly. */
 export function plantPopupHtml(p: PlantProperties): string {
-  const fuel = (p.fuel in FUEL_LABELS ? p.fuel : "lainnya") as FuelType;
+  const fuel = fuelKey(p.fuel);
   const notes: string[] = [];
   if (p.status !== "operating") notes.push(STATUS_LABEL[p.status] ?? p.status);
   if (p.approx) notes.push("Lokasi perkiraan");
   return `
     <div class="plant-popup">
-      <div class="plant-popup__fuel"><span style="background:${FUEL_COLORS[fuel]}"></span>${FUEL_LABELS[fuel]}</div>
+      <div class="plant-popup__fuel"><span class="fuel-dot" data-fuel="${fuel}"></span>${FUEL_LABELS[fuel]}</div>
       <div class="plant-popup__name">${escapeHtml(p.name)}</div>
-      <div class="plant-popup__mw">${fmtNumber(p.capacityMw)} <small>MW</small></div>
-      ${notes.length ? `<div class="plant-popup__notes">${notes.map((n) => `<span>${escapeHtml(n)}</span>`).join("")}</div>` : ""}
+      <div class="plant-popup__mw"><span class="num">${fmtNumber(p.capacityMw)}</span> MW</div>
+      ${notes.map((n) => `<div class="plant-popup__note">${escapeHtml(n)}</div>`).join("")}
     </div>`;
 }
 
 let popup: mapboxgl.Popup | null = null;
 const IMAGE_PX = 128;
+const PERIOD_MS = 3200;
+
+interface MarkerColors {
+  /** Fuel colour. */
+  core: string;
+  /** Outer edge (ink). */
+  edge: string;
+  /** Ring and pulse (paper). */
+  pulse: string;
+}
 
 /**
- * A pulsing marker drawn on a canvas each frame (Mapbox's animated-image pattern). A symbol layer
- * (unlike a circle layer) can ignore depth, so the plants stay visible in front of the region columns.
+ * A marker drawn on a canvas (Mapbox's animated-image pattern): a fuel-coloured core in a paper ring
+ * with an ink edge, so it reads on a light map, a dark map and on top of the columns. A thin ring grows
+ * and fades from it, meaning "a working plant". A symbol layer, unlike a circle layer, can ignore depth,
+ * so the plants stay visible in front of the region columns.
  */
-function pulsingMarker(map: MapboxMap, fuel: FuelType, phase: number): mapboxgl.StyleImageInterface {
+function markerImage(map: MapboxMap, colors: MarkerColors, phase: number): mapboxgl.StyleImageInterface {
   const size = IMAGE_PX;
   const still = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-  let ctx: CanvasRenderingContext2D | null = null;
-  const color = FUEL_COLORS[fuel];
-  const coal = fuel === "batubara";
+  const canvas = document.createElement("canvas");
+  canvas.width = size;
+  canvas.height = size;
+  let ctx: CanvasRenderingContext2D | null = canvas.getContext("2d", { willReadFrequently: true });
+
+  const draw = (now: number) => {
+    if (!ctx) return;
+    const t = still ? 0.4 : ((now + phase) % PERIOD_MS) / PERIOD_MS;
+    const c = size / 2;
+    const core = size * 0.13;
+    const ring = core + 4;
+    ctx.clearRect(0, 0, size, size);
+    // The pulse: a paper ring with an ink edge, from the marker outwards, fading as it grows.
+    const r = ring + 2 + (size * 0.47 - ring - 2) * t;
+    ctx.globalAlpha = 0.7 * (1 - t) ** 1.5;
+    ctx.beginPath();
+    ctx.arc(c, c, r, 0, Math.PI * 2);
+    ctx.strokeStyle = colors.edge;
+    ctx.lineWidth = 4;
+    ctx.stroke();
+    ctx.strokeStyle = colors.pulse;
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+    // Ink edge, paper ring, then the fuel colour.
+    ctx.beginPath();
+    ctx.arc(c, c, ring + 1.5, 0, Math.PI * 2);
+    ctx.fillStyle = colors.edge;
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(c, c, ring, 0, Math.PI * 2);
+    ctx.fillStyle = colors.pulse;
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(c, c, core, 0, Math.PI * 2);
+    ctx.fillStyle = colors.core;
+    ctx.fill();
+  };
+
+  // Mapbox copies `data` when the image is added, so the first frame must exist before that (and it
+  // is the only frame when the user prefers reduced motion).
+  draw(performance.now());
   return {
     width: size,
     height: size,
-    data: new Uint8Array(size * size * 4),
-    onAdd() {
-      const canvas = document.createElement("canvas");
-      canvas.width = size;
-      canvas.height = size;
-      ctx = canvas.getContext("2d", { willReadFrequently: true });
-    },
+    data: ctx ? ctx.getImageData(0, 0, size, size).data : new Uint8Array(size * size * 4),
     render() {
-      if (!ctx) return false;
-      const period = 2600;
-      const t = still ? 0.35 : ((performance.now() + phase) % period) / period;
-      const c = size / 2;
-      const core = size * 0.16;
-      ctx.clearRect(0, 0, size, size);
-      // Ring that grows and fades.
-      ctx.beginPath();
-      ctx.arc(c, c, core + (size * 0.5 - core - 2) * t, 0, Math.PI * 2);
-      ctx.strokeStyle = color;
-      ctx.globalAlpha = 0.75 * (1 - t) ** 1.6;
-      ctx.lineWidth = 3 + 5 * (1 - t);
-      ctx.stroke();
-      // Soft glow under the core.
-      ctx.globalAlpha = 1;
-      const glow = ctx.createRadialGradient(c, c, core * 0.6, c, c, core * 2.1);
-      glow.addColorStop(0, `${color}aa`);
-      glow.addColorStop(1, `${color}00`);
-      ctx.fillStyle = glow;
-      ctx.beginPath();
-      ctx.arc(c, c, core * 2.1, 0, Math.PI * 2);
-      ctx.fill();
-      // Core: coal is a dark lump in a red ring, every other fuel is a bright dot.
-      ctx.beginPath();
-      ctx.arc(c, c, core, 0, Math.PI * 2);
-      ctx.fillStyle = coal ? COAL_CORE : color;
-      ctx.fill();
-      ctx.lineWidth = coal ? 6 : 4;
-      ctx.strokeStyle = coal ? color : "rgba(255,255,255,0.9)";
-      ctx.stroke();
+      if (!ctx || still) return false;
+      draw(performance.now());
       this.data = ctx.getImageData(0, 0, size, size).data;
-      if (!still) map.triggerRepaint();
+      map.triggerRepaint();
       return true;
+    },
+    onRemove() {
+      ctx = null;
     },
   };
 }
@@ -116,8 +118,10 @@ function pulsingMarker(map: MapboxMap, fuel: FuelType, phase: number): mapboxgl.
 export function addPlants(map: MapboxMap, fc: PlantCollection): void {
   removePlants(map);
   map.addSource(SOURCE, { type: "geojson", data: fc as unknown as GeoJSONSourceSpecification["data"] });
-  (Object.keys(FUEL_COLORS) as FuelType[]).forEach((fuel, i) => {
-    map.addImage(`plant-${fuel}`, pulsingMarker(map, fuel, i * 430), { pixelRatio: 2 });
+  const edge = token("--color-ink");
+  const paper = token("--color-paper");
+  FUELS.forEach((fuel, i) => {
+    map.addImage(`plant-${fuel}`, markerImage(map, { core: token(`--color-fuel-${fuel}`), edge, pulse: paper }, i * 460), { pixelRatio: 2 });
   });
 
   // Square root of MW so a 2.200 MW site does not swallow a 50 MW one.
@@ -128,7 +132,7 @@ export function addPlants(map: MapboxMap, fc: PlantCollection): void {
     source: SOURCE,
     slot: "top",
     layout: {
-      "icon-image": ["concat", "plant-", ["match", ["get", "fuel"], Object.keys(FUEL_COLORS), ["get", "fuel"], "lainnya"]],
+      "icon-image": ["concat", "plant-", ["match", ["get", "fuel"], [...FUELS], ["get", "fuel"], "lainnya"]],
       "icon-size": ["interpolate", ["linear"], ["zoom"], 5, size(0.75), 10, size(1.35)],
       "icon-allow-overlap": true,
       "icon-ignore-placement": true,
@@ -143,7 +147,7 @@ export function addPlants(map: MapboxMap, fc: PlantCollection): void {
     },
   });
 
-  popup = new mapboxgl.Popup({ closeButton: false, closeOnClick: false, offset: 16, className: "glass-popup", maxWidth: "260px" });
+  popup = new mapboxgl.Popup({ closeButton: false, closeOnClick: false, offset: 14, className: "map-popup", maxWidth: "260px" });
   const show = (e: mapboxgl.InteractionEvent) => {
     const f = e.feature;
     if (!f || f.geometry.type !== "Point") return;
@@ -175,8 +179,8 @@ export function setPlantsVisible(map: MapboxMap, visible: boolean): void {
 export function removePlants(map: MapboxMap): void {
   popup?.remove();
   popup = null;
-  for (const id of ["plants-enter", "plants-click", "plants-leave"]) map.removeInteraction(id);
+  for (const id of INTERACTIONS) map.removeInteraction(id);
   if (map.getLayer(PLANT_LAYER)) map.removeLayer(PLANT_LAYER);
   if (map.getSource(SOURCE)) map.removeSource(SOURCE);
-  for (const fuel of Object.keys(FUEL_COLORS)) if (map.hasImage(`plant-${fuel}`)) map.removeImage(`plant-${fuel}`);
+  for (const fuel of FUELS as readonly FuelType[]) if (map.hasImage(`plant-${fuel}`)) map.removeImage(`plant-${fuel}`);
 }

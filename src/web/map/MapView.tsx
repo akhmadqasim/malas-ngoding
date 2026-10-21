@@ -3,10 +3,18 @@ import "mapbox-gl/dist/mapbox-gl.css";
 import { useEffect, useRef } from "react";
 import { api, type PlantCollection, type RegionCollection } from "../api.ts";
 import { useAppStore } from "../store.ts";
-import { GLOBE_VIEW, flyToRegion, introFlight, KALTIM_VIEW, startIdleOrbit, stopIdleOrbit } from "./camera.ts";
-import { applyLightPreset, type LightPreset, lightPresetFor, setRainEffect } from "./effects.ts";
+import { FLY_MS, flyToRegion, GLOBE_VIEW, introFlight, KALTIM_VIEW, startIdleOrbit, stopIdleOrbit } from "./camera.ts";
+import { applyLightPreset, type LightPreset, lightPresetFor, presetTone, setRainEffect } from "./effects.ts";
 import { addPlants, setPlantsVisible } from "./plantsLayer.ts";
-import { addRegions, type RegionHover, riseRegions, setRegionMetric, setRegionsVisible, setSelectedRegion } from "./regionsLayer.ts";
+import {
+  addRegions,
+  riseRegions,
+  setRegionHover,
+  setRegionMetric,
+  setRegionsVisible,
+  setRegionTone,
+  setSelectedRegion,
+} from "./regionsLayer.ts";
 
 interface Props {
   token: string;
@@ -14,7 +22,10 @@ interface Props {
   plants: PlantCollection;
   onIntroStart: () => void;
   onIntroEnd: () => void;
-  onRegionHover: (hover: RegionHover | null) => void;
+  /** The region under the pointer on the map changed. Called on enter and leave, not on every move. */
+  onRegionHover: (id: string | null) => void;
+  /** The pointer moved over a hovered region (tooltip position). */
+  onRegionPointer: (point: { x: number; y: number }) => void;
 }
 
 const PRESETS: readonly LightPreset[] = ["dawn", "day", "dusk", "night"];
@@ -47,16 +58,18 @@ function bboxOf(fc: RegionCollection, id: string): [[number, number], [number, n
 /** Centre of a bounding box: the fallback when the region detail (with its PostGIS centroid) cannot load. */
 const centerOf = (b: [[number, number], [number, number]]): [number, number] => [(b[0][0] + b[1][0]) / 2, (b[0][1] + b[1][1]) / 2];
 
-export function MapView({ token, regions, plants, onIntroStart, onIntroEnd, onRegionHover }: Props) {
+export function MapView({ token, regions, plants, onIntroStart, onIntroEnd, onRegionHover, onRegionPointer }: Props) {
   const container = useRef<HTMLDivElement>(null);
   // Keep the latest callbacks without re-creating the map.
-  const handlers = useRef({ onIntroStart, onIntroEnd, onRegionHover });
-  handlers.current = { onIntroStart, onIntroEnd, onRegionHover };
+  const handlers = useRef({ onIntroStart, onIntroEnd, onRegionHover, onRegionPointer });
+  handlers.current = { onIntroStart, onIntroEnd, onRegionHover, onRegionPointer };
 
   useEffect(() => {
     if (!container.current) return;
     mapboxgl.accessToken = token;
     const store = useAppStore.getState();
+    const pinned = pinnedPreset();
+    let preset: LightPreset = pinned ?? lightPresetFor(new Date());
     const map = new mapboxgl.Map({
       container: container.current,
       style: "mapbox://styles/mapbox/standard",
@@ -66,7 +79,7 @@ export function MapView({ token, regions, plants, onIntroStart, onIntroEnd, onRe
       attributionControl: false,
       config: {
         basemap: {
-          lightPreset: pinnedPreset() ?? lightPresetFor(new Date()),
+          lightPreset: preset,
           theme: "faded",
           show3dLandmarks: false,
           showPointOfInterestLabels: false,
@@ -79,16 +92,28 @@ export function MapView({ token, regions, plants, onIntroStart, onIntroEnd, onRe
 
     let disposed = false;
     let ready = false;
-    const lightTimer = pinnedPreset() ? undefined : setInterval(() => applyLightPreset(map, new Date()), 60_000);
+    const lightTimer = pinned
+      ? undefined
+      : setInterval(() => {
+          preset = applyLightPreset(map, new Date());
+          setRegionTone(map, presetTone(preset));
+        }, 60_000);
 
     map.on("style.load", async () => {
       map.addSource("mapbox-dem", { type: "raster-dem", url: "mapbox://mapbox.mapbox-terrain-dem-v1", tileSize: 512, maxzoom: 14 });
       map.setTerrain({ source: "mapbox-dem", exaggeration: 1.4 });
 
-      addRegions(map, regions, store.metric, {
-        onSelect: (id) => useAppStore.getState().selectRegion(id),
-        onHover: (h) => handlers.current.onRegionHover(h),
-      });
+      addRegions(
+        map,
+        regions,
+        store.metric,
+        {
+          onSelect: (id) => useAppStore.getState().selectRegion(id),
+          onHover: (id) => handlers.current.onRegionHover(id),
+          onPointer: (point) => handlers.current.onRegionPointer(point),
+        },
+        presetTone(preset),
+      );
       addPlants(map, plants);
       setRegionsVisible(map, store.layers.regions);
       setPlantsVisible(map, store.layers.plants);
@@ -124,6 +149,7 @@ export function MapView({ token, regions, plants, onIntroStart, onIntroEnd, onRe
       if (s.layers.regions !== prev.layers.regions) setRegionsVisible(map, s.layers.regions);
       if (s.layers.plants !== prev.layers.plants) setPlantsVisible(map, s.layers.plants);
       if (s.rain !== prev.rain) setRainEffect(map, s.rain === "on");
+      if (s.hoveredRegionId !== prev.hoveredRegionId) setRegionHover(map, s.hoveredRegionId);
       if (s.selectedRegionId !== prev.selectedRegionId) {
         setSelectedRegion(map, s.selectedRegionId);
         if (s.selectedRegionId) {
@@ -138,7 +164,7 @@ export function MapView({ token, regions, plants, onIntroStart, onIntroEnd, onRe
               if (!disposed && centroid && useAppStore.getState().selectedRegionId === id) flyToRegion(map, centroid, { bounds });
             });
         } else {
-          map.flyTo({ ...KALTIM_VIEW, duration: 2200, essential: true });
+          map.flyTo({ ...KALTIM_VIEW, duration: FLY_MS, curve: 1.2, essential: true });
         }
       }
     });
@@ -153,6 +179,6 @@ export function MapView({ token, regions, plants, onIntroStart, onIntroEnd, onRe
     };
   }, [token, regions, plants]);
 
-  // Inline style: mapbox-gl.css sets `.mapboxgl-map { position: relative }`, which would beat a utility class.
+  // Inline style: mapbox-gl.css sets `.mapboxgl-map { position: relative }`, which would beat a class.
   return <div ref={container} style={{ position: "absolute", inset: 0 }} aria-label="Peta 3D Kalimantan Timur" role="region" />;
 }
