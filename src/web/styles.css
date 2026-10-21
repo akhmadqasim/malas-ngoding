@@ -2,6 +2,7 @@
 @import "@heroui/styles";
 @import "./atlas-theme.css";
 @import "./buildings.css";
+@import "./solar-weather.css";
 
 /*
  * Visual direction "Atlas malam": docs/research/design/00-direction.md (binding).
@@ -81,6 +82,9 @@
   --color-fuel-air: #4fa3d9;
   --color-fuel-biomassa: #79a94f;
   --color-fuel-lainnya: #a78bc9;
+  /* Solar output in the building panel's charts (solar-weather.css): the solar fuel colour by night, this
+     darker step on the paper sheet by day, so a line or ring still has 3:1. */
+  --color-solar-day: #9a7200;
 
   /* Rain (Mapbox setRain): bright streaks in every light, the slate haze that the daytime streaks show
      against (map fog), and the overcast tint that dims the whole scene while it rains. */

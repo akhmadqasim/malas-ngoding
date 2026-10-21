@@ -24,6 +24,16 @@ export type BuildingHint = { type?: BuildingType; name?: string };
 
 /** Where a hover preview comes from: the pointer over a column on the map, or a row of the region list. */
 export type HoverOrigin = "map" | "list";
+/** Live weather at the view centre (map/autoRain.ts): whether it rains there now, and where it was checked. */
+export interface LiveRain {
+  raining: boolean;
+  at: [number, number];
+}
+/** The rooftop solar size simulated for a building (SolarTab), so the Cuaca tab forecasts the same panels. */
+export interface SolarSizing {
+  featureId: string;
+  kWp: number;
+}
 
 export interface AppState {
   map: MapboxMap | null;
@@ -53,6 +63,9 @@ export interface AppState {
   lightPreset: LightPreset;
   panelTab: PanelTab;
   chatOpen: boolean;
+  /** Rain at the view centre at city zoom, or null when unknown (farther out, or the forecast failed). */
+  liveRain: LiveRain | null;
+  solarSizing: SolarSizing | null;
 
   setMap: (map: MapboxMap | null) => void;
   /** Selects a region (or goes back to all with `null`). Either way the hover preview has done its job and ends. */
@@ -89,6 +102,8 @@ export interface AppState {
   setLightPreset: (preset: LightPreset) => void;
   setPanelTab: (tab: PanelTab) => void;
   setChatOpen: (open: boolean) => void;
+  setLiveRain: (live: LiveRain | null) => void;
+  setSolarSizing: (sizing: SolarSizing | null) => void;
 }
 
 /** The light a `?cahaya=` link asked for ("auto" without one). The Cahaya switch's Otomatis returns to it. */
@@ -119,6 +134,8 @@ export const useAppStore = create<AppState>()((set, get) => ({
   lightPreset: resolvePreset(linkedLightMode, new Date()),
   panelTab: "energi",
   chatOpen: false,
+  liveRain: null,
+  solarSizing: null,
 
   setMap: (map) => set({ map }),
   selectRegion: (selectedRegionId) => set({ selectedRegionId, hoveredRegionId: null, hoverOrigin: null }),
@@ -194,6 +211,8 @@ export const useAppStore = create<AppState>()((set, get) => ({
   setLightPreset: (lightPreset) => set({ lightPreset }),
   setPanelTab: (panelTab) => set({ panelTab }),
   setChatOpen: (chatOpen) => set({ chatOpen }),
+  setLiveRain: (liveRain) => set({ liveRain }),
+  setSolarSizing: (solarSizing) => set({ solarSizing }),
 }));
 
 /** Fetches the estimate for `input`; `keep` leaves the shown numbers up while it loads (an override). */

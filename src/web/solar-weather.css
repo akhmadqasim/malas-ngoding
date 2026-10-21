@@ -1,0 +1,484 @@
+/*
+ * The Surya and Cuaca tabs of the building panel (panels/SolarTab.tsx, panels/WeatherTab.tsx).
+ * Tokens only, like every stylesheet here (tests/web/tokens.test.ts): raw values live in the theme block
+ * of styles.css. Colour belongs to data: solar output is the solar fuel colour (a darker step on the paper
+ * sheet, so lines and the ring keep 3:1), the building's need is the kWh colour. Text stays ink or paper.
+ */
+
+.sw-tab {
+  --sw-solar: var(--color-fuel-surya);
+  --sw-demand: var(--color-kwh-3);
+  display: grid;
+  gap: --spacing(5);
+  min-width: 0;
+}
+[data-theme="atlas-day"] .sw-tab {
+  --sw-solar: var(--color-solar-day);
+  --sw-demand: var(--color-kwh-day-3);
+}
+.sw-tab p,
+.sw-tab h3,
+.sw-tab ol,
+.sw-tab dl,
+.sw-tab dd {
+  margin: 0;
+}
+
+/* ---------- Inputs ---------- */
+
+.sw-solar__inputs {
+  display: grid;
+  gap: --spacing(4);
+}
+/* Roof area: the label on the left, the field on the right, one line. */
+.sw-solar__roof {
+  display: grid;
+  grid-template-columns: 1fr --spacing(36);
+  align-items: center;
+  column-gap: --spacing(3);
+}
+.sw-solar__roof .label,
+.sw-solar__backup .label {
+  font-size: var(--text-sm);
+  font-weight: var(--font-weight-regular);
+  color: var(--muted);
+}
+.sw-solar__roof .number-field__group {
+  height: --spacing(8);
+  border-radius: var(--radius-sm);
+  grid-template-columns: --spacing(8) 1fr --spacing(8);
+}
+.sw-solar__roof .number-field__input {
+  font-size: var(--text-sm);
+  text-align: center;
+  font-variant-numeric: tabular-nums lining-nums;
+}
+.sw-solar__roof .number-field__decrement-button,
+.sw-solar__roof .number-field__increment-button {
+  color: var(--muted);
+}
+.sw-solar__backup .slider__output {
+  font-size: var(--text-sm);
+  font-weight: var(--font-weight-medium);
+  color: var(--foreground);
+}
+/* A slim track; the fill and thumb are the accent (state), not a data colour. */
+.sw-solar__backup .slider__track {
+  height: --spacing(1.5);
+  /* Room for half the thumb at each end; the fill-start border is the rounded start of the fill. */
+  border-inline-width: --spacing(2);
+  margin-top: --spacing(2);
+  border-radius: var(--radius-full);
+  background: var(--border);
+}
+.sw-solar__backup .slider__fill {
+  border-radius: 0;
+  background: var(--accent);
+}
+.sw-solar__backup .slider__track[data-fill-start="true"] {
+  border-inline-start-color: var(--accent);
+}
+.sw-solar__backup .slider__thumb {
+  width: --spacing(4);
+  height: --spacing(4);
+  border-radius: var(--radius-full);
+  background: var(--accent);
+}
+.sw-solar__backup .slider__thumb::after {
+  width: --spacing(2);
+  height: --spacing(2);
+  border-radius: var(--radius-full);
+  background: var(--accent-foreground);
+  box-shadow: none;
+}
+
+/* While a newer simulation is out after a failure, the last numbers stay, a step back. */
+.sw-solar__result {
+  display: grid;
+  gap: --spacing(5);
+  transition: opacity var(--duration-quick) var(--ease-standard);
+}
+.sw-solar__result[data-stale] {
+  opacity: 0.6;
+}
+
+/* ---------- Coverage ring ---------- */
+
+.sw-cover {
+  display: grid;
+  grid-template-columns: --spacing(16) 1fr;
+  align-items: center;
+  column-gap: --spacing(4);
+}
+.sw-cover__ring {
+  width: --spacing(16);
+  height: --spacing(16);
+  transform: rotate(-90deg);
+}
+.sw-cover__track,
+.sw-cover__arc {
+  fill: none;
+  stroke-width: 6;
+}
+.sw-cover__track {
+  stroke: var(--border);
+}
+.sw-cover__arc {
+  stroke: var(--sw-solar);
+}
+.sw-cover__figure {
+  font-size: var(--text-2xl);
+  line-height: var(--text-2xl--line-height);
+  font-weight: var(--font-weight-medium);
+  font-stretch: var(--font-stretch-readout);
+  letter-spacing: var(--tracking-tight);
+}
+.sw-cover__label {
+  margin-top: --spacing(0.5);
+  font-size: var(--text-xs);
+  line-height: var(--text-xs--line-height);
+  color: var(--muted);
+}
+
+/* ---------- Production against need ---------- */
+
+.sw-versus {
+  display: grid;
+  gap: --spacing(3);
+}
+.sw-versus__label {
+  display: flex;
+  align-items: center;
+  gap: --spacing(2);
+  font-size: var(--text-sm);
+  color: var(--foreground);
+}
+.sw-versus__value {
+  margin-left: auto;
+  font-size: var(--text-xs);
+  color: var(--muted);
+  white-space: nowrap;
+}
+.sw-versus__value .num {
+  font-size: var(--text-sm);
+  font-weight: var(--font-weight-medium);
+  color: var(--foreground);
+}
+.sw-versus__key {
+  flex: none;
+  width: --spacing(2.5);
+  height: --spacing(2.5);
+  border-radius: var(--radius-xs);
+}
+.sw-versus__track {
+  margin-top: --spacing(1.5);
+  height: --spacing(1.5);
+  border-radius: var(--radius-xs);
+  background: var(--border);
+  overflow: hidden;
+}
+.sw-versus__bar {
+  height: 100%;
+  border-radius: var(--radius-xs);
+  transform-origin: left center;
+}
+.sw-tab [data-series="solar"] {
+  background: var(--sw-solar);
+}
+.sw-tab [data-series="demand"] {
+  background: var(--sw-demand);
+}
+.sw-versus__unit {
+  font-size: var(--text-xs);
+  color: var(--muted);
+}
+
+/* ---------- Facts (the same build as the region facts) ---------- */
+
+.sw-facts {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  column-gap: --spacing(4);
+}
+.sw-fact {
+  padding: --spacing(2.5) 0 --spacing(3);
+  border-top: 1px solid var(--border);
+}
+.sw-fact__label {
+  font-size: var(--text-xs);
+  color: var(--muted);
+}
+.sw-fact__value {
+  margin-top: --spacing(1);
+  font-size: var(--text-xs);
+  color: var(--muted);
+}
+.sw-fact__number {
+  display: block;
+  font-size: var(--text-lg);
+  line-height: var(--text-lg--line-height);
+  font-weight: var(--font-weight-medium);
+  color: var(--foreground);
+  white-space: nowrap;
+}
+.sw-fact__unit {
+  display: block;
+  margin-top: --spacing(0.5);
+}
+
+/* ---------- Charts ---------- */
+
+.sw-chart__title {
+  font-size: var(--text-xs);
+  line-height: var(--text-xs--line-height);
+  font-weight: var(--font-weight-regular);
+  color: var(--muted);
+}
+/* The reading line: the value under the pointer, or the summary when nothing is pointed at. */
+.sw-chart__reading {
+  min-height: var(--text-sm--line-height);
+  margin-top: --spacing(1);
+  font-size: var(--text-sm);
+  line-height: var(--text-sm--line-height);
+  color: var(--foreground);
+}
+.sw-chart__box {
+  margin-top: --spacing(2);
+  width: 100%;
+  min-width: 0;
+}
+.sw-chart__svg {
+  display: block;
+  overflow: visible;
+  cursor: crosshair;
+}
+.sw-chart__svg:focus-visible {
+  outline-offset: 4px;
+}
+.sw-chart__grid {
+  stroke: var(--border);
+  stroke-width: 1;
+  shape-rendering: crispEdges;
+}
+.sw-chart__day {
+  stroke: var(--border-strong);
+  stroke-width: 1;
+  shape-rendering: crispEdges;
+}
+.sw-chart__tick {
+  font-size: var(--text-2xs);
+  fill: var(--faint);
+  font-variant-numeric: tabular-nums lining-nums;
+}
+.sw-chart__tick[data-active] {
+  fill: var(--foreground);
+}
+.sw-chart__bar {
+  fill: var(--sw-solar);
+  transition: opacity var(--duration-instant) var(--ease-standard);
+}
+/* Pointing at a month brings it forward and the others step back. */
+.sw-chart__svg:has(.sw-chart__bar[data-active]) .sw-chart__bar:not([data-active]) {
+  opacity: 0.45;
+}
+.sw-chart__area {
+  fill: var(--sw-solar);
+  fill-opacity: 0.16;
+}
+.sw-chart__line {
+  fill: none;
+  stroke: var(--sw-solar);
+  stroke-width: 2;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+.sw-chart__rain {
+  fill: var(--muted);
+  fill-opacity: 0.16;
+}
+.sw-chart__cursor line {
+  stroke: var(--foreground);
+  stroke-width: 1;
+}
+.sw-chart__cursor circle {
+  fill: var(--sw-solar);
+  stroke: var(--surface);
+  stroke-width: 2;
+}
+.sw-chart__unit {
+  margin-top: --spacing(1);
+  font-size: var(--text-xs);
+  color: var(--faint);
+}
+.sw-chart__legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: --spacing(1) --spacing(4);
+  margin-top: --spacing(2);
+  font-size: var(--text-xs);
+  color: var(--muted);
+}
+.sw-chart__key {
+  display: inline-flex;
+  align-items: center;
+  gap: --spacing(1.5);
+}
+.sw-chart__key--note {
+  margin-left: auto;
+  font-style: italic;
+  color: var(--faint);
+}
+.sw-chart__swatch {
+  display: inline-block;
+  flex: none;
+  width: --spacing(3);
+}
+.sw-chart__swatch--line {
+  height: --spacing(0.5);
+  border-radius: var(--radius-xs);
+  background: var(--sw-solar);
+}
+.sw-chart__swatch--rain {
+  height: --spacing(3);
+  border-radius: var(--radius-xs);
+  background: var(--muted);
+  opacity: 0.3;
+}
+
+/* ---------- Weather ---------- */
+
+.sw-weather__now {
+  display: flex;
+  align-items: center;
+  gap: --spacing(2);
+  font-size: var(--text-sm);
+  color: var(--muted);
+}
+.sw-weather__sky {
+  font-weight: var(--font-weight-medium);
+  color: var(--foreground);
+}
+.sw-weather__icon,
+.sw-days__icon {
+  flex: none;
+  width: --spacing(4);
+  height: --spacing(4);
+  color: var(--muted);
+}
+
+.sw-days__list {
+  margin-top: --spacing(2);
+  padding: 0;
+  list-style: none;
+}
+.sw-days__row {
+  display: grid;
+  grid-template-columns: --spacing(4) 1fr auto;
+  align-items: baseline;
+  column-gap: --spacing(3);
+  padding: --spacing(2) 0;
+  border-top: 1px solid var(--border);
+}
+.sw-days__icon {
+  align-self: center;
+}
+.sw-days__name {
+  font-size: var(--text-sm);
+  color: var(--foreground);
+}
+.sw-days__sky {
+  margin-left: --spacing(2);
+  font-size: var(--text-xs);
+  color: var(--muted);
+}
+.sw-days__value {
+  font-size: var(--text-xs);
+  color: var(--muted);
+  text-align: right;
+  white-space: nowrap;
+}
+.sw-days__value .num {
+  font-size: var(--text-sm);
+  font-weight: var(--font-weight-medium);
+  color: var(--foreground);
+}
+.sw-days__drop {
+  grid-column: 2 / -1;
+  margin-top: --spacing(0.5);
+  font-size: var(--text-xs);
+  color: var(--muted);
+}
+.sw-days__drop .num {
+  color: var(--foreground);
+}
+
+/* ---------- States and the foot ---------- */
+
+.sw-tab__warn,
+.sw-tab__empty {
+  font-size: var(--text-sm);
+  line-height: var(--leading-relaxed);
+  color: var(--muted);
+}
+.sw-tab__failure {
+  display: grid;
+  justify-items: start;
+  gap: --spacing(3);
+}
+.sw-tab__failure-text {
+  font-size: var(--text-sm);
+  line-height: var(--leading-relaxed);
+  color: var(--muted);
+}
+.sw-tab__foot {
+  display: grid;
+  gap: --spacing(1);
+  padding-top: --spacing(3);
+  border-top: 1px solid var(--border);
+}
+.sw-tab__note {
+  font-size: var(--text-xs);
+  line-height: var(--leading-relaxed);
+  color: var(--muted);
+}
+.sw-tab__source {
+  font-size: var(--text-2xs);
+  line-height: var(--leading-relaxed);
+  color: var(--faint);
+}
+
+/* Loading: flat blocks in the shape of what comes (00-direction section 8). */
+.sw-tab__skeleton {
+  display: grid;
+  gap: --spacing(3);
+}
+.sw-tab__skeleton-row {
+  display: grid;
+  grid-template-columns: --spacing(16) 1fr;
+  align-items: center;
+  column-gap: --spacing(4);
+}
+.sw-tab__skeleton-lines {
+  display: grid;
+  gap: --spacing(2);
+}
+.sw-tab__skeleton .skeleton {
+  background: var(--surface-secondary);
+}
+.sw-skeleton-ring {
+  width: --spacing(16);
+  height: --spacing(16);
+  border-radius: var(--radius-full);
+}
+.sw-skeleton-line {
+  width: 60%;
+  height: --spacing(3);
+  border-radius: var(--radius-xs);
+}
+.sw-skeleton-line--wide {
+  width: 100%;
+}
+.sw-skeleton-block {
+  height: --spacing(28);
+  border-radius: var(--radius-xs);
+}
