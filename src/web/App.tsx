@@ -13,6 +13,7 @@ import { MapView } from "./map/MapView.tsx";
 import { METRIC_TEXT } from "./metrics.ts";
 import { DURATION, EASE_OUT } from "./motion.ts";
 import { Legend } from "./panels/Legend.tsx";
+import { MapControls } from "./panels/MapControls.tsx";
 import { RegionPanel } from "./panels/RegionPanel.tsx";
 import { type Metric, useAppStore } from "./store.ts";
 
@@ -38,6 +39,11 @@ export function App() {
   const tone = useAppStore((s) => presetTone(s.lightPreset));
   const regionList = useMemo(() => data?.regions.features.map((f) => f.properties) ?? [], [data]);
   const attempt = useRef(0);
+  // The chrome follows the ground: paper panels on a light map, ink panels on a dark one (atlas-theme.css).
+  // It lives on <html>, where HeroUI computes its derived colours, and so overlays in portals follow too.
+  useEffect(() => {
+    document.documentElement.dataset.theme = tone === "light" ? "atlas-day" : "atlas-night";
+  }, [tone]);
 
   const load = useCallback(() => {
     const run = ++attempt.current;
@@ -119,9 +125,14 @@ export function App() {
               <motion.div className="sheet-slot" variants={assemble(0, -16)}>
                 <RegionPanel regions={regionList} />
               </motion.div>
-              <motion.div className="legend-slot" variants={assemble(12, 0)}>
-                <Legend plants={data.plants} regions={regionList} />
-              </motion.div>
+              <div className="dock-slot">
+                <motion.div variants={assemble(12, 0)}>
+                  <Legend plants={data.plants} regions={regionList} />
+                </motion.div>
+                <motion.div variants={assemble(12, 0)}>
+                  <MapControls />
+                </motion.div>
+              </div>
             </motion.div>
           )}
         </AnimatePresence>

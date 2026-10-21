@@ -158,6 +158,9 @@ function Overview({
                 }}
                 onBlur={() => endListHover(r.id)}
               >
+                <span className="ranking__rank num" aria-hidden>
+                  {i + 1}
+                </span>
                 <span className="ranking__name">{r.name}</span>
                 <span className="ranking__value num">{fmtCompact(m.value(r) * m.scale)}</span>
                 <span className="ranking__track" aria-hidden>
@@ -174,8 +177,10 @@ function Overview({
           ))}
         </ol>
       </div>
-      <p className="sheet__note">Pilih wilayah untuk melihat rinciannya.</p>
-      <p className="sheet__source">Sumber: BPS Kalimantan Timur dan Kementerian ESDM.</p>
+      <footer className="sheet__foot">
+        <p className="sheet__note">Pilih wilayah untuk melihat rinciannya.</p>
+        <p className="sheet__source">Sumber: BPS Kalimantan Timur dan Kementerian ESDM.</p>
+      </footer>
     </div>
   );
 }
@@ -243,11 +248,13 @@ function RegionDetail({
           {region.villagesNoPln === null ? null : <AnimatedNumber value={region.villagesNoPln} format={whole} />}
         </Fact>
       </dl>
-      <p className="sheet__note">
-        {chem(
-          "Listrik terpakai diperkirakan dari penjualan PLN 2024 per cabang, dibagi menurut jumlah pelanggan. Emisi CO2 = kWh dikali faktor emisi jaringan Kaltim (Kementerian ESDM, data 2019).",
-        )}
-      </p>
+      <footer className="sheet__foot">
+        <p className="sheet__note">
+          {chem(
+            "Listrik terpakai diperkirakan dari penjualan PLN 2024 per cabang, dibagi menurut jumlah pelanggan. Emisi CO2 = kWh dikali faktor emisi jaringan Kaltim (Kementerian ESDM, data 2019).",
+          )}
+        </p>
+      </footer>
     </div>
   );
 }

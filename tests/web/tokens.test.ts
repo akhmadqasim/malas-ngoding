@@ -56,7 +56,8 @@ describe("stylesheets use tokens only", () => {
   test("font sizes, radii and shadows come from tokens", () => {
     expect(offenders(/font-size:(?!\s*(var\(--text-|inherit))/)).toEqual([]);
     expect(offenders(/border-radius:(?!\s*(var\(--radius-|0;|inherit))/)).toEqual([]);
-    expect(offenders(/box-shadow:(?!\s*(var\(--shadow-|none))/)).toEqual([]);
+    // --surface-shadow and --overlay-shadow are the theme bridge's names for the --shadow-* tokens.
+    expect(offenders(/box-shadow:(?!\s*(var\(--(shadow-|surface-shadow|overlay-shadow)|none))/)).toEqual([]);
   });
   test("durations come from tokens", () => {
     expect(offenders(/(^|[\s:,(])\d*\.?\d+m?s\b/)).toEqual([]);

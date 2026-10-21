@@ -109,11 +109,14 @@ const intersects = (a: Box, b: Box) => a.x1 < b.x2 && b.x1 < a.x2 && a.y1 < b.y2
 
 /**
  * The screen box of every symbol Mapbox placed (its collision index: the very boxes it keeps apart), with
- * the region each one names, and the boxes of the two panels. These are Mapbox internals, so a version
+ * the region each one names, and the boxes of the panels. These are Mapbox internals, so a version
  * that moves them fails the check loudly instead of passing it silently.
  */
+/** The cards of the bottom dock (legend, map controls): checked for layout, and no region name may hide under one. */
+const DOCK_CARDS = [".legend", ".controls"];
+
 const labelLayout = (page: Page) =>
-  page.evaluate(() => {
+  page.evaluate((panels) => {
     const map = (window as MapWindow).__malasMap!;
     type Grid = { boxKeys: unknown[]; bboxes: ArrayLike<number> };
     const internals = map as unknown as { style?: { placement?: { collisionIndex?: { grid?: Grid } } } };
@@ -131,8 +134,8 @@ const labelLayout = (page: Page) =>
       const r = document.querySelector(sel)!.getBoundingClientRect();
       return { x1: r.left, y1: r.top, x2: r.right, y2: r.bottom };
     };
-    return { boxes, panels: [rect(".sheet"), rect(".legend")] };
-  });
+    return { boxes, panels: panels.map(rect) };
+  }, [".sheet", ...DOCK_CARDS]);
 
 /** The four largest regions: their names must never yield (controller ruling, fix round 4). */
 const MAJOR_NAMES = ["samarinda", "kutai-kartanegara", "balikpapan", "kutai-timur"];
@@ -420,16 +423,19 @@ try {
   await waitForMapIdle(page);
   await page.waitForTimeout(800);
 
-  // Layout: both panels inside the viewport, no overlap, nothing cut off, right edge free for the chat button.
-  const layout = await page.evaluate(() => {
-    const box = (sel: string) => document.querySelector(sel)!.getBoundingClientRect();
-    const legend = document.querySelector<HTMLElement>(".legend")!;
-    const sheet = box(".sheet");
-    const leg = box(".legend");
+  // Layout: the sheet and every card of the bottom dock inside the viewport, none overlapping another, nothing
+  // cut off, the right edge free for the chat button.
+  const layout = await page.evaluate((cards) => {
+    const box = (el: Element) => {
+      const r = el.getBoundingClientRect();
+      return { left: r.left, right: r.right, top: r.top, bottom: r.bottom };
+    };
     return {
-      sheet: { left: sheet.left, right: sheet.right, top: sheet.top, bottom: sheet.bottom },
-      legend: { left: leg.left, right: leg.right, top: leg.top, bottom: leg.bottom },
-      legendOverflow: legend.scrollWidth - legend.clientWidth,
+      sheet: box(document.querySelector(".sheet")!),
+      dock: cards.map((sel) => {
+        const el = document.querySelector<HTMLElement>(sel);
+        return el ? { sel, ...box(el), overflow: el.scrollWidth - el.clientWidth } : { sel, missing: true as const };
+      }),
       sheetScroll: (() => {
         const el = document.querySelector<HTMLElement>(".sheet__scroll")!;
         return el.scrollHeight - el.clientHeight;
@@ -437,12 +443,23 @@ try {
       vw: window.innerWidth,
       vh: window.innerHeight,
     };
-  });
-  const { sheet, legend, vw, vh } = layout;
+  }, DOCK_CARDS);
+  const { sheet, vw, vh } = layout;
   check(sheet.left >= 0 && sheet.top >= 0 && sheet.bottom <= vh - 30, `region sheet fits the viewport (bottom ${Math.round(sheet.bottom)} of ${vh})`);
-  check(legend.left > sheet.right || legend.top > sheet.bottom, "legend does not overlap the region sheet");
-  check(legend.right <= vw - 80 && legend.bottom <= vh, `legend leaves the right edge free (right ${Math.round(legend.right)} of ${vw})`);
-  check(layout.legendOverflow <= 1, `legend content does not overflow (by ${layout.legendOverflow}px)`);
+  for (const card of layout.dock) {
+    if ("missing" in card) {
+      check(false, `${card.sel} is on the page`);
+      continue;
+    }
+    const others = layout.dock.filter((o) => o !== card && !("missing" in o)) as (typeof card)[];
+    check(card.left > sheet.right || card.top > sheet.bottom, `${card.sel} does not overlap the region sheet`);
+    check(
+      others.every((o) => !intersects({ x1: card.left, y1: card.top, x2: card.right, y2: card.bottom }, { x1: o.left, y1: o.top, x2: o.right, y2: o.bottom })),
+      `${card.sel} does not overlap another dock card`,
+    );
+    check(card.left >= 0 && card.top >= 0 && card.right <= vw - 80 && card.bottom <= vh, `${card.sel} fits and leaves the right edge free (right ${Math.round(card.right)} of ${vw})`);
+    check(card.overflow <= 1, `${card.sel} content does not overflow (by ${card.overflow}px)`);
+  }
   check(layout.sheetScroll <= 1, `all ten regions fit in the sheet without scrolling (hidden ${layout.sheetScroll}px)`);
   await shot(page, "2-overview");
   await screen(page, "map.png");

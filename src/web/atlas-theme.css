@@ -85,6 +85,53 @@
     --overlay-shadow: var(--shadow-float);
     --field-shadow: none;
   }
+
+  /* A printed sheet: paper panels with ink type, by day and at dawn (a light ground). The accent turns
+     to ink, so it is still the strongest mark on the panel. */
+  [data-theme="atlas-day"] {
+    color-scheme: light;
+
+    --background: var(--color-sheet);
+    --foreground: var(--color-ink);
+
+    --surface: var(--color-sheet);
+    --surface-foreground: var(--color-ink);
+    --surface-secondary: var(--color-sheet-high);
+    --surface-secondary-foreground: var(--color-ink);
+    --surface-tertiary: var(--color-sheet-high);
+    --surface-tertiary-foreground: var(--color-ink);
+
+    --overlay: var(--color-sheet);
+    --overlay-foreground: var(--color-ink);
+
+    --muted: var(--color-ink-muted);
+    --faint: var(--color-ink-faint);
+
+    --default: var(--color-sheet-high);
+    --default-foreground: var(--color-ink);
+
+    --accent: var(--color-ink);
+    --accent-foreground: var(--color-sheet);
+    --segment: var(--color-ink);
+    --segment-foreground: var(--color-sheet);
+
+    --border: var(--color-sheet-rule);
+    --border-strong: var(--color-sheet-rule-strong);
+    --separator: var(--color-sheet-rule);
+    --focus: var(--color-ink);
+    --link: var(--color-ink);
+
+    --field-background: var(--color-sheet);
+    --field-foreground: var(--color-ink);
+    --field-placeholder: var(--color-ink-faint);
+    --field-border: var(--color-sheet-rule-strong);
+
+    --scrollbar-thumb: var(--color-sheet-rule-strong);
+
+    --surface-shadow: var(--shadow-panel-day);
+    --overlay-shadow: var(--shadow-float-day);
+    --field-shadow: none;
+  }
 }
 
 /* ---------- HeroUI component customizations ---------- */

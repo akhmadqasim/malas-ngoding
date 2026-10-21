@@ -1,74 +1,35 @@
-import type { Map as MapboxMap } from "mapbox-gl";
-import { AnimatePresence, motion } from "motion/react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Card } from "@heroui/react";
+import { motion } from "motion/react";
+import { useMemo, useRef } from "react";
 import { fmtCompact } from "../../shared/format.ts";
 import type { RegionSummary } from "../../shared/types.ts";
 import type { PlantCollection } from "../api.ts";
 import { chem } from "../components/Chem.tsx";
 import { Estimate } from "../components/Estimate.tsx";
-import { LIGHT_NOTE, type LightOption, lightModeFor, lightOption, RAIN_MIN_ZOOM } from "../map/effects.ts";
 import { FUEL_LABELS, fuelsPresent } from "../map/fuels.ts";
 import { intensities } from "../map/regionsLayer.ts";
 import { METRIC_TEXT } from "../metrics.ts";
 import { DURATION, SPRING } from "../motion.ts";
-import { LayerSwitch } from "../components/LayerSwitch.tsx";
 import { Segmented } from "../components/Segmented.tsx";
-import { linkedLightMode, type Metric, useAppStore } from "../store.ts";
+import { type Metric, useAppStore } from "../store.ts";
 
 const METRICS: { key: Metric; label: string }[] = [
   { key: "co2", label: "Emisi CO2" },
   { key: "kwh", label: "Listrik" },
 ];
 
-/**
- * The presenter's light switch. Otomatis is the light the page chooses itself: the time of day in WITA, or
- * the dawn or dusk a `?cahaya=` link asked for (they have no button of their own).
- */
-const LIGHTS: { key: LightOption; label: string }[] = [
-  { key: "auto", label: "Otomatis" },
-  { key: "day", label: "Siang" },
-  { key: "night", label: "Malam" },
-];
-const linkedNote = linkedLightMode === "auto" ? undefined : LIGHT_NOTE[linkedLightMode];
-/** What Otomatis follows, as its hover title. */
-const AUTO_TITLE = linkedNote ? `Cahaya ${linkedNote}, sesuai tautan` : "Mengikuti jam di Kalimantan Timur (WITA)";
 
-/** The map's zoom, updated when a zoom gesture or camera move ends. */
-function useMapZoom(map: MapboxMap | null): number {
-  const [zoom, setZoom] = useState(() => map?.getZoom() ?? 0);
-  useEffect(() => {
-    if (!map) return;
-    const update = () => setZoom(map.getZoom());
-    update();
-    map.on("zoomend", update);
-    return () => {
-      map.off("zoomend", update);
-    };
-  }, [map]);
-  return zoom;
-}
-
-/** Bottom legend strip: what the columns mean (with the meter), the metric switch and the layers. */
+/** The legend card: what the column heights and colours mean (the gauge), and what the plant dots mean. */
 export function Legend({ plants, regions }: { plants: PlantCollection; regions: RegionSummary[] }) {
   const metric = useAppStore((s) => s.metric);
   const setMetric = useAppStore((s) => s.setMetric);
-  const layers = useAppStore((s) => s.layers);
-  const setLayer = useAppStore((s) => s.setLayer);
-  const rain = useAppStore((s) => s.rain);
-  const setRain = useAppStore((s) => s.setRain);
-  const chosenLight = useAppStore((s) => lightOption(s.lightMode));
-  // Dawn and dusk show as Otomatis; the label then names the light: "Cahaya fajar", "Cahaya senja".
-  const lightNote = useAppStore((s) => LIGHT_NOTE[s.lightPreset]);
-  const setLightMode = useAppStore((s) => s.setLightMode);
-  const map = useAppStore((s) => s.map);
-  const zoom = useMapZoom(map);
+  const plantsShown = useAppStore((s) => s.layers.plants);
   const fuels = useMemo(() => fuelsPresent(plants), [plants]);
-  const rainHint = rain === "on" && zoom < RAIN_MIN_ZOOM;
 
   return (
-    <section className="legend" aria-label="Legenda dan lapisan peta">
-      <div className="legend__metric">
-        <span className="legend__label" id="legend-metric">
+    <Card className="legend" role="region" aria-label="Legenda peta">
+      <div className="legend__head">
+        <span className="group-label" id="legend-metric">
           Tinggi kolom
         </span>
         <Segmented
@@ -82,53 +43,20 @@ export function Legend({ plants, regions }: { plants: PlantCollection; regions: 
 
       <Meter metric={metric} regions={regions} />
 
-      <div className="legend__layers" role="group" aria-label="Lapisan peta">
-        <div className="layer">
-          <LayerSwitch label="Wilayah" on={layers.regions} onChange={(v) => setLayer("regions", v)} />
-        </div>
-        <div className="layer">
-          <LayerSwitch label="Pembangkit" on={layers.plants} onChange={(v) => setLayer("plants", v)} />
-          <ul className="fuel-key" aria-label="Jenis pembangkit">
-            {fuels.map((f) => (
-              <li key={f}>
-                <span className="fuel-dot" data-fuel={f} aria-hidden />
-                {FUEL_LABELS[f]}
-              </li>
-            ))}
-          </ul>
-        </div>
-      </div>
-
-      {/* The scene's atmosphere: light and rain. */}
-      <div className="legend__scene" role="group" aria-label="Suasana peta">
-        <span className="legend__label" id="legend-light">
-          {lightNote ? `Cahaya ${lightNote}` : "Cahaya"}
+      <div className="legend__plants" data-off={plantsShown ? undefined : ""}>
+        <span className="group-label" id="legend-plants">
+          Pembangkit
         </span>
-        <Segmented
-          labelledBy="legend-light"
-          options={LIGHTS.map((l) => ({ key: l.key, label: l.label, title: l.key === "auto" ? AUTO_TITLE : undefined }))}
-          value={chosenLight}
-          onChange={(key) => setLightMode(lightModeFor(key, linkedLightMode))}
-          indicatorId="light-indicator"
-        />
-        <div className="legend__rain">
-          <LayerSwitch label="Hujan" on={rain === "on"} onChange={(v) => setRain(v ? "on" : "auto")} />
-          <AnimatePresence initial={false}>
-            {rainHint && (
-              <motion.p
-                key="rain-hint"
-                className="layer__hint"
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1, transition: { duration: DURATION.panel } }}
-                exit={{ opacity: 0, transition: { duration: DURATION.exit } }}
-              >
-                Terlihat saat peta diperbesar sampai tingkat gedung.
-              </motion.p>
-            )}
-          </AnimatePresence>
-        </div>
+        <ul className="fuel-key" aria-labelledby="legend-plants">
+          {fuels.map((f) => (
+            <li key={f}>
+              <span className="fuel-dot" data-fuel={f} aria-hidden />
+              {FUEL_LABELS[f]}
+            </li>
+          ))}
+        </ul>
       </div>
-    </section>
+    </Card>
   );
 }
 
