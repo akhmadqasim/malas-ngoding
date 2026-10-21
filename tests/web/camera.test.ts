@@ -80,4 +80,26 @@ describe("idle sway: a slow pendulum around the resting bearing, not a full turn
     const near = { ...swayFrom(null, 178), bearing: 181 };
     expect(swayFrom(near, -179).center).toBe(178);
   });
+
+  test("at the province view it always sways around the province bearing, even after a turn to north", () => {
+    // Turned to north (bearing 0, outside the -26..-2 arc): it glides back to the arc's near end, then sways.
+    let s = swayFrom(null, 0, rest);
+    expect(s.center).toBe(rest);
+    expect(s.returning).toBe(true);
+    const seen: number[] = [];
+    for (let t = 0; t < SWAY_PERIOD_MS * 2; t += 16) {
+      s = swayStep(s, 16);
+      seen.push(s.bearing);
+    }
+    const settled = seen.slice(Math.floor(seen.length / 2));
+    expect(Math.min(...settled)).toBeGreaterThanOrEqual(rest - SWAY_DEG - 0.01);
+    expect(Math.max(...settled)).toBeLessThanOrEqual(rest + SWAY_DEG + 0.01);
+    // It never jumps: every step is a small turn.
+    for (let i = 1; i < seen.length; i++) expect(Math.abs(seen[i]! - seen[i - 1]!)).toBeLessThan(0.05);
+  });
+  test("inside the arc it picks up where the bearing is", () => {
+    const s = swayFrom(null, rest + 6, rest);
+    expect(s.returning).toBeUndefined();
+    expect(swayStep(s, 16).bearing).toBeCloseTo(rest + 6, 1);
+  });
 });

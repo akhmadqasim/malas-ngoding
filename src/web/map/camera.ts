@@ -1,4 +1,4 @@
-import type { LngLatBoundsLike, Map as MapboxMap } from "mapbox-gl";
+import mapboxgl, { type LngLatBoundsLike, type Map as MapboxMap } from "mapbox-gl";
 
 /** Overview camera for Kalimantan Timur: the whole province, tilted so the region columns read as 3D. */
 export const KALTIM_VIEW = {
@@ -89,15 +89,20 @@ export interface FlyOptions {
 export function flyToRegion(map: MapboxMap, centroid: [number, number], opts: FlyOptions = {}): void {
   const pitch = opts.pitch ?? 58;
   const padding = opts.padding ?? { top: 80, bottom: 80, left: 420, right: 80 };
+  const bearing = opts.bearing ?? map.getBearing();
   let zoom = opts.zoom;
+  let center = centroid;
   if (zoom === undefined && opts.bounds) {
-    zoom = map.cameraForBounds(opts.bounds, { padding, pitch })?.zoom;
+    // Frame the whole box inside the padding, centred on the box (the centroid can sit far off-centre).
+    const fit = map.cameraForBounds(opts.bounds, { padding, pitch, bearing });
+    zoom = fit?.zoom;
+    if (fit?.center) center = mapboxgl.LngLat.convert(fit.center).toArray() as [number, number];
   }
   map.flyTo({
-    center: centroid,
+    center,
     zoom: Math.min(zoom ?? 8.5, 10.5),
     pitch,
-    bearing: opts.bearing ?? map.getBearing(),
+    bearing,
     padding,
     duration: prefersReducedMotion() ? 0 : FLY_MS,
     curve: 1.2,
@@ -132,16 +137,33 @@ export interface SwayState {
   bearing: number;
   /** Time since this run of the sway started, in ms. */
   elapsed: number;
+  /** Outside its arc (the camera was turned away): it first glides back to the nearest end of the arc. */
+  returning?: boolean;
 }
 
 /** a - b in degrees, wrapped to [-180, 180). */
 const angleDiff = (a: number, b: number) => ((((a - b) % 360) + 540) % 360) - 180;
 
+/** Below this zoom the camera is at the province view, where the sway always centres on its bearing. */
+export const PROVINCE_SWAY_ZOOM = 7.5;
+/** The fastest the sway turns, in degrees per ms (at the middle of the swing): about 2.1 degrees a second. */
+const SWAY_TOP_SPEED = (2 * Math.PI * SWAY_DEG) / SWAY_PERIOD_MS;
+
 /**
- * Where a sway starts once the page has been idle long enough: carrying on around the same resting
- * bearing if nothing turned the camera since the last sway stopped, or else around the current bearing.
+ * Where a sway starts once the page has been idle long enough.
+ * - At the province view (`home` given): always around the province bearing, the arc the region names
+ *   are swept on, even after "Hadapkan ke utara" or a drag turned the camera. From inside the arc it picks
+ *   up where the bearing is; from outside it first glides back to the arc.
+ * - Elsewhere: carrying on around the same resting bearing if nothing turned the camera since the last
+ *   sway stopped, or else around the current bearing.
  */
-export function swayFrom(previous: SwayState | null, bearing: number): SwayState {
+export function swayFrom(previous: SwayState | null, bearing: number, home?: number): SwayState {
+  if (home !== undefined) {
+    if (previous && previous.center === home && Math.abs(angleDiff(bearing, previous.bearing)) < 0.01) return { ...previous, elapsed: 0 };
+    const offset = angleDiff(bearing, home);
+    if (Math.abs(offset) <= SWAY_DEG) return { center: home, phase: Math.asin(offset / SWAY_DEG), bearing, elapsed: 0 };
+    return { center: home, phase: Math.sign(offset) * (Math.PI / 2), bearing, elapsed: 0, returning: true };
+  }
   if (previous && Math.abs(angleDiff(bearing, previous.bearing)) < 0.01) return { ...previous, elapsed: 0 };
   return { center: bearing, phase: 0, bearing, elapsed: 0 };
 }
@@ -151,6 +173,14 @@ export function swayStep(s: SwayState, dt: number): SwayState {
   const elapsed = s.elapsed + dt;
   const x = Math.min(1, elapsed / SWAY_EASE_MS);
   const speed = x * x * (3 - 2 * x);
+  if (s.returning) {
+    // Glide toward the nearest end of the arc at the sway's own top speed, then swing on from there.
+    const edge = s.center + Math.sign(Math.sin(s.phase)) * SWAY_DEG;
+    const gap = angleDiff(edge, s.bearing);
+    const move = SWAY_TOP_SPEED * dt * speed;
+    if (Math.abs(gap) <= move) return { center: s.center, phase: s.phase, bearing: edge, elapsed };
+    return { ...s, bearing: s.bearing + Math.sign(gap) * move, elapsed };
+  }
   const phase = s.phase + ((2 * Math.PI * dt) / SWAY_PERIOD_MS) * speed;
   return { center: s.center, phase, bearing: s.center + SWAY_DEG * Math.sin(phase), elapsed };
 }
@@ -188,7 +218,7 @@ export function startIdleOrbit(map: MapboxMap): void {
       fresh = true;
     } else {
       if (fresh || !sway) {
-        sway = swayFrom(sway, map.getBearing());
+        sway = swayFrom(sway, map.getBearing(), map.getZoom() < PROVINCE_SWAY_ZOOM ? KALTIM_VIEW.bearing : undefined);
         fresh = false;
         last = 0;
       }
