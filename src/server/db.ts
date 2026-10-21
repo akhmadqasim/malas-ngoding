@@ -292,6 +292,8 @@ export async function climatologyGet(key: string): Promise<Climatology | null> {
 }
 
 export async function climatologySet(key: string, lat: number, lng: number, value: Climatology): Promise<void> {
+  // Bind the JSON as text and cast it: a string bound straight to a jsonb parameter is stored as a JSON
+  // string ("[1,2]"), not as the array.
   const months = JSON.stringify(value.pshByMonth);
   await sql`
     INSERT INTO solar_climatology (key, lat, lng, psh_by_month, psh_year, fetched_at)

@@ -57,7 +57,7 @@ describe("createMeteoLookup", () => {
     hourly: {
       time: ["2026-10-21T00:00", "2026-10-21T01:00"],
       shortwave_radiation: [0, 120.5],
-      cloud_cover: [84, null],
+      cloud_cover: [84, 100],
       precipitation: [0, 1.2],
       weather_code: [3, 61],
     },
@@ -76,8 +76,24 @@ describe("createMeteoLookup", () => {
     expect(u.searchParams.get("timezone")).toBe("Asia/Makassar");
     expect(hours).toEqual([
       { time: "2026-10-21T00:00", ghiWm2: 0, cloudPct: 84, precipMm: 0, weatherCode: 3 },
-      { time: "2026-10-21T01:00", ghiWm2: 120.5, cloudPct: 0, precipMm: 1.2, weatherCode: 61 },
+      { time: "2026-10-21T01:00", ghiWm2: 120.5, cloudPct: 100, precipMm: 1.2, weatherCode: 61 },
     ]);
+  });
+
+  test("leaves out an hour with a missing value instead of reading null as a clear, dry hour", async () => {
+    const sparse = {
+      hourly: {
+        time: ["2026-10-21T00:00", "2026-10-21T01:00", "2026-10-21T02:00", "2026-10-21T03:00"],
+        shortwave_radiation: [0, null, 300, 400],
+        cloud_cover: [84, 50, null, 20],
+        precipitation: [0, 0, 0, null],
+        weather_code: [3, 3, 3, 1],
+      },
+    };
+    const hours = await createMeteoLookup({ fetch: respond(sparse) })(-0.5, 117.15);
+    expect(hours.map((h) => h.time)).toEqual(["2026-10-21T00:00"]);
+    const allMissing = { hourly: { time: ["2026-10-21T00:00"], shortwave_radiation: [null] } };
+    await expect(createMeteoLookup({ fetch: respond(allMissing) })(0, 117)).rejects.toThrow(/empty/);
   });
 
   test("throws on an empty forecast, an HTTP error and a timeout", async () => {

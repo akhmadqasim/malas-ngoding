@@ -13,8 +13,7 @@ export function weatherKey(lat: number, lng: number): string {
   return `${roundWeatherCoord(lat).toFixed(2)},${roundWeatherCoord(lng).toFixed(2)}`;
 }
 
-/** A number, or `fallback` for null and other non-numbers (Open-Meteo sends null for missing values). */
-const num = (v: unknown, fallback = 0): number => (typeof v === "number" && Number.isFinite(v) ? v : fallback);
+const isNum = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
 
 /**
  * Seven-day hourly forecast from Open-Meteo in Asia/Makassar time. Throws on network errors, timeouts,
@@ -55,15 +54,18 @@ export function createMeteoLookup(opts: { fetch?: typeof fetch; timeoutMs?: numb
     const rain = col("precipitation");
     const code = col("weather_code");
 
+    // Open-Meteo sends null for a value it does not have. Reading that as 0 would turn a missing hour into
+    // a clear, dry one, so an hour with any missing value is left out of the forecast.
     const hours: ForecastHour[] = [];
     times.forEach((time, i) => {
-      if (typeof time !== "string") return;
+      const [g, c, p, w] = [ghi[i], cloud[i], rain[i], code[i]];
+      if (typeof time !== "string" || !isNum(g) || !isNum(c) || !isNum(p) || !isNum(w)) return;
       hours.push({
         time,
-        ghiWm2: Math.max(0, num(ghi[i])),
-        cloudPct: Math.min(100, Math.max(0, num(cloud[i]))),
-        precipMm: Math.max(0, num(rain[i])),
-        weatherCode: num(code[i]),
+        ghiWm2: Math.max(0, g),
+        cloudPct: Math.min(100, Math.max(0, c)),
+        precipMm: Math.max(0, p),
+        weatherCode: w,
       });
     });
     if (hours.length === 0) throw new Error("Open-Meteo: forecast is empty");

@@ -8,7 +8,10 @@ export type NasaLookup = (lat: number, lng: number) => Promise<Climatology>;
 const TIMEOUT_MS = 6000;
 const MONTHS = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"] as const;
 
-/** Round to 0.1 degree (about 11 km): the grid NASA POWER climatology is stored on and our cache key. */
+/**
+ * Round to 0.1 degree (about 11 km): our cache key. This is not NASA POWER's own grid, which is coarser,
+ * so neighbouring keys often come back with the same values.
+ */
 export function roundClimatologyCoord(v: number): number {
   return Math.round(v * 10) / 10;
 }

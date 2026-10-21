@@ -30,6 +30,20 @@ function warn(what: string, err: unknown): void {
   console.warn(`${what}:`, err instanceof Error ? err.message : "unknown error");
 }
 
+const inflight = new Map<string, Promise<unknown>>();
+
+/**
+ * Runs `start` once per key at a time: callers that arrive while a call for the same key is still running
+ * share its result (or its failure) instead of sending the same upstream request again.
+ */
+function once<T>(key: string, start: () => Promise<T>): Promise<T> {
+  const running = inflight.get(key) as Promise<T> | undefined;
+  if (running) return running;
+  const promise = start().finally(() => inflight.delete(key));
+  inflight.set(key, promise);
+  return promise;
+}
+
 /**
  * Nearest POI for a point, read through `poi_cache`. "No POI here" is cached too.
  * When the live lookup fails (timeout, upstream down) `poi` is null, `degraded` is true and
@@ -89,7 +103,7 @@ export async function cachedClimatology(
   }
   let fresh: Climatology;
   try {
-    fresh = await deps.nasa(lat, lng);
+    fresh = await once(`nasa:${key}`, () => deps.nasa(lat, lng));
   } catch (err) {
     warn("nasa power lookup failed", err);
     return { pshByMonth: Array<number>(12).fill(FALLBACK_PSH), pshYear: FALLBACK_PSH, fallback: FALLBACK_NOTE };
@@ -102,9 +116,24 @@ export async function cachedClimatology(
   return fresh;
 }
 
+const isFiniteNumber = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
+
+function isForecastHour(v: unknown): v is ForecastHour {
+  if (typeof v !== "object" || v === null) return false;
+  const h = v as Record<string, unknown>;
+  return (
+    typeof h.time === "string" &&
+    isFiniteNumber(h.ghiWm2) &&
+    isFiniteNumber(h.cloudPct) &&
+    isFiniteNumber(h.precipMm) &&
+    isFiniteNumber(h.weatherCode)
+  );
+}
+
+/** The cached forecast hours, or null when the payload is missing, empty or not made of valid hours. */
 function asHours(payload: Record<string, unknown> | undefined): ForecastHour[] | null {
   const hours = payload?.hours;
-  return Array.isArray(hours) && hours.length > 0 ? (hours as ForecastHour[]) : null;
+  return Array.isArray(hours) && hours.length > 0 && hours.every(isForecastHour) ? hours : null;
 }
 
 /**
@@ -131,7 +160,7 @@ export async function cachedForecast(
     return { hours: cached.hours, stale: false };
   }
   try {
-    const hours = await deps.meteo(lat, lng);
+    const hours = await once(`meteo:${key}`, () => deps.meteo(lat, lng));
     if (hours.length === 0) throw new Error("empty forecast");
     try {
       await deps.db.cacheSet("weather_cache", key, { hours });

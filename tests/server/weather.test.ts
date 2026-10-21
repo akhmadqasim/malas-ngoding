@@ -2,6 +2,7 @@ import { afterAll, afterEach, beforeEach, describe, expect, spyOn, test } from "
 import type { Server } from "bun";
 import { createServer } from "../../src/server/index.ts";
 import { currentConditions } from "../../src/server/routes/weather.ts";
+import { cachedForecast } from "../../src/server/services/cache.ts";
 import type { ForecastHour } from "../../src/shared/pvForecast.ts";
 import type { PvHour } from "../../src/shared/types.ts";
 import { type FakeDeps, type FakeUpstreams, fakeDeps } from "./fakes.ts";
@@ -166,5 +167,54 @@ describe("currentConditions", () => {
 
   test("an empty forecast gives dry night conditions", () => {
     expect(currentConditions([], noon)).toEqual({ raining: false, cloudPct: 0, precipMm: 0, isDay: false });
+  });
+});
+
+describe("cachedForecast", () => {
+  let warn: ReturnType<typeof spyOn>;
+  beforeEach(() => {
+    warn = spyOn(console, "warn").mockImplementation(() => {});
+  });
+  afterEach(() => {
+    warn.mockRestore();
+  });
+
+  test("callers that arrive while a live call is running share it", async () => {
+    const fake = fakeDeps(null, { meteo: forecast() });
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let calls = 0;
+    const deps = {
+      db: fake.deps.db,
+      meteo: async () => {
+        calls++;
+        await gate;
+        return forecast();
+      },
+    };
+    const first = cachedForecast(deps, -0.5, 117.15);
+    const second = cachedForecast(deps, -0.51, 117.14); // same 0.05 degree cache key
+    await Bun.sleep(10);
+    release();
+    const [a, b] = await Promise.all([first, second]);
+    expect(calls).toBe(1);
+    expect(a?.hours).toHaveLength(72);
+    expect(b?.hours).toHaveLength(72);
+    // Once it has finished, the next miss calls the upstream again.
+    fake.ages.set(CACHE_KEY, new Date(Date.now() - 2 * 3600_000));
+    await cachedForecast(deps, -0.5, 117.15);
+    expect(calls).toBe(2);
+  });
+
+  test("a cached payload with a malformed hour is ignored, not trusted", async () => {
+    const fake = fakeDeps(null, { meteo: forecast() });
+    fake.stored.set(CACHE_KEY, { hours: [{ time: "2026-10-21T00:00", ghiWm2: "500" }] });
+    fake.ages.set(CACHE_KEY, new Date());
+    const out = await cachedForecast(fake.deps, -0.5, 117.15);
+    expect(fake.meteoCalls).toHaveLength(1);
+    expect(out?.hours).toHaveLength(72);
+    expect(out?.stale).toBe(false);
   });
 });
