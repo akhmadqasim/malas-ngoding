@@ -52,9 +52,10 @@
   justify-content: flex-end;
   pointer-events: none;
 }
-/* Next to the building panel (same width, on the right edge): one column further left. */
+/* Next to the building panel (.building-slot: the same width, left of the map tools column): one column
+   further left. */
 .chat[data-beside] {
-  right: calc(var(--layout-inset) + var(--chat-width) + var(--chat-gap));
+  right: calc(var(--layout-reserve-right) + var(--chat-width) + var(--chat-gap));
 }
 
 .chat .chat__card {
