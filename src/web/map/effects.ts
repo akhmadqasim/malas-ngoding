@@ -70,31 +70,48 @@ const zoomReveal = (value: number): ZoomRamp => ["interpolate", ["linear"], ["zo
 
 /**
  * The rain look (docs/research/design/00-direction.md section 9): nothing below building zoom, then thin
- * light streaks. Real rain shows as light streaks against a dim sky; dark drops on pale buildings read as
- * needles. By day the dim background comes from the rain haze (`rainFog`), drawn inside the map. The
- * Mapbox example uses [2.6, 18.2] drops from zoom 11, which read as blobs.
+ * bright streaks, crisp in every light. Real rain shows as light streaks against a dim sky; dark drops on
+ * pale buildings read as needles, and the refraction pass (`distortion-strength`) turned the streaks into
+ * faint glassy smears, so it is off (which also skips a full-screen copy per frame). By day the dim
+ * background comes from the rain haze (`rainFog`), drawn inside the map. The Mapbox example uses
+ * [2.6, 18.2] drops from zoom 11, which read as blobs.
  */
 export function rainSpec(tone: Tone, colors: { color: string; vignetteColor: string }) {
   const light = tone === "light";
   return {
-    density: zoomReveal(light ? 1 : 0.9),
+    density: zoomReveal(1),
     intensity: 0.85,
     color: colors.color,
-    opacity: light ? 0.72 : 0.6,
+    // Full strength by day: on the pale city a softer streak disappears.
+    opacity: light ? 1 : 0.95,
     vignette: zoomReveal(light ? 0.3 : 0.35),
     "vignette-color": colors.vignetteColor,
     direction: [0, 80] as [number, number],
-    "droplet-size": (light ? [1, 12] : [1.1, 11]) as [number, number],
-    "distortion-strength": light ? 0.35 : 0.3,
+    "droplet-size": [1.3, 14] as [number, number],
+    "distortion-strength": 0,
     // Keeps the middle of the screen, where the user clicks buildings, a little clearer.
     "center-thinning": 0.15,
   } satisfies RainSpecification;
 }
 
-/** The rain haze at full rain: fog closing in from just behind the camera, and how it meets the sky. */
-const RAIN_FOG = { range: [-1, 2.5] as [number, number], horizonBlend: 0.25 };
+/**
+ * Fog range of the rain haze at full rain. Mapbox fog is (1 - e^(-6r))^3 of the way along it, so this
+ * dims the map centre by about 30% and the city two camera-distances further by about 70%: dark enough
+ * for the light streaks to show, light enough that the whole city stays visible.
+ */
+export const RAIN_HAZE_RANGE: [number, number] = [-2, 9];
+/** The rain haze at full rain: its fog range, and how it meets the sky. */
+const RAIN_FOG = { range: RAIN_HAZE_RANGE, horizonBlend: 0.2 };
 
 type FogValue = FogSpecification[keyof FogSpecification];
+
+/**
+ * A value that goes inside an expression. A plain array such as a fog range `[1, 10]` must be written
+ * `["literal", [1, 10]]` there: GL JS 3.33 happens to coerce a bare one, other versions reject it, and
+ * `setFog` then fails with only a console error.
+ */
+const asExpressionValue = (value: unknown): unknown =>
+  Array.isArray(value) && typeof value[0] !== "string" ? ["literal", value] : value;
 
 /**
  * A basemap fog value carried up to building zoom and then faded into the rain value between
@@ -105,7 +122,8 @@ function spliceAtRainZoom(base: FogValue | undefined, rain: unknown): unknown {
   if (base === undefined || base === null) return rain;
   const isZoomCurve =
     Array.isArray(base) && base[0] === "interpolate" && Array.isArray(base[2]) && (base[2] as unknown[])[0] === "zoom";
-  if (!isZoomCurve) return ["interpolate", ["linear"], ["zoom"], RAIN_MIN_ZOOM, base, RAIN_FULL_ZOOM, rain];
+  const fade = (start: unknown) => [RAIN_MIN_ZOOM, asExpressionValue(start), RAIN_FULL_ZOOM, asExpressionValue(rain)];
+  if (!isZoomCurve) return ["interpolate", ["linear"], ["zoom"], ...fade(base)];
   const [, kind, input, ...stops] = base as unknown[];
   const kept: unknown[] = [];
   let atRain: unknown = stops[1];
@@ -113,9 +131,9 @@ function spliceAtRainZoom(base: FogValue | undefined, rain: unknown): unknown {
     const zoom = stops[i] as number;
     if (zoom > RAIN_MIN_ZOOM) break;
     atRain = stops[i + 1];
-    if (zoom < RAIN_MIN_ZOOM) kept.push(zoom, atRain);
+    if (zoom < RAIN_MIN_ZOOM) kept.push(zoom, asExpressionValue(atRain));
   }
-  return ["interpolate", kind, input, ...kept, RAIN_MIN_ZOOM, atRain, RAIN_FULL_ZOOM, rain];
+  return ["interpolate", kind, input, ...kept, ...fade(atRain)];
 }
 
 /**
@@ -130,7 +148,7 @@ export function rainFog(base: FogSpecification | null, colors: { color: string; 
     ...from,
     color: splice("color", colors.color),
     "high-color": splice("high-color", colors.highColor),
-    range: splice("range", base ? ["literal", RAIN_FOG.range] : RAIN_FOG.range),
+    range: splice("range", RAIN_FOG.range),
     "horizon-blend": splice("horizon-blend", RAIN_FOG.horizonBlend),
   } as FogSpecification;
 }

@@ -7,6 +7,7 @@ import {
   lightPresetFor,
   overcastOpacity,
   presetTone,
+  RAIN_HAZE_RANGE,
   RAIN_MIN_ZOOM,
   rainFog,
   rainSpec,
@@ -14,6 +15,7 @@ import {
   setRainEffect,
   witaHour,
 } from "../../src/web/map/effects.ts";
+import { expressionErrors, styleSpec } from "./styleSpec.ts";
 
 // WITA is UTC+8, so 05:00 WITA is 21:00 UTC the day before.
 const wita = (hh: number, mm = 0) => new Date(Date.UTC(2026, 9, 21, hh - 8, mm));
@@ -91,10 +93,15 @@ describe("rain only shows at building zoom", () => {
 
   test("drops are thin streaks, far smaller than the Mapbox example's [2.6, 18.2]", () => {
     const [across, along] = spec["droplet-size"];
-    expect(across).toBeLessThanOrEqual(1.2);
-    expect(along).toBeLessThanOrEqual(12);
+    expect(across).toBeLessThanOrEqual(1.5);
+    expect(along).toBeLessThanOrEqual(14);
     expect(spec["center-thinning"]).toBeGreaterThan(0);
-    expect(spec["distortion-strength"]).toBeLessThanOrEqual(0.4);
+  });
+
+  test("at night the streaks are bright and crisp, not faint glassy smears (no refraction)", () => {
+    expect(spec.opacity).toBeGreaterThanOrEqual(0.9);
+    expect(spec["distortion-strength"]).toBe(0);
+    expect(atZoom(spec.density, 16.5)).toBe(1);
   });
 
   test("colours come from the caller (design tokens), not from literals", () => {
@@ -111,9 +118,11 @@ describe("rain on a light ground (day, dawn)", () => {
   });
   test("light streaks, like real rain against an overcast sky (dark drops read as needles)", () => {
     expect(light.color).toBe("#e2e5ea");
-    expect(light.opacity).toBeCloseTo(0.72);
-    expect(light["droplet-size"]).toEqual([1, 12]);
-    expect(light["distortion-strength"]).toBe(0.35);
+    // Full strength: on the pale city a softer streak disappears.
+    expect(light.opacity).toBe(1);
+    // One streak shape in every light.
+    expect(light["droplet-size"]).toEqual(rainSpec("dark", { color: "#e2e5ea", vignetteColor: "#283040" })["droplet-size"]);
+    expect(light["distortion-strength"]).toBe(0);
     expect(atZoom(light.density, 16.5)).toBe(1);
   });
 });
@@ -146,19 +155,61 @@ describe("rain haze: the overcast drawn inside the map, so light drops show agai
       15,
       ["literal", [1, 4]],
       16.5,
-      ["literal", [-1, 2.5]],
+      ["literal", RAIN_HAZE_RANGE],
     ]);
+  });
+
+  test("the haze dims the city without swallowing it: thin at the centre, never solid within the view", () => {
+    // Mapbox fog opacity at a depth (0 = the map centre, 1 = one camera-to-centre distance further):
+    // (1 - e^(-6r))^3 with r the share of `range` (fog_helpers.ts, GL JS 3.33).
+    const opacityAt = (depth: number) => {
+      const [start, end] = RAIN_HAZE_RANGE;
+      const r = Math.max(0, (depth - start) / (end - start));
+      return Math.min(1, 1.00747 * (1 - Math.exp(-6 * r)) ** 3);
+    };
+    expect(opacityAt(0)).toBeLessThan(0.45);
+    expect(opacityAt(2)).toBeLessThan(0.8);
+    expect(opacityAt(0)).toBeGreaterThan(0.2);
   });
 
   test("a plain basemap value fades into the rain value", () => {
     expect(fog["high-color"]).toEqual(["interpolate", ["linear"], ["zoom"], 15, "#ffffff", 16.5, "#4a525e"]);
-    expect(fog["horizon-blend"]).toEqual(["interpolate", ["exponential", 1.2], ["zoom"], 5, 0.01, 7, 0.1, 15, 0.1, 16.5, 0.25]);
+    expect(fog["horizon-blend"]).toEqual(["interpolate", ["exponential", 1.2], ["zoom"], 5, 0.01, 7, 0.1, 15, 0.1, 16.5, 0.2]);
   });
 
   test("without a basemap fog the rain values apply as they are", () => {
     const bare = rainFog(null, colors);
     expect(bare.color).toBe("#5f6874");
-    expect(bare.range).toEqual([-1, 2.5]);
+    expect(bare.range).toEqual(RAIN_HAZE_RANGE);
+  });
+
+  test("a plain array from the basemap goes into the fade as a literal, the form every Mapbox version reads", () => {
+    const plain = rainFog({ range: [0.5, 10], color: "#ffffff" } as FogSpecification, colors);
+    expect(plain.range).toEqual(["interpolate", ["linear"], ["zoom"], 15, ["literal", [0.5, 10]], 16.5, ["literal", RAIN_HAZE_RANGE]]);
+    // The same inside a zoom curve whose stops are bare arrays.
+    const curve = rainFog({ range: ["interpolate", ["linear"], ["zoom"], 13, [1, 10], 15, [1, 4]] } as unknown as FogSpecification, colors);
+    expect(curve.range).toEqual(["interpolate", ["linear"], ["zoom"], 13, ["literal", [1, 10]], 15, ["literal", [1, 4]], 16.5, ["literal", RAIN_HAZE_RANGE]]);
+  });
+
+  test("Mapbox accepts the hazed fog: every spliced property parses, and the fog validates", () => {
+    // The fog of the Standard style as the app captures it (map.getFog(), Mapbox GL 3.33, day light).
+    const standard = {
+      "vertical-range": [30, 120],
+      range: ["interpolate", ["linear"], ["zoom"], 13, ["literal", [1, 10]], 15, ["literal", [1, 4]], 22, ["literal", [14, 20]]],
+      color: ["interpolate", ["exponential", 1.2], ["zoom"], 5, ["interpolate", ["linear"], ["measure-light", "brightness"], 0.1, "hsla(0, 0%, 20%, 1)", 0.4, "hsla(0, 0%, 100%, 1)"], 7, "hsla(200, 60%, 98%, 0.9)"],
+      "high-color": ["interpolate", ["exponential", 1.2], ["zoom"], 5, "hsla(215, 100%, 20%, 1)", 7, "hsla(0, 0%, 100%, 1)"],
+      "space-color": ["interpolate", ["exponential", 1.2], ["zoom"], 5, "hsl(0, 0%, 0%)", 7, "hsl(210, 40%, 30%)"],
+      "horizon-blend": ["interpolate", ["exponential", 1.2], ["zoom"], 5, 0.01, 7, ["interpolate", ["exponential", 1.2], ["measure-light", "brightness"], 0.35, 0.03, 0.4, 0.1]],
+      "star-intensity": ["interpolate", ["exponential", 1.2], ["zoom"], 5, 0.4, 7, 0],
+    };
+    for (const base of [standard, { range: [0.5, 10], color: "#ffffff", "horizon-blend": 0.1 }]) {
+      const fog = rainFog(base as unknown as FogSpecification, colors) as Record<string, unknown>;
+      for (const key of ["color", "high-color", "range", "horizon-blend"]) {
+        expect(expressionErrors(fog[key], (styleSpec.latest.fog as Record<string, unknown>)[key])).toEqual([]);
+      }
+      const errors = styleSpec.validate({ version: 8, sources: {}, layers: [], fog } as unknown as Parameters<typeof styleSpec.validate>[0]);
+      expect(errors.map((e) => e.message)).toEqual([]);
+    }
   });
 });
 
