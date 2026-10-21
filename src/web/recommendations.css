@@ -14,8 +14,8 @@
 }
 .recs__title {
   margin: 0;
-  font-size: var(--text-base);
-  line-height: var(--text-base--line-height);
+  font-size: var(--text-lg);
+  line-height: var(--text-lg--line-height);
   font-weight: var(--font-weight-semibold);
   color: var(--foreground);
 }
@@ -27,7 +27,7 @@
 }
 .recs__key {
   margin: calc(var(--spacing) * 2) 0 0;
-  font-size: var(--text-2xs);
+  font-size: var(--text-xs);
   line-height: var(--leading-relaxed);
   color: var(--faint);
 }
@@ -210,6 +210,15 @@
   translate: calc(var(--spacing) * 4) 0;
   opacity: 0;
 }
+@media (prefers-reduced-motion: reduce) {
+  .drawer__dialog.methodology {
+    transition: opacity var(--drawer-enter-duration) var(--drawer-enter-ease);
+  }
+  .drawer__content--right[data-entering="true"] .methodology,
+  .drawer__content--right[data-exiting="true"] .methodology {
+    translate: 0 0;
+  }
+}
 .methodology .methodology__close {
   top: calc(var(--spacing) * 4);
   right: calc(var(--spacing) * 4);
@@ -339,6 +348,25 @@
 /* Rows whose value has no verified source. */
 .methodology__table tr[data-assumption] {
   background: var(--surface-secondary);
+}
+.methodology__cell-note {
+  display: block;
+  margin-top: calc(var(--spacing) * 0.5);
+  font-weight: var(--font-weight-regular);
+  color: var(--muted);
+  white-space: nowrap;
+}
+.methodology__table--split tbody th {
+  vertical-align: top;
+}
+/* Read by screen readers only. */
+.methodology__sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 .methodology__assumption {
   font-style: italic;
