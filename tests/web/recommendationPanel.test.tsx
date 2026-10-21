@@ -8,7 +8,10 @@ import {
   RecommendationFailure,
   RecommendationList,
   RecommendationLoading,
+  RecommendationRefreshButton,
+  RecommendationRefreshNote,
   recommendationsHeading,
+  REFRESH_KEPT,
 } from "../../src/web/panels/RecommendationPanel.tsx";
 
 const ai: Recommendations = {
@@ -122,5 +125,24 @@ describe("the heading names who the advice is for", () => {
   });
   test("without a name it addresses local government in general", () => {
     expect(recommendationsHeading()).toBe("Rekomendasi untuk pemerintah daerah");
+  });
+});
+
+describe("Perbarui: writing the recommendations again", () => {
+  test("a quiet text button that says what it does, and says it is working while it runs", () => {
+    const idle = renderToStaticMarkup(<RecommendationRefreshButton pending={false} onRefresh={() => {}} />);
+    expect(idle).toContain("Perbarui");
+    expect(idle).toContain("button--ghost");
+    expect(idle).not.toContain("data-pending");
+    const busy = renderToStaticMarkup(<RecommendationRefreshButton pending onRefresh={() => {}} />);
+    expect(busy).toContain("Memperbarui");
+    expect(busy).toContain("data-pending");
+  });
+  test("one calm line while it runs, and an honest one when nothing new came back", () => {
+    expect(renderToStaticMarkup(<RecommendationRefreshNote state={{ status: "idle" }} />)).toBe("");
+    const pending = renderToStaticMarkup(<RecommendationRefreshNote state={{ status: "pending" }} />);
+    expect(pending).toContain('role="status"');
+    expect(pending).toContain("8 sampai 10 detik");
+    expect(renderToStaticMarkup(<RecommendationRefreshNote state={{ status: "kept", message: REFRESH_KEPT }} />)).toContain("versi sebelumnya");
   });
 });

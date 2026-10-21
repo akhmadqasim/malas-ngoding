@@ -100,6 +100,9 @@ export const api = {
   /** The first answer for a region can take 8 to 10 s (Claude writes it); later ones come from the cache. */
   recommendations: (regionId: string, signal?: AbortSignal) =>
     request<Recommendations>(`/api/recommendations/${encodeURIComponent(regionId)}`, { signal }),
+  /** Asks Claude to write the region's recommendations again; the server keeps the old copy if that fails. */
+  refreshRecommendations: (regionId: string, signal?: AbortSignal) =>
+    request<Recommendations>(`/api/recommendations/${encodeURIComponent(regionId)}/refresh`, { method: "POST", signal }),
   equivalents: () => request<EquivalentFactor[]>("/api/equivalents"),
   estimateBuilding: (input: BuildingInput) => post<BuildingEstimate>("/api/buildings/estimate", input),
   simulateSolar: (input: SolarRequest) => post<SolarSimulation>("/api/solar/simulate", input),

@@ -1,5 +1,6 @@
+import { ArrowsRotateRight } from "@gravity-ui/icons";
 import { Accordion, Button, ProgressBar, Skeleton } from "@heroui/react";
-import { useCallback, useEffect, useId, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import type { RecommendationCategory, RecommendationItem, Recommendations, RegionSummary } from "../../shared/types.ts";
 import { ApiError, api } from "../api.ts";
 import { chem } from "../components/Chem.tsx";
@@ -55,10 +56,26 @@ export function recommendationsHeading(regionName?: string, kind?: RegionSummary
 }
 
 type State = { status: "loading" } | { status: "ready"; data: Recommendations } | { status: "error"; message: string };
+/** The "Perbarui" request: none, running, or a sentence about how it ended when it brought nothing new. */
+export type RefreshState = { status: "idle" } | { status: "pending" } | { status: "kept"; message: string };
 
-function useRecommendations(regionId: string): [State, () => void] {
+/** Said when the server answered a refresh with the copy it already had (Claude could not write a new one). */
+export const REFRESH_KEPT = "AI belum bisa menulis ulang sekarang, jadi yang tampil masih versi sebelumnya.";
+
+function useRecommendations(regionId: string): [State, () => void, RefreshState, () => void] {
   const [state, setState] = useState<State>({ status: "loading" });
   const [attempt, setAttempt] = useState(0);
+  const [refreshState, setRefreshState] = useState<RefreshState>({ status: "idle" });
+  const refreshing = useRef<AbortController | null>(null);
+  // Another region (or leaving the panel) drops a refresh still on its way.
+  useEffect(
+    () => () => {
+      refreshing.current?.abort();
+      refreshing.current = null;
+      setRefreshState({ status: "idle" });
+    },
+    [regionId],
+  );
   useEffect(() => {
     const abort = new AbortController();
     setState({ status: "loading" });
@@ -76,7 +93,30 @@ function useRecommendations(regionId: string): [State, () => void] {
     return () => abort.abort();
   }, [regionId, attempt]);
   const retry = useCallback(() => setAttempt((n) => n + 1), []);
-  return [state, retry];
+  const shownAt = state.status === "ready" ? state.data.generatedAt : null;
+  const refresh = useCallback(() => {
+    if (refreshing.current) return;
+    const abort = new AbortController();
+    refreshing.current = abort;
+    setRefreshState({ status: "pending" });
+    api
+      .refreshRecommendations(regionId, abort.signal)
+      .then((data) => {
+        if (abort.signal.aborted) return;
+        setState({ status: "ready", data });
+        // The server keeps the old copy when Claude cannot write a new one: say so instead of pretending.
+        setRefreshState(data.generatedAt === shownAt ? { status: "kept", message: REFRESH_KEPT } : { status: "idle" });
+      })
+      .catch((err: unknown) => {
+        if (abort.signal.aborted) return;
+        const reason = err instanceof ApiError ? ` ${err.message}` : "";
+        setRefreshState({ status: "kept", message: `Rekomendasi belum bisa diperbarui.${reason} Yang tampil masih versi sebelumnya.` });
+      })
+      .finally(() => {
+        if (refreshing.current === abort) refreshing.current = null;
+      });
+  }, [regionId, shownAt]);
+  return [state, retry, refreshState, refresh];
 }
 
 /** Milliseconds since `active` turned on, updated every `stepMs`; 0 while off. */
@@ -104,16 +144,20 @@ const SLOW_MS = 12_000;
  * The name and kind only shape the heading; without them it says "pemerintah daerah".
  */
 export function RecommendationPanel({ regionId, regionName, kind }: { regionId: string; regionName?: string; kind?: RegionSummary["kind"] }) {
-  const [state, retry] = useRecommendations(regionId);
+  const [state, retry, refreshState, refresh] = useRecommendations(regionId);
   const elapsed = useElapsed(state.status === "loading", TICK_MS);
   const headingId = useId();
   const showLoading = state.status === "loading" && elapsed > 0;
 
   return (
-    <section className="recs" aria-labelledby={headingId} aria-busy={state.status === "loading"}>
-      <h3 id={headingId} className="recs__title">
-        {recommendationsHeading(regionName, kind)}
-      </h3>
+    <section className="recs" aria-labelledby={headingId} aria-busy={state.status === "loading" || refreshState.status === "pending"}>
+      <div className="recs__head">
+        <h3 id={headingId} className="recs__title">
+          {recommendationsHeading(regionName, kind)}
+        </h3>
+        {state.status === "ready" && <RecommendationRefreshButton pending={refreshState.status === "pending"} onRefresh={refresh} />}
+      </div>
+      {state.status === "ready" && <RecommendationRefreshNote state={refreshState} />}
       {state.status === "ready" && <RecommendationList data={state.data} />}
       {state.status === "error" && <RecommendationFailure message={state.message} onRetry={retry} />}
       {showLoading && <RecommendationLoading elapsedMs={elapsed} />}
@@ -154,6 +198,31 @@ export function RecommendationLoading({ elapsedMs }: { elapsedMs: number }) {
         ))}
       </div>
     </div>
+  );
+}
+
+/**
+ * "Perbarui": asks Claude to write the region's recommendations again (the refresh route). A quiet text
+ * button beside the heading; while it runs it says so and cannot be pressed twice.
+ */
+export function RecommendationRefreshButton({ pending, onRefresh }: { pending: boolean; onRefresh: () => void }) {
+  return (
+    <Button size="sm" variant="ghost" className="recs__refresh" isPending={pending} onPress={onRefresh}>
+      <ArrowsRotateRight aria-hidden />
+      {pending ? "Memperbarui" : "Perbarui"}
+    </Button>
+  );
+}
+
+/** One quiet line under the heading while a refresh runs, or when it ended without new items. */
+export function RecommendationRefreshNote({ state }: { state: RefreshState }) {
+  if (state.status === "idle") return null;
+  return (
+    <p className="recs__note recs__note--refresh" role="status">
+      {state.status === "pending"
+        ? "Menulis ulang rekomendasi dari data wilayah ini. Biasanya butuh 8 sampai 10 detik; daftar di bawah tetap bisa dibaca."
+        : state.message}
+    </p>
   );
 }
 

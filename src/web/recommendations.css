@@ -12,7 +12,28 @@
   padding-top: calc(var(--spacing) * 3);
   border-top: 1px solid var(--border);
 }
+/* The heading, with the quiet "Perbarui" button at its right end. */
+.recs__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: calc(var(--spacing) * 2);
+}
+.recs .recs__refresh {
+  flex-shrink: 0;
+  margin-right: calc(var(--spacing) * -2);
+  padding-inline: calc(var(--spacing) * 2);
+  gap: calc(var(--spacing) * 1);
+}
+.recs .recs__refresh svg {
+  width: calc(var(--spacing) * 3.5);
+  height: calc(var(--spacing) * 3.5);
+}
+.recs__note--refresh {
+  margin: calc(var(--spacing) * 1) 0 0;
+}
 .recs__title {
+  min-width: 0;
   margin: 0;
   font-size: var(--text-lg);
   line-height: var(--text-lg--line-height);
