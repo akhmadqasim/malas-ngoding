@@ -130,3 +130,33 @@ export function estimateBuilding(
     assumptions,
   };
 }
+
+/** Mean Earth radius in metres (IUGG), the sphere the footprint area is measured on. */
+const EARTH_RADIUS_M = 6_371_008.8;
+const RAD = Math.PI / 180;
+
+/** Signed spherical area of one ring of [lng, lat] points (Chamberlain and Duquette, 2007). */
+function ringAreaM2(ring: number[][]): number {
+  const pts = ring.filter((p) => p.length >= 2);
+  if (pts.length !== ring.length) return Number.NaN;
+  const n = pts.length;
+  if (n < 3) return 0;
+  let sum = 0;
+  for (let i = 0; i < n; i++) {
+    const [lng1 = 0, lat1 = 0] = pts[i]!;
+    const [lng2 = 0, lat2 = 0] = pts[(i + 1) % n]!;
+    sum += (lng2 - lng1) * RAD * (2 + Math.sin(lat1 * RAD) + Math.sin(lat2 * RAD));
+  }
+  return (sum * EARTH_RADIUS_M * EARTH_RADIUS_M) / 2;
+}
+
+/**
+ * Area in m2 of a GeoJSON polygon's rings ([lng, lat] degrees): the outer ring minus its holes, on a
+ * sphere, whatever the winding order. An unclosed ring counts as closed. Bad input gives 0, never NaN.
+ */
+export function polygonAreaM2(coords: number[][][]): number {
+  const [outer, ...holes] = coords;
+  if (!outer) return 0;
+  const area = Math.abs(ringAreaM2(outer)) - holes.reduce((sum, h) => sum + Math.abs(ringAreaM2(h)), 0);
+  return Number.isFinite(area) && area > 0 ? area : 0;
+}

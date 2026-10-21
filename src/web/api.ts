@@ -1,7 +1,7 @@
 import type { CurrentConditions } from "../server/routes/weather.ts";
 import type { SolarSimulation } from "../server/routes/solar.ts";
 import type { summariseDays } from "../shared/pvForecast.ts";
-import type { BuildingEstimate, BuildingInput, FuelType, GridMix, PvHour, Recommendations, RegionSummary } from "../shared/types.ts";
+import type { BuildingEstimate, BuildingInput, EquivalentFactor, FuelType, GridMix, PvHour, Recommendations, RegionSummary } from "../shared/types.ts";
 
 // Typed fetch helpers for the server API. Later tasks add their own endpoints here.
 
@@ -98,6 +98,7 @@ export const api = {
   /** The first answer for a region can take 8 to 10 s (Claude writes it); later ones come from the cache. */
   recommendations: (regionId: string, signal?: AbortSignal) =>
     request<Recommendations>(`/api/recommendations/${encodeURIComponent(regionId)}`, { signal }),
+  equivalents: () => request<EquivalentFactor[]>("/api/equivalents"),
   estimateBuilding: (input: BuildingInput) => post<BuildingEstimate>("/api/buildings/estimate", input),
   simulateSolar: (input: SolarRequest) => post<SolarSimulation>("/api/solar/simulate", input),
   weather: (lat: number, lng: number, kWp: number) =>
