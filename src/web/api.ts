@@ -1,7 +1,7 @@
 import type { CurrentConditions } from "../server/routes/weather.ts";
 import type { SolarSimulation } from "../server/routes/solar.ts";
 import type { summariseDays } from "../shared/pvForecast.ts";
-import type { BuildingEstimate, BuildingInput, EquivalentFactor, FuelType, GridMix, PvHour, Recommendations, RegionSummary } from "../shared/types.ts";
+import type { BuildingEstimate, BuildingInput, BuildingType, EquivalentFactor, FuelType, GridMix, PvHour, Recommendations, RegionSummary } from "../shared/types.ts";
 
 // Typed fetch helpers for the server API. Later tasks add their own endpoints here.
 
@@ -46,6 +46,8 @@ export interface SolarRequest {
   roofAreaM2: number;
   kwhYear: number;
   backupHours: number;
+  /** Picks the PLN tariff and the daytime use on the server; optional for older callers. */
+  buildingType?: BuildingType;
 }
 
 export interface WeatherResponse {

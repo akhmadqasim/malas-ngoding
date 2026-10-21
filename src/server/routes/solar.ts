@@ -1,9 +1,11 @@
+import { fmtNumber } from "../../shared/format.ts";
 import { simulateSolar } from "../../shared/solar.ts";
-import type { SolarResult } from "../../shared/types.ts";
+import type { BuildingType, SolarResult } from "../../shared/types.ts";
 import costs from "../../../data/seed/solar-costs.json";
 import type { AppDeps } from "../index.ts";
 import { type RouteTable, error, json, safe } from "../http.ts";
 import { cachedClimatology } from "../services/cache.ts";
+import { chooseTariff, daytimeShareFor, isBuildingType } from "../services/solarTariff.ts";
 
 const MAX_ROOF_M2 = 50_000;
 const MAX_BACKUP_HOURS = 72;
@@ -22,7 +24,12 @@ export interface SolarRequestInput {
   roofAreaM2: number;
   kwhYear: number;
   backupHours: number;
+  /** Picks the tariff and the daytime share; without it the simulation says the type is unknown. */
+  buildingType?: BuildingType;
 }
+
+/** No credit for power sent to the grid (Permen ESDM 2/2024, Art. 13). */
+export const NO_EXPORT_NOTE = "Kelebihan listrik ke jaringan PLN tidak mengurangi tagihan (Permen ESDM 2/2024).";
 
 /** Validates a simulation request (the HTTP body or a chat tool input) and clamps roof and backup hours. */
 export function parseSolarInput(body: unknown): { input: SolarRequestInput } | { problem: string } {
@@ -35,6 +42,7 @@ export function parseSolarInput(body: unknown): { input: SolarRequestInput } | {
   if (!isNum(b.roofAreaM2) || b.roofAreaM2 <= 0) return { problem: "Luas atap (roofAreaM2) harus berupa angka lebih dari 0." };
   if (!isNum(b.kwhYear) || b.kwhYear <= 0) return { problem: "Konsumsi listrik (kwhYear) harus berupa angka lebih dari 0." };
   if (!isNum(b.backupHours) || b.backupHours < 0) return { problem: "Jam cadangan baterai (backupHours) harus berupa angka 0 atau lebih." };
+  if (b.buildingType !== undefined && !isBuildingType(b.buildingType)) return { problem: "Jenis gedung (buildingType) tidak dikenal." };
   return {
     input: {
       lat: b.lat,
@@ -42,33 +50,48 @@ export function parseSolarInput(body: unknown): { input: SolarRequestInput } | {
       roofAreaM2: Math.min(b.roofAreaM2, MAX_ROOF_M2),
       kwhYear: b.kwhYear,
       backupHours: Math.min(b.backupHours, MAX_BACKUP_HOURS),
+      ...(b.buildingType !== undefined ? { buildingType: b.buildingType as BuildingType } : {}),
     },
   };
 }
 
 /**
- * Rooftop solar for a point with the seed tariff and costs, NASA POWER sun hours (cached, with a seed
- * fallback) and the grid factor. Used by the HTTP route and the chat, so both give the same numbers.
+ * Rooftop solar for a point: the tariff and daytime use of the building type, the seed costs, NASA POWER
+ * sun hours (cached, with a seed fallback) and the Kepmen emission factor for solar. Used by the HTTP route
+ * and the chat, so both give the same numbers. Every assumption comes back as a sentence.
  */
 export async function simulateSolarAt(
   deps: Pick<AppDeps, "db" | "nasa">,
-  { lat, lng, roofAreaM2, kwhYear, backupHours }: SolarRequestInput,
+  { lat, lng, roofAreaM2, kwhYear, backupHours, buildingType }: SolarRequestInput,
 ): Promise<SolarSimulation> {
-  const [climate, grid] = await Promise.all([cachedClimatology(deps, lat, lng), deps.db.getGridMix()]);
+  const climate = await cachedClimatology(deps, lat, lng);
+  const tariff = chooseTariff(buildingType, kwhYear);
+  const daytime = daytimeShareFor(buildingType);
   const result = simulateSolar({
     roofAreaM2,
     kwhYear,
     peakSunHours: climate.pshYear,
     backupHours,
-    tariffRpPerKwh: costs.tariffs.R1_1300,
+    tariffRpPerKwh: tariff.rpPerKwh,
     costRpPerKwp: costs.costRpPerKwp,
     batteryRpPerKwh: costs.batteryRpPerKwh,
-    gridFactorKgPerKwh: grid.factorKgPerKwh,
+    gridFactorKgPerKwh: costs.solarFactorKgPerKwh,
+    daytimeShare: daytime.share,
   });
   const assumptions = [
-    `Tarif listrik Rp ${costs.tariffs.R1_1300.toLocaleString("id-ID")} per kWh (golongan R-1 1300 VA).`,
+    tariff.note,
+    daytime.note,
+    NO_EXPORT_NOTE,
     `Biaya panel Rp ${costs.costRpPerKwp.toLocaleString("id-ID")} per kWp dan baterai Rp ${costs.batteryRpPerKwh.toLocaleString("id-ID")} per kWh (perkiraan).`,
   ];
+  if (result.batteryKwh > 0) {
+    assumptions.push(
+      `Baterai hanya cadangan saat listrik padam untuk beban rata-rata gedung; tidak menambah penghematan. Tanpa baterai, balik modal ${fmtNumber(result.paybackPanelYears, 1)} tahun.`,
+    );
+  }
+  assumptions.push(
+    `CO2 yang dihindari memakai faktor ${costs.solarFactorKgPerKwh.toLocaleString("id-ID")} kg CO2 per kWh, faktor emisi untuk PLTS di sistem Mahakam (Kepmen ESDM 163.K/2021, data 2019).`,
+  );
   if (climate.fallback) assumptions.push(climate.fallback);
   return {
     ...result,

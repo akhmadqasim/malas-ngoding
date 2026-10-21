@@ -5,7 +5,33 @@
     "R1_1300": 1444.7,
     "R1_2200": 1444.7,
     "B2": 1444.7,
-    "P1": 1699.53
+    "B3": 1114.74,
+    "P1": 1699.53,
+    "I3": 1114.74
   },
-  "source": "PV: Rp14-17 million/kWp on-grid (sobatbangun.com Apr 2026, vendor blogs; PLN 2022 figure Rp15 million). Battery: marketplace LiFePO4 listings 2026, Rp1.8-3.3 million/kWh. Tariffs: detik.com Oct 2026, same as Q3 2026 (news, not the Kepmen)."
+  "tariffLabels": {
+    "R1_1300": "R-1/TR 1.300 VA",
+    "B2": "B-2/TR 6.600 VA–200 kVA",
+    "B3": "B-3/TM di atas 200 kVA",
+    "P1": "P-1/TR 6.600 VA–200 kVA",
+    "I3": "I-3/TM di atas 200 kVA"
+  },
+  "largeKwhYear": 600000,
+  "daytimeShare": {
+    "rumah": 0.4,
+    "ruko": 0.6,
+    "kantor": 0.85,
+    "pemerintahan": 0.85,
+    "sekolah": 0.85,
+    "kampus": 0.8,
+    "rumah_sakit": 0.6,
+    "hotel": 0.7,
+    "mal": 0.7,
+    "ibadah": 0.5,
+    "gudang": 0.7,
+    "industri": 0.6
+  },
+  "daytimeShareUnknown": 0.6,
+  "solarFactorKgPerKwh": 1.13,
+  "source": "PV: Rp14-17 million/kWp on-grid (sobatbangun.com Apr 2026, vendor blogs; PLN 2022 figure Rp15 million). Battery: marketplace LiFePO4 listings 2026, Rp1.8-3.3 million/kWh. Tariffs: the 13 non-subsidised classes held unchanged for Q4 2026 (Oct-Dec) at the Q3 2026 rates (news reports of the ESDM decision, not the official table: investortrust.id 'PLN Bikin Tenang, Tarif Listrik Triwulan IV Enggak Naik', journalarta.com 6 and 12 Oct 2026, fortuneidn.com 1 Oct 2026; I-3 and I-4 from investortrust.id Jan-Mar 2026 list, unchanged since): R-1/TR 1.300 VA and B-2/TR 6.600 VA-200 kVA Rp1.444,70; B-3/TM and I-3/TM above 200 kVA Rp1.114,74 (LWBP); P-1/TR 6.600 VA-200 kVA Rp1.699,53. Social (S) classes for schools, places of worship and hospitals are subsidised and were not verified from an official source, so they are not modelled. largeKwhYear: asumsi (above about 600 MWh a year a building needs more than 200 kVA at load factor 0.4 and power factor 0.85). daytimeShare: asumsi (share of the yearly load used while the sun shines, by building type; perkiraan). solarFactorKgPerKwh: Kepmen ESDM 163.K/HK.02/MEM.S/2021 Lampiran no. 73 Mahakam (Kalimantan Timur), 1.13 t CO2/MWh for PLTS/PLTB (2019 data), see data/seed/grid.json."
 }

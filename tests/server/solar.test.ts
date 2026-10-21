@@ -53,14 +53,71 @@ describe("POST /api/solar/simulate", () => {
     expect(fake.stored.get("solar_climatology:-0.5,117.2")).toEqual(NASA);
   });
 
-  test("uses the seed tariff, costs and grid factor", async () => {
+  test("uses the seed tariff, costs and the solar emission factor", async () => {
     const { server } = start({ nasa: NASA });
     const out = (await (await post(server, BODY)).json()) as SolarSimulation;
-    // Grid factor 1.14 kg/kWh (fake grid), tariff Rp 1.444,7 and Rp 15 jt/kWp from the seed.
-    const usedKwh = (out.coveragePct / 100) * BODY.kwhYear;
-    expect(out.co2AvoidedKgYear).toBeCloseTo(usedKwh * 1.14, 6);
-    expect(out.savingRpYear).toBeCloseTo(usedKwh * 1444.7, 3);
+    // No building type: tariff R-1 Rp 1.444,7, Rp 15 jt/kWp, and 1,13 kg CO2/kWh (Kepmen factor for PLTS).
+    expect(out.co2AvoidedKgYear).toBeCloseTo(out.selfUseKwh * 1.13, 6);
+    expect(out.savingRpYear).toBeCloseTo(out.selfUseKwh * 1444.7, 3);
     expect(out.costRp).toBeCloseTo(out.kWp * 15_000_000 + out.batteryKwh * 2_500_000, 3);
+    expect(out.assumptions.some((a) => a.includes("1,13 kg CO2"))).toBe(true);
+  });
+
+  test("without a building type: R-1, 60% daytime use, and it says the type is unknown", async () => {
+    const { server } = start({ nasa: NASA });
+    const out = (await (await post(server, BODY)).json()) as SolarSimulation;
+    expect(out.selfUseKwh).toBeLessThanOrEqual(BODY.kwhYear * 0.6 + 1e-6);
+    expect(out.coveragePct).toBeCloseTo(60, 6);
+    expect(out.assumptions[0]).toContain("R-1/TR 1.300 VA");
+    expect(out.assumptions[0]).toContain("jenis gedung tidak diketahui");
+  });
+
+  test.each([
+    ["rumah", 5000, "R-1/TR 1.300 VA", 1444.7],
+    ["kantor", 100_000, "B-2/TR 6.600 VA–200 kVA", 1444.7],
+    ["mal", 100_000, "B-2/TR 6.600 VA–200 kVA", 1444.7],
+    ["mal", 900_000, "B-3/TM di atas 200 kVA", 1114.74],
+    ["hotel", 700_000, "B-3/TM di atas 200 kVA", 1114.74],
+    ["pemerintahan", 100_000, "P-1/TR 6.600 VA–200 kVA", 1699.53],
+    ["industri", 900_000, "I-3/TM di atas 200 kVA", 1114.74],
+  ])("a %s using %d kWh a year is priced as %s", async (buildingType, kwhYear, golongan, rp) => {
+    const { server } = start({ nasa: NASA });
+    const res = await post(server, { ...BODY, roofAreaM2: 5000, kwhYear, buildingType });
+    expect(res.status).toBe(200);
+    const out = (await res.json()) as SolarSimulation;
+    expect(out.savingRpYear).toBeCloseTo(out.selfUseKwh * rp, 3);
+    expect(out.assumptions[0]).toContain(`golongan ${golongan}`);
+    expect(out.assumptions[0]).toContain(rp.toLocaleString("id-ID"));
+  });
+
+  test.each(["sekolah", "ibadah", "rumah_sakit"])("a %s says plainly that the social tariff is not modelled", async (buildingType) => {
+    const { server } = start({ nasa: NASA });
+    const out = (await (await post(server, { ...BODY, buildingType })).json()) as SolarSimulation;
+    expect(out.savingRpYear).toBeCloseTo(out.selfUseKwh * 1444.7, 3);
+    expect(out.assumptions[0]).toContain("tarif sosial (golongan S)");
+    expect(out.assumptions[0]).toContain("belum dimodelkan");
+    expect(out.assumptions[0]).not.toContain("golongan R-1");
+  });
+
+  test("a house saves only what it uses while the sun shines (about 40%), and the panels are sized to it", async () => {
+    const { server } = start({ nasa: NASA });
+    const house = (await (await post(server, { ...BODY, buildingType: "rumah" })).json()) as SolarSimulation;
+    const office = (await (await post(server, { ...BODY, buildingType: "kantor" })).json()) as SolarSimulation;
+    expect(house.coveragePct).toBeCloseTo(40, 6);
+    expect(office.coveragePct).toBeCloseTo(85, 6);
+    expect(house.kWp).toBeLessThan(office.kWp);
+    expect(house.assumptions.some((a) => a.includes("40%"))).toBe(true);
+  });
+
+  test("names the missing export credit and what the battery does", async () => {
+    const { server } = start({ nasa: NASA });
+    const out = (await (await post(server, { ...BODY, buildingType: "kantor" })).json()) as SolarSimulation;
+    expect(out.assumptions).toContain("Kelebihan listrik ke jaringan PLN tidak mengurangi tagihan (Permen ESDM 2/2024).");
+    const battery = out.assumptions.find((a) => a.startsWith("Baterai hanya cadangan"));
+    expect(battery).toContain("tidak menambah penghematan");
+    expect(battery).toContain(`Tanpa baterai, balik modal ${out.paybackPanelYears.toLocaleString("id-ID", { minimumFractionDigits: 1, maximumFractionDigits: 1 })} tahun`);
+    const noBattery = (await (await post(server, { ...BODY, buildingType: "kantor", backupHours: 0 })).json()) as SolarSimulation;
+    expect(noBattery.assumptions.some((a) => a.startsWith("Baterai"))).toBe(false);
   });
 
   test("a second call for a nearby point is served from the climatology cache", async () => {
@@ -112,6 +169,8 @@ describe("POST /api/solar/simulate", () => {
     ["kwhYear is negative", { ...BODY, kwhYear: -5 }],
     ["backupHours is null", { ...BODY, backupHours: null }],
     ["backupHours is negative", { ...BODY, backupHours: -1 }],
+    ["buildingType is unknown", { ...BODY, buildingType: "kandang" }],
+    ["buildingType is a number", { ...BODY, buildingType: 3 }],
     ["body is an array", [1]],
     ["body is not json", "nope{"],
   ])("invalid body (%s) returns 400 with an error", async (_n, body) => {
