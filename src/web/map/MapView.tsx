@@ -6,6 +6,7 @@ import { useAppStore } from "../store.ts";
 import { abortIntro, flyToProvince, flyToRegion, GLOBE_VIEW, introFlight, startIdleOrbit, stopIdleOrbit } from "./camera.ts";
 import {
   applyLightPreset,
+  basemapLight,
   basemapTheme,
   type LightPreset,
   lightPresetFor,
@@ -135,7 +136,7 @@ export function MapView({ token, regions, plants, onIntroStart, onIntroEnd, onRe
         language: "id",
         config: {
           basemap: {
-            lightPreset: preset,
+            lightPreset: basemapLight(preset),
             theme: basemapTheme(preset),
             show3dLandmarks: false,
             showPointOfInterestLabels: false,

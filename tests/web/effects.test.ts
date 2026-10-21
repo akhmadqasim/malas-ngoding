@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import type { FogSpecification } from "mapbox-gl";
 import { clearTokenCache } from "../../src/web/theme.ts";
 import {
+  basemapLight,
   basemapTheme,
   LIGHT_NOTE,
   type LightMode,
@@ -45,11 +46,14 @@ describe("light preset follows WITA time", () => {
     expect(presetTone("dusk")).toBe("dark");
     expect(presetTone("night")).toBe("dark");
   });
-  test("the basemap is neutral except at night, where the navy faded theme stays", () => {
-    expect(basemapTheme("day")).toBe("monochrome");
-    expect(basemapTheme("dawn")).toBe("monochrome");
-    expect(basemapTheme("dusk")).toBe("monochrome");
-    expect(basemapTheme("night")).toBe("faded");
+  test("the basemap is Standard's own look, lightly muted, in every light", () => {
+    for (const p of ["day", "dawn", "dusk", "night"] as const) expect(basemapTheme(p)).toBe("faded");
+  });
+  test("dawn and dusk use Standard's day and night light, never its warm tan wash", () => {
+    expect(basemapLight("day")).toBe("day");
+    expect(basemapLight("dawn")).toBe("day");
+    expect(basemapLight("dusk")).toBe("night");
+    expect(basemapLight("night")).toBe("night");
   });
 });
 

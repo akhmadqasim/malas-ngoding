@@ -67,17 +67,25 @@ export function presetTone(preset: LightPreset): Tone {
 }
 
 /**
- * Standard basemap theme per preset. The neutral `monochrome` ground lets the data colours carry the
- * map and does not clash with the ink panels; at night the navy `faded` theme reads better, above all
- * at building zoom, where monochrome night turns the city black.
+ * Standard basemap theme: `faded` in every light. It is Standard's own look, lightly muted, so water reads
+ * as water and the data colours still carry the map (`monochrome` turned rivers and land the same grey).
  */
-export function basemapTheme(preset: LightPreset): "monochrome" | "faded" {
-  return preset === "night" ? "faded" : "monochrome";
+export function basemapTheme(_preset: LightPreset): "faded" {
+  return "faded";
+}
+
+/**
+ * The basemap light for a preset. Dawn and dusk use Standard's day and night light: its own dawn and dusk
+ * presets wash the whole map in a warm tan that muddies land, water and the data colours alike. The page
+ * still names the time ("Cahaya fajar", "Cahaya senja") and picks the panels by its ground tone.
+ */
+export function basemapLight(preset: LightPreset): "day" | "night" {
+  return presetTone(preset) === "light" ? "day" : "night";
 }
 
 /** Sets the basemap light and theme for a preset. */
 export function applyLightPreset(map: MapboxMap, preset: LightPreset): void {
-  map.setConfigProperty("basemap", "lightPreset", preset);
+  map.setConfigProperty("basemap", "lightPreset", basemapLight(preset));
   map.setConfigProperty("basemap", "theme", basemapTheme(preset));
 }
 
