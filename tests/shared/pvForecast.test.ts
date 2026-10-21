@@ -89,6 +89,15 @@ describe("one clear-sky verdict per day, shared by the Cuaca tab and the chat", 
     expect(v).toMatchObject({ sky: "hujan", cause: "hujan", dropPct: 50 });
     expect(dropSentence(v)).toBe("produksi turun 50% karena hujan");
   });
+  test("a night-only shower leaves a dry day cerah, and its heaviest rain counts daylight hours only", () => {
+    const hours = [hour(2, 3), hour(10), hour(12), hour(14)];
+    const v = dayAgainstClearSky({ date: "2026-10-22", pvKwh: clear * 0.95, rainy: true, maxPrecipMm: 3 }, hours, site);
+    expect(v.sky).toBe("cerah");
+    expect(v.heaviestRainMm).toBe(0);
+    expect(dayAgainstClearSky({ date: "2026-10-22", pvKwh: 1, rainy: true }, [hour(2, 3), hour(13, 0.4)], site).heaviestRainMm).toBe(0.4);
+    // Without hours for the date: the day's own maximum.
+    expect(dayAgainstClearSky({ date: "2026-10-22", pvKwh: 1, rainy: true, maxPrecipMm: 3 }, [], site).heaviestRainMm).toBe(3);
+  });
   test("a gap under 10% is not blamed on cloud: the model has no haze term", () => {
     const v = dayAgainstClearSky({ date: "2026-10-22", pvKwh: clear * 0.92, rainy: false }, [hour(12)], site);
     expect(v.dropPct).toBe(8);

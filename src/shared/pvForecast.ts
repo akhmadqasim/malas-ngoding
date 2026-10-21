@@ -113,6 +113,8 @@ export interface DayVerdict {
   cause: DropCause;
   /** 1 - output / clear sky, in whole %, never below 0; null without panels. */
   dropPct: number | null;
+  /** The wettest daylight hour in mm (rain at night is left out, as in `sky`); the day's maximum without hours. */
+  heaviestRainMm: number;
 }
 
 /** Daylight rain that makes a rainy day: this many rain hours, or this much rain. */
@@ -130,10 +132,10 @@ export const NEAR_CLEAR_PCT = 10;
  * How one forecast day compares with a clear sky at the panels' spot: the sky, what the drop is put down to,
  * and the drop in %. Rain and cloud count in daylight only (rain at night costs no output); a day is "hujan"
  * from 2 daylight rain hours or 1 mm. Without hours for the date it falls back to `day.rainy`. The Cuaca tab
- * and the chat use this, so both give the same numbers.
+ * and the chat use this, so both give the same numbers and the same rain verdict.
  */
 export function dayAgainstClearSky(
-  day: { date: string; pvKwh: number; rainy: boolean },
+  day: { date: string; pvKwh: number; rainy: boolean; maxPrecipMm?: number },
   hours: { time: string; precipMm: number; weatherCode: number; cloudPct: number }[],
   site: PanelSite,
 ): DayVerdict {
@@ -149,6 +151,7 @@ export function dayAgainstClearSky(
     sky: wet ? "hujan" : cloud >= CLOUDY_PCT ? "berawan" : "cerah",
     cause: wet ? "hujan" : rainHours.length > 0 ? "awan dan hujan" : "awan",
     dropPct: clearKwh > 0 ? Math.max(0, Math.round((1 - day.pvKwh / clearKwh) * 100)) : null,
+    heaviestRainMm: light.length ? light.reduce((m, h) => Math.max(m, h.precipMm), 0) : (day.maxPrecipMm ?? 0),
   };
 }
 

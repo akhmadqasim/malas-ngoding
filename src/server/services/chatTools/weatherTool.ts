@@ -35,7 +35,7 @@ export const getWeather: ServerTool = {
   definition: {
     name: "get_weather",
     description:
-      "Weather forecast for the coming days at a point (rain, cloud) and the expected solar production per day for a system of kWp kilowatt-peak, each day compared with the same panels under a clear sky (comparedToClearSky). Days are labelled \"hari ini\", \"besok\" and \"lusa\". Pass the kWp from simulate_solar when you have it; without it 1 kWp is used. Only for points in or near Kalimantan Timur.",
+      "Weather forecast for the coming days at a point (rain, cloud) and the expected solar production per day for a system of kWp kilowatt-peak, each day compared with the same panels under a clear sky (comparedToClearSky). Each day's sky is \"cerah\", \"berawan\" or \"hujan\", judged by daylight hours as in the Cuaca tab (rain only at night does not make a rainy day). Days are labelled \"hari ini\", \"besok\" and \"lusa\". Pass the kWp from simulate_solar when you have it; without it 1 kWp is used. Only for points in or near Kalimantan Timur.",
     input_schema: {
       type: "object",
       properties: {
@@ -64,9 +64,16 @@ export const getWeather: ServerTool = {
     const days = summariseDays(pvFromForecast(forecast.hours, kWp)).filter((d) => d.date >= today);
     if (days.length === 0) return { problem: WEATHER_DOWN };
     const now = currentConditions(forecast.hours, nowMs);
-    const clearSky = (d: (typeof days)[number]) => {
+    // The Cuaca tab's verdict: rain counts in daylight only, so a night shower does not make a rainy day.
+    const verdict = (d: (typeof days)[number]) => {
       const v = dayAgainstClearSky(d, forecast.hours, { lat: p.lat, lng: p.lng, kWp });
-      return { clearSkyText: `${fmtNumber(v.clearKwh, 1)} kWh (model langit cerah)`, comparedToClearSky: dropSentence(v) };
+      return {
+        sky: v.sky,
+        rain: v.sky === "hujan",
+        heaviestRainText: `${fmtNumber(v.heaviestRainMm, 1)} mm per jam di siang hari`,
+        clearSkyText: `${fmtNumber(v.clearKwh, 1)} kWh (model langit cerah)`,
+        comparedToClearSky: dropSentence(v),
+      };
     };
     return {
       result: {
@@ -77,11 +84,9 @@ export const getWeather: ServerTool = {
         days: days.map((d) => ({
           date: d.date,
           day: dayLabel(d.date, today),
-          rain: d.rainy,
-          heaviestRainText: `${fmtNumber(d.maxPrecipMm, 1)} mm per jam`,
           solarText: estimated(`${fmtNumber(d.pvKwh, 1)} kWh`),
-          // Against a clear sky at this place and date, as the Cuaca tab does.
-          ...clearSky(d),
+          // Sky, rain and the drop against a clear sky at this place and date, as the Cuaca tab gives them.
+          ...verdict(d),
         })),
         ...(forecast.stale ? { note: "Prakiraan ini dari simpanan lama karena Open-Meteo sedang tidak bisa dihubungi." } : {}),
         source:

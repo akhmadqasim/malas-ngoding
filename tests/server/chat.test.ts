@@ -19,6 +19,7 @@ import { fmtKwh, fmtNumber, fmtRupiah } from "../../src/shared/format.ts";
 import { dayAgainstClearSky, dropSentence, pvFromForecast, summariseDays } from "../../src/shared/pvForecast.ts";
 import type { ForecastHour } from "../../src/shared/pvForecast.ts";
 import type { BuildingEstimate } from "../../src/shared/types.ts";
+import { dayRows } from "../../src/web/panels/solarWeather.ts";
 import { type FakeDeps, type FakeUpstreams, fakeDeps } from "./fakes.ts";
 
 const SESSION = "6f1c2b9e-3d4a-4e5f-8a7b-9c0d1e2f3a4b";
@@ -246,13 +247,14 @@ async function waitFor(check: () => boolean, ms = 2000): Promise<void> {
 }
 
 /** Hourly forecast from today 00:00 WITA for two days; tomorrow has rain and dim sun from 12:00 to 15:00. */
-function forecastFromToday(): ForecastHour[] {
+/** Two days from today (WITA): dry and sunny, then 3 mm an hour at the hours `rainAt` counts from today's 00:00. */
+function forecastFromToday(rainAt: (i: number) => boolean = (i) => i >= 36 && i < 39): ForecastHour[] {
   const witaMs = 8 * 3600_000;
   const today = new Date(Date.now() + witaMs).toISOString().slice(0, 10);
   const startMs = Date.parse(`${today}T00:00:00+08:00`);
   return Array.from({ length: 48 }, (_, i) => {
     const hour = i % 24;
-    const rainy = i >= 36 && i < 39;
+    const rainy = rainAt(i);
     const sunny = hour >= 6 && hour < 18;
     return {
       time: new Date(startMs + i * 3600_000 + witaMs).toISOString().slice(0, 13) + ":00",
@@ -959,7 +961,7 @@ describe("chat server tools", () => {
     // 12 sunny hours x 2 kWp x 0.6 kW/m2 x PR 0.78.
     expect(json.days[0].solarText).toBe("11,2 kWh (perkiraan)");
     // Tomorrow: 9 sunny hours plus 3 rainy ones at 150 W/m2 is 9,126 kWh.
-    expect(json.days[1]).toMatchObject({ rain: true, heaviestRainText: "3,0 mm per jam", solarText: "9,1 kWh (perkiraan)" });
+    expect(json.days[1]).toMatchObject({ sky: "hujan", rain: true, heaviestRainText: "3,0 mm per jam di siang hari", solarText: "9,1 kWh (perkiraan)" });
     // Each day is measured against a clear sky at that place and date (the Cuaca tab's model), not the best day.
     const hours = forecastFromToday();
     const rows = summariseDays(pvFromForecast(hours, 2));
@@ -970,6 +972,16 @@ describe("chat server tools", () => {
     }
     expect(json.days[1].comparedToClearSky).toMatch(/^produksi turun \d+% karena (hujan|awan dan hujan)$/);
     expect(JSON.stringify(json)).not.toContain("hari terbaik");
+  });
+
+  test("get_weather judges rain by daylight hours, as the Cuaca tab does: a night-only shower is not a rainy day", async () => {
+    // Tomorrow is dry and sunny apart from one 3 mm shower at 02:00 (hour 26 from today's 00:00).
+    const hours = forecastFromToday((i) => i === 26);
+    const { json } = await callTool("get_weather", { lat: -0.5, lng: 117.15, kWp: 2 }, { meteo: hours });
+    expect(json.days[1]).toMatchObject({ sky: "cerah", rain: false, heaviestRainText: "0,0 mm per jam di siang hari" });
+    // The tab's day rows give the same sky for every day.
+    const tab = dayRows(summariseDays(pvFromForecast(hours, 2)), pvFromForecast(hours, 2), Date.now(), { lat: -0.5, lng: 117.15, kWp: 2 });
+    expect(json.days.map((d: { sky: string }) => d.sky)).toEqual(tab.map((r) => r.sky));
   });
 
   test("get_weather without kWp uses 1 kWp and says so", async () => {
