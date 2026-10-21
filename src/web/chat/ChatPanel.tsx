@@ -26,8 +26,15 @@ const ACTIONS_ONLY_TEXT = "Sudah saya tampilkan di peta.";
 const PANEL_ID = "chat-panel";
 
 /**
- * Px from the bottom of the window to the top of the bottom dock's cards (legend, map controls) that sit
- * under the panel's column, or null when none does. Kept up to date as the dock or the window changes.
+ * The dock's cards as drawn: the legend, and the map controls only while "Lapisan dan tampilan" is open (a
+ * closed disclosure keeps its content's box, hidden). Not the dock itself: it spans to the right edge of
+ * its slot even where no card is.
+ */
+const DOCK_CARDS = ".dock-slot .legend, .dock-slot .dock__more[data-expanded='true'] .controls";
+
+/**
+ * Px from the bottom of the window to the top of the bottom dock's cards (legend, open map controls) that
+ * sit under the panel's column, or null when none does. Kept up to date as the dock or the window changes.
  */
 function useDockClearance(panel: RefObject<HTMLElement | null>, open: boolean, beside: boolean): number | null {
   const [clearance, setClearance] = useState<number | null>(null);
@@ -40,17 +47,23 @@ function useDockClearance(panel: RefObject<HTMLElement | null>, open: boolean, b
       // Layout position, not the bounding box: the panel slides in 16 px from the right, and measured mid-slide
       // a card that ends just under its left edge would be missed.
       const p = { left: el.offsetLeft, right: el.offsetLeft + el.offsetWidth };
-      const under = dock
-        ? [...dock.children].map((c) => c.getBoundingClientRect()).filter((r) => r.height > 0 && r.left < p.right && r.right > p.left)
-        : [];
+      const under = [...document.querySelectorAll(DOCK_CARDS)]
+        .map((c) => c.getBoundingClientRect())
+        .filter((r) => r.height > 0 && r.left < p.right && r.right > p.left);
       setClearance(under.length ? Math.max(0, window.innerHeight - Math.min(...under.map((r) => r.top))) : null);
     };
     measure();
-    const observer = new ResizeObserver(measure);
-    if (dock) observer.observe(dock);
+    const resized = new ResizeObserver(measure);
+    // Opening or closing "Lapisan dan tampilan" changes which cards count, not always the dock's size.
+    const toggled = new MutationObserver(measure);
+    if (dock) {
+      resized.observe(dock);
+      toggled.observe(dock, { subtree: true, attributes: true, attributeFilter: ["data-expanded"] });
+    }
     window.addEventListener("resize", measure);
     return () => {
-      observer.disconnect();
+      resized.disconnect();
+      toggled.disconnect();
       window.removeEventListener("resize", measure);
     };
   }, [panel, open, beside]);
