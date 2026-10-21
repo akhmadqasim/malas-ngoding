@@ -1,8 +1,10 @@
 import type { GeoJSONSource, GeoJSONSourceSpecification, Map as MapboxMap } from "mapbox-gl";
 import { token } from "../theme.ts";
 
-// The places the AI chat found (find_places), marked on the map: numbered ink dots with a paper edge, as
-// the chat lists them, with their names beside them. A click on one selects the building there.
+// The places the AI chat found (find_places), marked on the map: numbered ink pins with a paper edge, as
+// the chat lists them, with their names beside them. Pins, not dots, so they never read as the round
+// plant cluster markers. Shown from city zoom only: at the province view they would be clutter. A click on
+// one selects the building there.
 
 export interface MarkedPlace {
   name: string;
@@ -13,29 +15,43 @@ export interface MarkedPlace {
 export const PLACES_SOURCE = "chat-places";
 export const PLACES_LAYER = "chat-places";
 export const PLACES_NAMES_LAYER = "chat-place-names";
+/** Below this zoom (the province and region views) the pins are hidden. */
+export const PLACES_MIN_ZOOM = 10;
 const FONT = ["DIN Pro Medium", "Arial Unicode MS Bold"];
-const DOT_IMAGE = "chat-place-dot";
+const PIN_IMAGE = "chat-place-pin";
 const INTERACTIONS = ["chat-places-click", "chat-places-enter", "chat-places-leave"] as const;
-/** Dot size in CSS px. */
-const DOT_PX = 22;
+/** Pin size in CSS px: a round head and a point at the place. */
+const PIN_W = 22;
+const PIN_H = 30;
+/** The number sits in the head: its centre is this far above the point, in ems of the 11 px number. */
+const HEAD_EM = -(PIN_H - PIN_W / 2) / 11;
 
-/** An ink disc with a paper edge, drawn at 2x for sharp edges. */
-function dotImage(): ImageData {
-  const size = DOT_PX * 2;
+/** An ink pin with a paper edge, drawn at 2x for sharp edges. */
+function pinImage(): ImageData {
+  const s = 2;
   const canvas = document.createElement("canvas");
-  canvas.width = size;
-  canvas.height = size;
+  canvas.width = PIN_W * s;
+  canvas.height = PIN_H * s;
   const ctx = canvas.getContext("2d")!;
-  const r = size / 2;
-  ctx.beginPath();
-  ctx.arc(r, r, r - 1, 0, Math.PI * 2);
+  const r = (PIN_W / 2) * s;
+  const tipY = PIN_H * s;
+  const pin = (inset: number) => {
+    const head = r - inset;
+    const tip = tipY - inset * 1.6;
+    // The sides leave the head where they touch it (tangents from the point) and meet at the point.
+    const a = Math.acos(head / (tip - r));
+    ctx.beginPath();
+    ctx.arc(r, r, head, Math.PI / 2 + a, Math.PI / 2 - a);
+    ctx.lineTo(r, tip);
+    ctx.closePath();
+  };
+  pin(1);
   ctx.fillStyle = token("--color-paper");
   ctx.fill();
-  ctx.beginPath();
-  ctx.arc(r, r, r - 4, 0, Math.PI * 2);
+  pin(4);
   ctx.fillStyle = token("--color-ink");
   ctx.fill();
-  return ctx.getImageData(0, 0, size, size);
+  return ctx.getImageData(0, 0, canvas.width, canvas.height);
 }
 
 /** The places as GeoJSON points numbered from 1, in the order the chat lists them. */
@@ -64,21 +80,23 @@ export function showPlaces(map: MapboxMap, places: MarkedPlace[], onPick: (lngLa
   }
   clearPlaces(map);
   map.addSource(PLACES_SOURCE, { type: "geojson", data });
-  if (!map.hasImage(DOT_IMAGE)) map.addImage(DOT_IMAGE, dotImage(), { pixelRatio: 2 });
+  if (!map.hasImage(PIN_IMAGE)) map.addImage(PIN_IMAGE, pinImage(), { pixelRatio: 2 });
   const paper = token("--color-paper");
   const ink = token("--color-ink");
-  // The names first, so the dots draw over them.
+  // The names first, so the pins draw over them.
   map.addLayer({
     id: PLACES_NAMES_LAYER,
     type: "symbol",
     source: PLACES_SOURCE,
     slot: "top",
+    minzoom: PLACES_MIN_ZOOM,
     layout: {
       "text-field": ["get", "name"],
       "text-font": FONT,
       "text-size": 12,
       "text-anchor": "left",
-      "text-offset": [1.1, 0],
+      // Beside the pin's head.
+      "text-offset": [1, HEAD_EM * (11 / 12)],
       "text-max-width": 14,
       // Earlier places in the list win where two names would touch.
       "symbol-sort-key": ["to-number", ["get", "n"]],
@@ -97,13 +115,16 @@ export function showPlaces(map: MapboxMap, places: MarkedPlace[], onPick: (lngLa
     type: "symbol",
     source: PLACES_SOURCE,
     slot: "top",
+    minzoom: PLACES_MIN_ZOOM,
     layout: {
-      "icon-image": DOT_IMAGE,
+      "icon-image": PIN_IMAGE,
+      "icon-anchor": "bottom",
       "icon-allow-overlap": true,
       "icon-ignore-placement": true,
       "text-field": ["get", "n"],
       "text-font": FONT,
       "text-size": 11,
+      "text-offset": [0, HEAD_EM],
       "text-allow-overlap": true,
       "text-ignore-placement": true,
       "symbol-sort-key": ["-", 0, ["to-number", ["get", "n"]]],
