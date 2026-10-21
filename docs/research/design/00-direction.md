@@ -124,7 +124,7 @@ Date: 21 Oct 2026. Every UI task follows this file. It replaces "Mahakam malam" 
 - Order: name (600; a place name is the largest type), type as an editable select that looks like text with a chevron, floors stepper; then the one readout (kWh per year, perkiraan); then tabs Energi / Emisi / Surya / Cuaca as underlined text tabs; then details as label-value rows with hairlines between groups.
 - `bySource` as one horizontal stacked bar in fuel colours with a labelled list below (a donut is allowed only if its labels sit outside it). Equivalents as a list of rows (number, unit, label); no card grid, no emoji.
 - Loading: a skeleton with the same rows (flat `panel-high` blocks, no shimmer). Error: one sentence about what failed and a "Coba lagi" button. Outside Kaltim: say "Di luar Kalimantan Timur" in place of the region.
-- Building highlight and select colours: `paper-muted` and `paper-bright` on dark presets; `outline-light` on light presets (day, dawn).
+- Building highlight and select colours: on dark presets the hover is `paper` and the selection the light CO2 amber (`co2-4`), because the night `faded` basemap grades light neutrals down until a paper selection all but vanishes; `outline-light` on light presets (day, dawn).
 
 ## 9. Rain (`setRainEffect` in `src/web/map/effects.ts`)
 
