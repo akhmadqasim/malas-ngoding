@@ -18,6 +18,8 @@ import { type BuildingHint, type PanelTab, useAppStore } from "../store.ts";
 import { BUILDING_TYPE_LABELS, BUILDING_TYPES, type BuildingTabProps } from "./buildingTabs.ts";
 import { EmissionTab } from "./EmissionTab.tsx";
 import { EnergyTab } from "./EnergyTab.tsx";
+import { SolarTab } from "./SolarTab.tsx";
+import { WeatherTab } from "./WeatherTab.tsx";
 
 /**
  * The tabs of the panel. A tab whose `Panel` is null is not built yet and shows as disabled; the
@@ -26,8 +28,8 @@ import { EnergyTab } from "./EnergyTab.tsx";
 const TABS: { id: PanelTab; label: string; Panel: ComponentType<BuildingTabProps> | null }[] = [
   { id: "energi", label: "Energi", Panel: EnergyTab },
   { id: "emisi", label: "Emisi", Panel: EmissionTab },
-  { id: "surya", label: "Surya", Panel: null },
-  { id: "cuaca", label: "Cuaca", Panel: null },
+  { id: "surya", label: "Surya", Panel: SolarTab },
+  { id: "cuaca", label: "Cuaca", Panel: WeatherTab },
 ];
 
 /** Gap between the panel and the dock under it, in px (the dock's own gap, spacing 3). */
