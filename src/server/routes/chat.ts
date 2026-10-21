@@ -272,7 +272,7 @@ export function chatRoutes(deps: AppDeps) {
           // Claude and the tools can stay quiet for longer than Bun's 10 s idle timeout.
           server.timeout(r, 0);
           return eventStream(r, (send, signal) => converse(deps, parsed.request, send, signal));
-        })(req),
+        })(req, server),
     },
   };
 }
