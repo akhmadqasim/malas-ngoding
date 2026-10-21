@@ -1,6 +1,6 @@
 import { Accordion, Button, ProgressBar, Skeleton } from "@heroui/react";
 import { useCallback, useEffect, useId, useState } from "react";
-import type { RecommendationCategory, RecommendationItem, Recommendations } from "../../shared/types.ts";
+import type { RecommendationCategory, RecommendationItem, Recommendations, RegionSummary } from "../../shared/types.ts";
 import { ApiError, api } from "../api.ts";
 import { chem } from "../components/Chem.tsx";
 import { Estimate } from "../components/Estimate.tsx";
@@ -32,37 +32,26 @@ export function fmtWrittenOn(iso: string): string {
 /** Who wrote the items: Claude (with the model and the day) or the fixed rules (`model: null`). */
 export function provenance({ model, generatedAt }: Pick<Recommendations, "model" | "generatedAt">): string {
   if (model === null) {
-    return "Berbasis aturan: AI sedang tidak tersedia, jadi saran ini disusun dari aturan tetap atas data wilayah yang sama.";
+    return "Berbasis aturan: AI sedang tidak tersedia, jadi saran ini disusun dari aturan tetap atas data wilayah ini.";
   }
   const day = fmtWrittenOn(generatedAt);
   return `Ditulis AI (${model})${day ? ` pada ${day}` : ""}, hanya dari angka di peta ini. Periksa lagi sebelum dipakai untuk keputusan.`;
 }
 
-/** An impact that states a number the text itself does not already call an estimate gets "perkiraan". */
+/**
+ * An impact that states a number the text itself does not already call an estimate gets "perkiraan". A
+ * heuristic per impact, not per number: one "(perkiraan)" anywhere in it counts for all its numbers.
+ */
 export function impactNeedsEstimate(impact: string): boolean {
   return /\d/.test(impact) && !/perkiraan/i.test(impact);
 }
 
 // --- Data ----------------------------------------------------------------------------------------
 
-/**
- * Answers written by Claude, per region, for this page view. Rule-based answers are not kept: the server
- * does not cache them either, so opening the region again asks Claude again.
- */
-const written = new Map<string, Recommendations>();
-
-/** Recommendations for a region: from this page's memory, else from the server (which may ask Claude). */
-export async function loadRecommendations(regionId: string, signal?: AbortSignal): Promise<Recommendations> {
-  const kept = written.get(regionId);
-  if (kept) return kept;
-  const answer = await api.recommendations(regionId, signal);
-  if (answer.model !== null) written.set(regionId, answer);
-  return answer;
-}
-
-/** Forgets every kept answer (tests). */
-export function forgetRecommendations(): void {
-  written.clear();
+/** Who the recommendations address: "Pemkot Samarinda", "Pemkab Mahakam Ulu", or local government in general. */
+export function recommendationsHeading(regionName?: string, kind?: RegionSummary["kind"]): string {
+  if (!regionName || !kind) return "Rekomendasi untuk pemerintah daerah";
+  return `Rekomendasi untuk ${kind === "kota" ? "Pemkot" : "Pemkab"} ${regionName}`;
 }
 
 type State = { status: "loading" } | { status: "ready"; data: Recommendations } | { status: "error"; message: string };
@@ -73,7 +62,10 @@ function useRecommendations(regionId: string): [State, () => void] {
   useEffect(() => {
     const abort = new AbortController();
     setState({ status: "loading" });
-    loadRecommendations(regionId, abort.signal)
+    // No client cache: the server's cache answers in a few ms, and only the server knows which answers it
+    // kept (rule-based ones and those written on assumed sun hours are retried on the next request).
+    api
+      .recommendations(regionId, abort.signal)
       .then((data) => {
         if (!abort.signal.aborted) setState({ status: "ready", data });
       })
@@ -107,8 +99,11 @@ const TICK_MS = 250;
 const EXPECTED_MS = 4000;
 const SLOW_MS = 12_000;
 
-/** "Rekomendasi untuk pemerintah daerah" in the region detail: Claude's (or the rules') advice for the region. */
-export function RecommendationPanel({ regionId }: { regionId: string }) {
+/**
+ * "Rekomendasi untuk Pemkot Samarinda" in the region detail: Claude's (or the rules') advice for the region.
+ * The name and kind only shape the heading; without them it says "pemerintah daerah".
+ */
+export function RecommendationPanel({ regionId, regionName, kind }: { regionId: string; regionName?: string; kind?: RegionSummary["kind"] }) {
   const [state, retry] = useRecommendations(regionId);
   const elapsed = useElapsed(state.status === "loading", TICK_MS);
   const headingId = useId();
@@ -117,7 +112,7 @@ export function RecommendationPanel({ regionId }: { regionId: string }) {
   return (
     <section className="recs" aria-labelledby={headingId} aria-busy={state.status === "loading"}>
       <h3 id={headingId} className="recs__title">
-        Rekomendasi untuk pemerintah daerah
+        {recommendationsHeading(regionName, kind)}
       </h3>
       {state.status === "ready" && <RecommendationList data={state.data} />}
       {state.status === "error" && <RecommendationFailure message={state.message} onRetry={retry} />}
@@ -132,7 +127,7 @@ export function RecommendationLoading({ elapsedMs }: { elapsedMs: number }) {
   const note =
     elapsedMs < SLOW_MS
       ? "Menyusun rekomendasi dari data wilayah ini. Biasanya butuh 8 sampai 10 detik."
-      : "Masih menyusun. Jawaban pertama untuk satu wilayah kadang butuh hingga satu menit.";
+      : "Masih menyusun. Jawaban pertama untuk satu wilayah kadang butuh hingga dua menit.";
   return (
     <div className="recs__loading">
       <ProgressBar

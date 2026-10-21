@@ -248,7 +248,7 @@ function RegionDetail({
           {region.villagesNoPln === null ? null : <AnimatedNumber value={region.villagesNoPln} format={whole} />}
         </Fact>
       </dl>
-      <RecommendationPanel regionId={region.id} />
+      <RecommendationPanel regionId={region.id} regionName={region.name} kind={region.kind} />
       <footer className="sheet__foot">
         <p className="sheet__note">
           {chem(

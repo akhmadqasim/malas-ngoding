@@ -1,15 +1,14 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { Recommendations } from "../../src/shared/types.ts";
 import {
   fmtWrittenOn,
-  forgetRecommendations,
   impactNeedsEstimate,
-  loadRecommendations,
   provenance,
   RecommendationFailure,
   RecommendationList,
   RecommendationLoading,
+  recommendationsHeading,
 } from "../../src/web/panels/RecommendationPanel.tsx";
 
 const ai: Recommendations = {
@@ -41,12 +40,6 @@ const ai: Recommendations = {
   ],
 };
 const rules: Recommendations = { ...ai, model: null };
-
-const realFetch = globalThis.fetch;
-afterEach(() => {
-  globalThis.fetch = realFetch;
-  forgetRecommendations();
-});
 
 describe("who wrote the recommendations", () => {
   test("rule-based items (model null) say 'berbasis aturan'", () => {
@@ -110,6 +103,8 @@ describe("loading and failure", () => {
     expect(now).toBeGreaterThan(80);
     expect(now).toBeLessThanOrEqual(90);
     expect(html).toContain("Masih menyusun");
+    // The server allows 100 s with one retry.
+    expect(html).toContain("hingga dua menit");
   });
   test("a failure says what failed and offers 'Coba lagi'", () => {
     const html = renderToStaticMarkup(<RecommendationFailure message="Wilayah tidak ditemukan" onRetry={() => {}} />);
@@ -120,32 +115,12 @@ describe("loading and failure", () => {
   });
 });
 
-describe("loading recommendations", () => {
-  function serve(answer: Recommendations) {
-    const calls: string[] = [];
-    globalThis.fetch = (async (url: string) => {
-      calls.push(String(url));
-      return Response.json(answer);
-    }) as unknown as typeof fetch;
-    return calls;
-  }
-
-  test("asks the server once per region for answers Claude wrote", async () => {
-    const calls = serve(ai);
-    expect(await loadRecommendations("samarinda")).toEqual(ai);
-    expect(await loadRecommendations("samarinda")).toEqual(ai);
-    expect(calls).toEqual(["/api/recommendations/samarinda"]);
+describe("the heading names who the advice is for", () => {
+  test("a kota gets Pemkot, a kabupaten Pemkab", () => {
+    expect(recommendationsHeading("Samarinda", "kota")).toBe("Rekomendasi untuk Pemkot Samarinda");
+    expect(recommendationsHeading("Mahakam Ulu", "kabupaten")).toBe("Rekomendasi untuk Pemkab Mahakam Ulu");
   });
-
-  test("asks again after a rule-based answer, so Claude gets another try", async () => {
-    const calls = serve(rules);
-    await loadRecommendations("samarinda");
-    await loadRecommendations("samarinda");
-    expect(calls.length).toBe(2);
-  });
-
-  test("passes the server's error on", async () => {
-    globalThis.fetch = (async () => Response.json({ error: "Wilayah tidak ditemukan" }, { status: 404 })) as unknown as typeof fetch;
-    await expect(loadRecommendations("nowhere")).rejects.toThrow("Wilayah tidak ditemukan");
+  test("without a name it addresses local government in general", () => {
+    expect(recommendationsHeading()).toBe("Rekomendasi untuk pemerintah daerah");
   });
 });
