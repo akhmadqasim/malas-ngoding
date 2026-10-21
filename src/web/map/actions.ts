@@ -3,19 +3,11 @@ import type { BuildingType } from "../../shared/types.ts";
 import { api } from "../api.ts";
 import { type MarkedPlace, showPlaces } from "../chat/placesLayer.ts";
 import type { ChatAction } from "../chat/sse.ts";
-import { type AppState, type LayerKey, type Metric, type PanelTab, type RainMode, useAppStore } from "../store.ts";
+import { type AppState, type BuildingHint, type LayerKey, type Metric, type PanelTab, type RainMode, useAppStore } from "../store.ts";
 import { BUILDING_ZOOM, buildingViewPadding, type Padding, revealBuilding } from "./buildings.ts";
 import { FLY_MS, flyToProvince, flyToRegion } from "./camera.ts";
 
 // Turns the map actions of the AI chat (server `action` events) into store and camera calls.
-
-/** What the chat knows about a place it found: its building type and name (lane buildings' hint). */
-export interface BuildingHint {
-  type?: BuildingType;
-  name?: string;
-}
-/** Lane buildings' `selectBuildingAt` with the optional hint (posted contract). */
-type SelectWithHint = (lngLat: [number, number], hint?: BuildingHint) => Promise<void>;
 
 /** Where actions land. Tests pass their own; the app uses the store, the map in it and the API. */
 export interface ActionTarget {
@@ -201,7 +193,7 @@ async function selectBuilding(target: ActionTarget, lngLat: [number, number]): P
   if (map) await afterRegionFlightStarts(map);
   const place = markedAt(lngLat);
   const hint: BuildingHint | undefined = place ? { type: place.type, name: place.name } : undefined;
-  const select = () => (target.getState().selectBuildingAt as SelectWithHint)(lngLat, hint);
+  const select = () => target.getState().selectBuildingAt(lngLat, hint);
   await select();
   let after = target.getState();
   // Interrupted before the camera reached the building (another flight took over): once more.
