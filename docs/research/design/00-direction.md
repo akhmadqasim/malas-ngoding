@@ -28,7 +28,7 @@ Date: 21 Oct 2026. Every UI task follows this file. It replaces "Mahakam malam" 
 - **Fonts.** 04 says IBM Plex Sans + Plex Mono; the frontend-design skill calls mono data labels a tell. We use Plex Sans for UI and figures, and Plex Serif only for place names. No mono.
 - **Type scale.** 04 (11..64) and 05 (11..40) differ. We use one scale near 1.25, snapped to a 4 px line grid (below).
 - **Motion.** 07 caps UI motion at about 300 ms. The intro (6 s flight, columns rising) is the one orchestrated moment and is exempt. Camera moves after the intro take 2 s.
-- **Rain.** The Mapbox example reveals rain at zoom 11 to 13 with large drops; 10 says zoom 15 to 17 and small drops. Rendered at zoom 16.5, 10's `[1.2, 6]` drops at density 0.35 were almost invisible, so we use thin streaks `[1.1, 11]` at density 0.9, revealed from zoom 15 (Standard buildings are solid) to 16.5. Pale drops vanish on a light ground, so day and dawn use dark drops plus an overcast tint (section 9).
+- **Rain.** The Mapbox example reveals rain at zoom 11 to 13 with large drops; 10 says zoom 15 to 17 and small drops. Rendered at zoom 16.5, 10's `[1.2, 6]` drops at density 0.35 were almost invisible, so we use thin streaks `[1.1, 11]` at density 0.9, revealed from zoom 15 (Standard buildings are solid) to 16.5. Pale drops vanish on a light ground, and dark drops read as needles (A/B rendered in fix round 3), so by day the light streaks fall through a slate haze drawn inside the map (section 9), as real rain shows against an overcast sky.
 
 ## 3. Type
 
@@ -76,8 +76,8 @@ Date: 21 Oct 2026. Every UI task follows this file. It replaces "Mahakam malam" 
   --color-fuel-batubara: #3e444c; --color-fuel-gas: #e58a3e; --color-fuel-diesel: #a86a3d;
   --color-fuel-surya: #f2d45c; --color-fuel-air: #4fa3d9; --color-fuel-biomassa: #79a94f;
   --color-fuel-lainnya: #7b8794;
-  --color-rain: #b4b9c6; --color-rain-day: #4a5262; --color-rain-vignette: #283040;
-  --color-overcast: #3c4757;
+  --color-rain: #b4b9c6; --color-rain-day: #e2e5ea; --color-rain-haze: #5f6874;
+  --color-rain-haze-high: #4a525e; --color-rain-vignette: #283040; --color-overcast: #3c4757;
   --font-sans: "IBM Plex Sans Variable", "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
   --font-serif: "IBM Plex Serif", ui-serif, Georgia, serif;
   --font-weight-regular: 400; --font-weight-medium: 500; --font-weight-semibold: 600;
@@ -112,7 +112,7 @@ Date: 21 Oct 2026. Every UI task follows this file. It replaces "Mahakam malam" 
 
 - Left sheet (`layout-panel` wide, inset from the top-left): a title block (`Malas Ngoding`, `Data 2024`), the place name, one readout, the ranked list, then one hint and one source line. It scrolls inside itself if the screen is short.
 - Bottom legend strip, four groups: metric switch ("Tinggi kolom"), the meter (ramp, ticks with real values, unit, "perkiraan"), data layers (Wilayah, Pembangkit with the fuel key) and the scene (Cahaya: Otomatis, Siang, Malam; Hujan with its hint). One row down to 1270 px wide (the meter narrows at 1440 and 1360 px), two rows below that, stacked on phones. On screens 820 px tall or less the sheet tightens, and again at 740 px, so all ten regions fit.
-- Basemap labels are Indonesian (`language: "id"`); road names and shields show only from zoom 11.
+- Basemap labels are Indonesian (`language: "id"`). While the columns stand (below zoom 12) the basemap place names are off, because Standard draws them ghosted behind the columns; our own region names (`regionLabels.ts`, DIN Pro Medium, paper on an ink halo) sit on top of each column (`symbol-z-elevate` + `symbol-z-offset` = the column's resting height). The crowded coast is hand-placed at the province view (`text-variable-anchor` would switch the lift off) and every label centres from zoom 7.5. Labels are full or nothing, never half-faded; hidden while columns move; a selection keeps only its own. Plant markers stay clear of them through an invisible hit layer. Road names show from zoom 11, place names from 12.
 - The right side stays free for the building panel (Task 7) and the chat button (Task 8). Mapbox controls sit bottom-right above the chat button.
 - Tooltip and popup: `panel`, `rule-strong` border, `radius-sm`, `shadow-float`; name, then value, unit and "perkiraan". Status notes ("Rencana", "Lokasi perkiraan") are plain muted text.
 - The one primary button per view (for example "Coba lagi") is filled `accent` with `on-accent` text. Every other button is text or outlined.
@@ -132,7 +132,8 @@ const reveal = (v: number) => ["interpolate", ["linear"], ["zoom"], 15, 0, 16.5,
 map.setRain({ density: reveal(0.9), intensity: 0.85, color: token("--color-rain"), opacity: 0.6,
   vignette: reveal(0.35), "vignette-color": token("--color-rain-vignette"), direction: [0, 80],
   "droplet-size": [1.1, 11], "distortion-strength": 0.3, "center-thinning": 0.15 });
-// Light ground (day, dawn): color --color-rain-day, opacity 0.7, droplet-size [1.2, 12], distortion 0.5.
+// Light ground (day, dawn): color --color-rain-day (light), density 1, opacity 0.72, droplet-size [1, 12],
+// distortion 0.35, vignette 0.3, plus rainFog(): fog color --color-rain-haze, range [-1, 2.5] at full rain.
 ```
 
-Below zoom 15 the density is 0, so the province and city views never show rain. Off means `setRain(undefined)`. While it rains, a flat `overcast` slate layer between the map and the panels fades in with the rain (zoom 15 to 16.5), to 24% on a light ground and 12% on a dark one. A light change re-applies rain and tint. While rain is on and the view is farther out than zoom 15, the legend says under the switch: "Terlihat saat peta diperbesar sampai tingkat gedung."
+Below zoom 15 the density is 0, so the province and city views never show rain. Off means `setRain(undefined)`. By day the haze is spliced into the basemap's own fog from zoom 15 to 16.5, so the globe and province views keep their atmosphere; switching rain off, or to a dark preset, puts the basemap fog back. A flat `overcast` slate layer between the map and the panels fades in with the rain to 10% on a light ground (the haze does the rest) and 12% on a dark one. A light change re-applies rain, haze and tint. While rain is on and the view is farther out than zoom 15, the legend says under the switch: "Terlihat saat peta diperbesar sampai tingkat gedung."
