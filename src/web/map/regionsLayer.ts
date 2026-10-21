@@ -27,6 +27,9 @@ const HOVER_END_ZOOM = HIDE_ZOOM - 0.5;
 const MS = { rise: 1600, riseStagger: 110, hover: 300, select: 900, sink: 380, swapRise: 900, swapStagger: 40 } as const;
 /** Hover previews a selection: the column under the pointer rises this much ... */
 const HOVER_LIFT = 1.12;
+/** Columns stay opaque through the zoom a selected region rests at, then fade out toward city zoom. */
+const COLUMN_OPACITY: ExpressionSpecification = ["interpolate", ["linear"], ["zoom"], 11, 1, HIDE_ZOOM, 0];
+
 /** ... and the other columns fade this far toward the dimmed colour of a real selection (which goes all the way). */
 const RECEDE = 0.6;
 /**
@@ -209,7 +212,9 @@ export function addRegions(
   tone: Tone = "dark",
 ): void {
   removeRegions(map);
-  map.addSource(REGION_SOURCE, { type: "geojson", data: fc as unknown as GeoJSONSourceSpecification["data"], promoteId: "id" });
+  // A little more simplification than Mapbox's default (0.375 tile px), scaled by zoom like it: the walls
+  // of the columns read as calm planes instead of a stripe per tiny coastline step.
+  map.addSource(REGION_SOURCE, { type: "geojson", data: fc as unknown as GeoJSONSourceSpecification["data"], promoteId: "id", tolerance: 2.5 });
 
   const height: ExpressionSpecification = ["coalesce", ["feature-state", "h"], 0];
 
@@ -223,12 +228,15 @@ export function addRegions(
       "fill-extrusion-color": colorExpression(metric, tone),
       "fill-extrusion-height": columnZoomScale(height),
       "fill-extrusion-base": 0,
-      // Opaque, so the ground does not tint the data colour; fades out on the way to city zoom.
-      "fill-extrusion-opacity": ["interpolate", ["linear"], ["zoom"], 10, 1, HIDE_ZOOM, 0],
+      // Opaque, so the ground does not tint the data colour, also at the zoom a selected region rests at
+      // (up to 10.5); fades out only on the way to city zoom.
+      "fill-extrusion-opacity": COLUMN_OPACITY,
       // One value for every column: hover is shown by the lift and the receding neighbours, not by glow.
       "fill-extrusion-emissive-strength": EMISSIVE[tone],
-      "fill-extrusion-vertical-gradient": true,
-      "fill-extrusion-ambient-occlusion-intensity": 0.25,
+      // Calm walls: no darkening gradient and no ambient occlusion, which broke the low walls of a
+      // selected region into dark fragments.
+      "fill-extrusion-vertical-gradient": false,
+      "fill-extrusion-ambient-occlusion-intensity": 0,
     },
   });
   map.addLayer({
