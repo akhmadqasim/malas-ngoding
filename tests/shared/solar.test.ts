@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { simulateSolar } from "../../src/shared/solar.ts";
+import { simulateSolar, yieldPerKwpYear } from "../../src/shared/solar.ts";
 import type { SolarInput } from "../../src/shared/types.ts";
 
 const input: SolarInput = {
@@ -57,5 +57,13 @@ describe("simulateSolar", () => {
       for (const v of Object.values(r)) expect(Number.isFinite(v)).toBe(true);
     }
     expect(simulateSolar({ ...input, tariffRpPerKwh: 0 }).paybackYears).toBe(0);
+  });
+});
+
+describe("yieldPerKwpYear", () => {
+  test("is peak sun hours x 365 x the 0.78 performance ratio, and 0 for bad input", () => {
+    expect(yieldPerKwpYear(4.5)).toBeCloseTo(4.5 * 365 * 0.78, 9);
+    expect(simulateSolar(input).kwhYear).toBeCloseTo(3 * yieldPerKwpYear(4.5), 9);
+    for (const bad of [0, -1, Number.NaN, Number.POSITIVE_INFINITY]) expect(yieldPerKwpYear(bad)).toBe(0);
   });
 });

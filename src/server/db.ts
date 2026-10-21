@@ -4,6 +4,7 @@ import type {
   EquivalentFactor,
   FuelType,
   GridMix,
+  RecommendationItem,
   RegionSummary,
 } from "../shared/types.ts";
 import { env } from "./env.ts";
@@ -75,10 +76,23 @@ export async function listRegions(): Promise<RegionSummary[]> {
 export const DISPLAY_MIN_PART_M2 = 30e6;
 
 /**
- * Display geometry and a label point for every region. The label point is the centre of the largest
- * circle that fits inside the region's largest part: unlike the centroid it always lies inside the
- * region (Mahakam Ulu's centroid does not), and it sits where the region is widest.
+ * Joins the label point `lp.center` of region `r`: the centre of the largest circle that fits inside the
+ * region's largest part. Unlike the centroid it always lies inside the region (Mahakam Ulu's centroid
+ * does not), and it sits where the region is widest.
  */
+const labelPointJoin = () => sql`
+  CROSS JOIN LATERAL (
+    SELECT (ST_MaximumInscribedCircle(d.geom)).center
+    FROM ST_Dump(r.geom) d ORDER BY ST_Area(d.geom) DESC LIMIT 1
+  ) lp`;
+
+/** `[lng, lat]` of a row's `label_lng`/`label_lat`, rounded to 5 decimals (about 1 m). */
+const labelPointOf = (r: Record<string, unknown>): [number, number] => [
+  Math.round(Number(r.label_lng) * 1e5) / 1e5,
+  Math.round(Number(r.label_lat) * 1e5) / 1e5,
+];
+
+/** Display geometry and a label point (see `labelPointJoin`) for every region. */
 export async function regionGeoJSON(): Promise<FeatureCollection> {
   const factor = await latestGridFactor();
   const rows = await sql`
@@ -92,22 +106,27 @@ export async function regionGeoJSON(): Promise<FeatureCollection> {
              6)::text AS geometry,
            ST_X(lp.center) AS label_lng, ST_Y(lp.center) AS label_lat
     FROM regions r
-    CROSS JOIN LATERAL (
-      SELECT (ST_MaximumInscribedCircle(d.geom)).center
-      FROM ST_Dump(r.geom) d ORDER BY ST_Area(d.geom) DESC LIMIT 1
-    ) lp
+    ${labelPointJoin()}
     ORDER BY name`;
   return {
     type: "FeatureCollection",
     features: rows.map((r: Record<string, unknown>) => ({
       type: "Feature" as const,
-      properties: {
-        ...toSummary(r, factor),
-        labelPoint: [Math.round(Number(r.label_lng) * 1e5) / 1e5, Math.round(Number(r.label_lat) * 1e5) / 1e5],
-      },
+      properties: { ...toSummary(r, factor), labelPoint: labelPointOf(r) },
       geometry: JSON.parse(String(r.geometry)),
     })),
   };
+}
+
+/** The label point `[lng, lat]` of one region, the same one `regionGeoJSON` shows, or null for an unknown id. */
+export async function regionLabelPoint(regionId: string): Promise<[number, number] | null> {
+  const rows = await sql`
+    SELECT ST_X(lp.center) AS label_lng, ST_Y(lp.center) AS label_lat
+    FROM regions r
+    ${labelPointJoin()}
+    WHERE r.id = ${regionId}`;
+  const row = rows[0];
+  return row ? labelPointOf(row) : null;
 }
 
 export async function getGridMix(): Promise<GridMix> {
@@ -151,6 +170,34 @@ export async function listPlants(): Promise<FeatureCollection> {
       geometry: JSON.parse(String(r.geometry)),
     })),
   };
+}
+
+export interface RegionPlant {
+  name: string;
+  fuel: FuelType;
+  capacityMw: number;
+  status: string;
+  /** True when the plant's coordinates are a guess. */
+  approx: boolean;
+  source: string;
+}
+
+/** Power plants whose point lies inside the region's polygon, largest first. Empty for an unknown id. */
+export async function plantsInRegion(regionId: string): Promise<RegionPlant[]> {
+  const rows = await sql`
+    SELECT p.name, p.fuel, p.capacity_mw, p.status, p.approx, p.source
+    FROM power_plants p
+    JOIN regions r ON ST_Contains(r.geom, p.geom)
+    WHERE r.id = ${regionId}
+    ORDER BY p.capacity_mw DESC, p.name`;
+  return rows.map((r: Record<string, unknown>) => ({
+    name: String(r.name),
+    fuel: r.fuel as FuelType,
+    capacityMw: Number(r.capacity_mw),
+    status: String(r.status),
+    approx: Boolean(r.approx),
+    source: String(r.source),
+  }));
 }
 
 export async function getBuildingTypes(): Promise<
@@ -292,6 +339,35 @@ export async function addChatMessage(
   content: Record<string, unknown>,
 ): Promise<void> {
   await sql`INSERT INTO chat_messages (session_id, role, content) VALUES (${sessionId}, ${role}, ${content})`;
+}
+
+/** The recommendations stored for a region, or null on a miss. `items` is as stored; the caller validates it. */
+export async function recommendationsGet(
+  regionId: string,
+): Promise<{ items: unknown; model: string; generatedAt: Date } | null> {
+  const rows = await sql`
+    SELECT content, model, generated_at FROM recommendations WHERE region_id = ${regionId}`;
+  const row = rows[0];
+  if (!row) return null;
+  const content: unknown = typeof row.content === "string" ? JSON.parse(row.content) : row.content;
+  const items = content && typeof content === "object" ? (content as { items?: unknown }).items : undefined;
+  return { items, model: String(row.model), generatedAt: new Date(row.generated_at) };
+}
+
+/** Stores a region's recommendations, replacing any earlier copy. Returns the time they were stored. */
+export async function recommendationsSet(
+  regionId: string,
+  items: RecommendationItem[],
+  model: string,
+): Promise<Date> {
+  const content = { items };
+  const rows = await sql`
+    INSERT INTO recommendations (region_id, content, model, generated_at)
+    VALUES (${regionId}, ${content}, ${model}, now())
+    ON CONFLICT (region_id) DO UPDATE
+      SET content = EXCLUDED.content, model = EXCLUDED.model, generated_at = now()
+    RETURNING generated_at`;
+  return new Date(rows[0]?.generated_at);
 }
 
 /**

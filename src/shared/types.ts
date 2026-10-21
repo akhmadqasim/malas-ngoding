@@ -9,3 +9,7 @@ export interface SolarInput { roofAreaM2: number; kwhYear: number; peakSunHours:
 export interface SolarResult { kWp: number; panels: number; kwhYear: number; coveragePct: number; batteryKwh: number; costRp: number; savingRpYear: number; paybackYears: number; co2AvoidedKgYear: number }
 export interface PvHour { time: string; ghiWm2: number; cloudPct: number; precipMm: number; weatherCode: number; pvKwh: number }
 export interface RegionSummary { id: string; name: string; kind: "kabupaten" | "kota"; kwhYear: number; co2KgYear: number; population: number | null; customers: number | null; electrificationPct: number | null; villagesNoPln: number | null; estimated: boolean }
+export type RecommendationCategory = "energi_terbarukan" | "efisiensi" | "tata_ruang" | "akses_listrik" | "kebijakan";
+export interface RecommendationItem { title: string; category: RecommendationCategory; body: string; impact: string; priority: 1 | 2 | 3 }
+/** `model` is the Claude model that wrote the items, or null for the rule-based fallback. */
+export interface Recommendations { regionId: string; items: RecommendationItem[]; model: string | null; generatedAt: string }

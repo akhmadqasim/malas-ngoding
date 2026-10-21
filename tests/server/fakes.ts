@@ -1,6 +1,8 @@
+import type { RegionPlant } from "../../src/server/db.ts";
 import type { AppDeps } from "../../src/server/index.ts";
 import type { ChatModel } from "../../src/server/services/claude.ts";
 import type { Climatology } from "../../src/server/services/nasaPower.ts";
+import type { RecommendationWriter } from "../../src/server/services/recommendations.ts";
 import type { PoiHit } from "../../src/server/services/tilequery.ts";
 import type { ForecastHour } from "../../src/shared/pvForecast.ts";
 import type {
@@ -55,6 +57,14 @@ const GRID: GridMix = {
   source: "fake",
 };
 
+/** Plants inside a region (by id); regions not listed have none. */
+export const FAKE_PLANTS: Record<string, RegionPlant[]> = {
+  "kutai-kartanegara": [
+    { name: "PLTG Senipah", fuel: "gas", capacityMw: 117, status: "operating", approx: false, source: "fake" },
+    { name: "PLTU Embalut", fuel: "batubara", capacityMw: 60, status: "operating", approx: true, source: "fake" },
+  ],
+};
+
 const EQUIVALENTS: EquivalentFactor[] = [
   { key: "mobil_km", label: "Mobil", kgCo2PerUnit: 0.2, unit: "km" },
   { key: "motor_km", label: "Motor", kgCo2PerUnit: 0.1, unit: "km" },
@@ -91,6 +101,8 @@ export interface FakeUpstreams {
   meteo?: ForecastHour[] | Error;
   /** The Claude model behind the chat. Default: one that fails the request if used. */
   chat?: ChatModel;
+  /** Claude recommendations writer. Default: none, as with an empty ANTHROPIC_API_KEY. */
+  recommender?: RecommendationWriter | null;
 }
 
 /**
@@ -160,6 +172,19 @@ export function fakeDeps(poiAnswer: PoiHit | null | Error = null, upstreams: Fak
         if (!chatSessions.has(sessionId)) throw new Error("chat session does not exist");
         chatMessages.push({ sessionId, role, content: JSON.parse(JSON.stringify(content)) });
       },
+      plantsInRegion: async (id) => FAKE_PLANTS[id] ?? [],
+      regionLabelPoint: async (id) => (FAKE_REGIONS.some((r) => r.id === id) ? [117.15, -0.5] : null),
+      recommendationsGet: async (id) => {
+        const row = stored.get(`recommendations:${id}`);
+        if (!row) return null;
+        return { items: row.items, model: String(row.model), generatedAt: ages.get(`recommendations:${id}`) ?? new Date() };
+      },
+      recommendationsSet: async (id, items, model) => {
+        const at = new Date();
+        stored.set(`recommendations:${id}`, JSON.parse(JSON.stringify({ items, model })));
+        ages.set(`recommendations:${id}`, at);
+        return at;
+      },
     },
     poi: async (lng, lat) => {
       poiCalls.push([lng, lat]);
@@ -181,6 +206,7 @@ export function fakeDeps(poiAnswer: PoiHit | null | Error = null, upstreams: Fak
       (() => {
         throw new Error("chat model not expected");
       }),
+    recommender: upstreams.recommender ?? null,
   };
   return { deps, stored, ages, poiCalls, nasaCalls, meteoCalls, chatSessions, chatMessages };
 }

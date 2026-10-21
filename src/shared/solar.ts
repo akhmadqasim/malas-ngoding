@@ -22,13 +22,18 @@ function pos(n: number): number {
   return Number.isFinite(n) && n > 0 ? n : 0;
 }
 
+/** Yearly output of 1 kWp of PV at the given peak sun hours, in kWh. 0 for missing or bad input. */
+export function yieldPerKwpYear(peakSunHours: number): number {
+  return pos(peakSunHours) * 365 * PERFORMANCE_RATIO;
+}
+
 export function simulateSolar(input: SolarInput): SolarResult {
   const roof = pos(input.roofAreaM2);
   const load = pos(input.kwhYear);
   const psh = pos(input.peakSunHours);
   if (roof === 0 || load === 0 || psh === 0) return { ...ZERO };
 
-  const yieldPerKwp = psh * 365 * PERFORMANCE_RATIO;
+  const yieldPerKwp = yieldPerKwpYear(psh);
   const maxKwp = (roof * USABLE_ROOF_RATIO) / M2_PER_KWP;
   const neededKwp = load / yieldPerKwp;
   // Size to the need (rounded up to 0.5 kWp) but never above what the roof can hold (rounded down).

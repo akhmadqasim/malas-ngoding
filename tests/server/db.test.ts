@@ -15,12 +15,16 @@ import {
   getGridMix,
   listPlants,
   listRegions,
+  plantsInRegion,
+  recommendationsGet,
+  recommendationsSet,
   regionAt,
   regionById,
   regionGeoJSON,
+  regionLabelPoint,
   sql,
 } from "../../src/server/db.ts";
-import type { BuildingType } from "../../src/shared/types.ts";
+import type { BuildingType, RecommendationItem } from "../../src/shared/types.ts";
 
 const BUILDING_TYPES: BuildingType[] = [
   "rumah", "ruko", "kantor", "pemerintahan", "sekolah", "kampus",
@@ -209,6 +213,66 @@ describe.skipIf(!reachable)("db", () => {
     const [row] = await sql`SELECT jsonb_typeof(psh_by_month) AS t, jsonb_array_length(psh_by_month) AS n FROM solar_climatology WHERE key = 'test:-0.5,117.2'`;
     expect(row).toEqual({ t: "array", n: 12 });
     await sql`DELETE FROM solar_climatology WHERE key LIKE 'test:%'`;
+  });
+
+  test("plantsInRegion returns the plants whose point lies inside the region, largest first", async () => {
+    const kukar = await plantsInRegion("kutai-kartanegara");
+    expect(kukar.map((p) => p.name)).toContain("PLTGU Tanjung Batu");
+    expect(kukar.map((p) => p.name)).not.toContain("PLTU Kaltim Teluk Balikpapan");
+    for (let i = 1; i < kukar.length; i++) expect(kukar[i - 1]!.capacityMw).toBeGreaterThanOrEqual(kukar[i]!.capacityMw);
+    expect(Object.keys(kukar[0]!).sort()).toEqual(["approx", "capacityMw", "fuel", "name", "source", "status"]);
+    expect(typeof kukar[0]!.approx).toBe("boolean");
+    expect((await plantsInRegion("balikpapan")).map((p) => p.name)).toContain("PLTU Kaltim Teluk Balikpapan");
+    expect(await plantsInRegion("mahakam-ulu")).toEqual([]);
+    expect(await plantsInRegion("nope")).toEqual([]);
+  });
+
+  test("regionLabelPoint is the label point regionGeoJSON shows, or null", async () => {
+    const fc = await regionGeoJSON();
+    for (const f of fc.features) {
+      const [lng, lat] = f.properties?.labelPoint as [number, number];
+      const point = await regionLabelPoint(String(f.properties?.id));
+      expect(point?.[0]).toBeCloseTo(lng, 4);
+      expect(point?.[1]).toBeCloseTo(lat, 4);
+    }
+    expect(await regionLabelPoint("nope")).toBeNull();
+  });
+
+  test("recommendationsSet and recommendationsGet round-trip and overwrite", async () => {
+    // The table is keyed by a real region, so keep whatever a warm-up stored there and put it back.
+    const id = "bontang";
+    const [backup] = await sql`SELECT content, model, generated_at FROM recommendations WHERE region_id = ${id}`;
+    const items: RecommendationItem[] = [
+      { title: "Judul", category: "kebijakan", body: "Isi.", impact: "Dampak.", priority: 2 },
+    ];
+    try {
+      await sql`DELETE FROM recommendations WHERE region_id = ${id}`;
+      expect(await recommendationsGet(id)).toBeNull();
+      const at = await recommendationsSet(id, items, "test-model");
+      expect(at).toBeInstanceOf(Date);
+      expect(await recommendationsGet(id)).toEqual({ items, model: "test-model", generatedAt: at });
+      const [shape] = await sql`
+        SELECT jsonb_typeof(content) AS content, jsonb_typeof(content->'items') AS items
+        FROM recommendations WHERE region_id = ${id}`;
+      expect(shape).toEqual({ content: "object", items: "array" });
+
+      const later = await recommendationsSet(id, [{ ...items[0]!, title: "Baru" }], "test-model-2");
+      const row = await recommendationsGet(id);
+      expect(row?.model).toBe("test-model-2");
+      expect((row?.items as RecommendationItem[])[0]?.title).toBe("Baru");
+      expect(later.getTime()).toBeGreaterThanOrEqual(at.getTime());
+      expect(await recommendationsGet("nope")).toBeNull();
+    } finally {
+      if (backup) {
+        await sql`
+          INSERT INTO recommendations (region_id, content, model, generated_at)
+          VALUES (${id}, ${backup.content}, ${backup.model}, ${backup.generated_at})
+          ON CONFLICT (region_id) DO UPDATE
+            SET content = EXCLUDED.content, model = EXCLUDED.model, generated_at = EXCLUDED.generated_at`;
+      } else {
+        await sql`DELETE FROM recommendations WHERE region_id = ${id}`;
+      }
+    }
   });
 
   test("cache functions reject table names outside the whitelist", async () => {
