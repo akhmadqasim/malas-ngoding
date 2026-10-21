@@ -1,0 +1,383 @@
+/*
+ * The recommendations section of the region detail (panels/RecommendationPanel.tsx) and the methodology
+ * sheet (panels/MethodologyPanel.tsx). Lane recs-ui owns this file; it is imported by those components.
+ * Tokens only (tests/web/tokens.test.ts), and the theme bridge's semantic variables, so both follow the
+ * atlas-day and atlas-night themes. Plain calc() on --spacing: this file is bundled from the components.
+ */
+
+/* ---------- Recommendations (left sheet, region detail) ---------- */
+
+.recs {
+  margin-top: calc(var(--spacing) * 5);
+  padding-top: calc(var(--spacing) * 3);
+  border-top: 1px solid var(--border);
+}
+.recs__title {
+  margin: 0;
+  font-size: var(--text-base);
+  line-height: var(--text-base--line-height);
+  font-weight: var(--font-weight-semibold);
+  color: var(--foreground);
+}
+.recs__source {
+  margin: calc(var(--spacing) * 1) 0 calc(var(--spacing) * 2);
+  font-size: var(--text-xs);
+  line-height: var(--leading-relaxed);
+  color: var(--muted);
+}
+.recs__key {
+  margin: calc(var(--spacing) * 2) 0 0;
+  font-size: var(--text-2xs);
+  line-height: var(--leading-relaxed);
+  color: var(--faint);
+}
+
+/* One item: title and meta as the trigger, body and impact in the panel. Rows like the ranking index. */
+.recs__list .rec + .rec {
+  border-top: 1px solid var(--border);
+}
+.recs__list .rec::after {
+  content: none;
+}
+.recs__list .rec__trigger {
+  align-items: flex-start;
+  gap: calc(var(--spacing) * 3);
+  margin-inline: calc(var(--spacing) * -2);
+  padding: calc(var(--spacing) * 2.5) calc(var(--spacing) * 2);
+  border-radius: var(--radius-sm);
+  color: var(--foreground);
+  transition: background-color var(--duration-instant) var(--ease-standard);
+}
+.recs__list .rec__trigger:hover:not([aria-expanded="true"]) {
+  background-color: var(--surface-secondary);
+}
+.rec__head {
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--spacing) * 1);
+  min-width: 0;
+}
+.rec__title {
+  font-size: var(--text-sm);
+  line-height: var(--text-sm--line-height);
+  font-weight: var(--font-weight-semibold);
+}
+.rec__meta {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--spacing) * 1.5);
+  font-size: var(--text-xs);
+  line-height: var(--text-xs--line-height);
+  font-weight: var(--font-weight-regular);
+  color: var(--muted);
+}
+.recs__list .rec__indicator {
+  margin-top: calc(var(--spacing) * 0.5);
+  color: var(--faint);
+}
+
+/* Priority as three rising bars, as many filled as the item is urgent. */
+.rec__priority {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: calc(var(--spacing) * 0.5);
+  height: calc(var(--spacing) * 2.5);
+}
+.rec__priority-step {
+  width: calc(var(--spacing) * 0.75);
+  border-radius: var(--radius-xs);
+  background: var(--border-strong);
+}
+.rec__priority-step:nth-child(1) {
+  height: 40%;
+}
+.rec__priority-step:nth-child(2) {
+  height: 70%;
+}
+.rec__priority-step:nth-child(3) {
+  height: 100%;
+}
+.rec__priority-step[data-on] {
+  background: var(--foreground);
+}
+
+/* Body text lines up with the title above it (HeroUI indents it 16 px). */
+.recs__list .rec__body {
+  padding: 0 0 calc(var(--spacing) * 3);
+  font-size: var(--text-sm);
+}
+.rec__text {
+  margin: 0;
+  font-size: var(--text-sm);
+  line-height: var(--leading-relaxed);
+  color: var(--foreground);
+}
+.rec__impact-label {
+  margin: calc(var(--spacing) * 3) 0 0;
+  font-size: var(--text-xs);
+  line-height: var(--text-xs--line-height);
+  color: var(--muted);
+}
+.rec__impact {
+  margin: calc(var(--spacing) * 1) 0 0;
+  padding-left: calc(var(--spacing) * 2.5);
+  border-left: 2px solid var(--border-strong);
+  font-size: var(--text-sm);
+  line-height: var(--leading-relaxed);
+  color: var(--foreground);
+}
+
+/* Loading: a calm line that fills toward 90% and flat skeleton rows (no shimmer, no spinner). */
+.recs__loading {
+  margin-top: calc(var(--spacing) * 2);
+}
+.recs__progress {
+  --progress-bar-fill: var(--muted);
+}
+.recs__progress .progress-bar__track {
+  background: var(--border);
+}
+.recs__note {
+  margin: calc(var(--spacing) * 2) 0 calc(var(--spacing) * 2);
+  font-size: var(--text-xs);
+  line-height: var(--leading-relaxed);
+  color: var(--muted);
+}
+.recs__skeleton-item {
+  display: grid;
+  gap: calc(var(--spacing) * 2);
+  padding: calc(var(--spacing) * 3) 0;
+  border-top: 1px solid var(--border);
+}
+.recs__skeleton-line {
+  height: calc(var(--spacing) * 3);
+  border-radius: var(--radius-xs);
+  background: var(--surface-secondary);
+}
+.recs__skeleton-line--title {
+  width: 85%;
+}
+.recs__skeleton-line--meta {
+  width: 45%;
+  height: calc(var(--spacing) * 2.5);
+}
+
+/* Failure: one sentence and "Coba lagi". */
+.recs__failure {
+  margin-top: calc(var(--spacing) * 2);
+  padding: calc(var(--spacing) * 3);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+}
+.recs__failure-text {
+  margin: 0 0 calc(var(--spacing) * 3);
+  font-size: var(--text-sm);
+  line-height: var(--leading-relaxed);
+  color: var(--foreground);
+}
+.recs__failure-reason {
+  color: var(--muted);
+}
+
+/* ---------- Methodology (side sheet from "Tentang peta ini") ---------- */
+
+.map-about .methodology-open {
+  margin-top: calc(var(--spacing) * 3);
+}
+
+/* A floating margin panel like the others: inset, radius md, a hairline, the float shadow. It slides in
+   16 px and fades (00-direction section 6), not the full width HeroUI uses. */
+.drawer__dialog.methodology {
+  width: min(calc(var(--spacing) * 120), calc(100vw - 2 * var(--layout-inset)));
+  height: calc(100% - 2 * var(--layout-inset));
+  margin: var(--layout-inset);
+  padding: calc(var(--spacing) * 5) calc(var(--spacing) * 6) calc(var(--spacing) * 2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background: var(--overlay);
+  color: var(--overlay-foreground);
+  box-shadow: var(--overlay-shadow);
+  --drawer-enter-duration: var(--duration-panel);
+  --drawer-exit-duration: var(--duration-exit);
+  --drawer-enter-ease: var(--ease-out);
+  --drawer-exit-ease: var(--ease-in);
+  transition:
+    translate var(--drawer-enter-duration) var(--drawer-enter-ease),
+    opacity var(--drawer-enter-duration) var(--drawer-enter-ease);
+}
+.drawer__content--right[data-entering="true"] .methodology,
+.drawer__content--right[data-exiting="true"] .methodology {
+  translate: calc(var(--spacing) * 4) 0;
+  opacity: 0;
+}
+.methodology .methodology__close {
+  top: calc(var(--spacing) * 4);
+  right: calc(var(--spacing) * 4);
+  color: var(--muted);
+}
+.methodology__header {
+  padding-right: calc(var(--spacing) * 8);
+}
+.methodology .methodology__title {
+  margin: 0;
+  font-size: var(--text-lg);
+  line-height: var(--text-lg--line-height);
+  font-weight: var(--font-weight-semibold);
+  color: var(--foreground);
+}
+.methodology__lede {
+  margin: 0;
+  font-size: var(--text-sm);
+  line-height: var(--leading-relaxed);
+  color: var(--muted);
+}
+.methodology .methodology__body {
+  margin-top: calc(var(--spacing) * 4);
+  padding-right: calc(var(--spacing) * 2);
+  font-size: var(--text-sm);
+  line-height: var(--leading-relaxed);
+  color: var(--muted);
+}
+
+.methodology__section {
+  padding: calc(var(--spacing) * 4) 0;
+  border-top: 1px solid var(--border);
+}
+.methodology__heading {
+  margin: 0;
+  font-size: var(--text-base);
+  line-height: var(--text-base--line-height);
+  font-weight: var(--font-weight-semibold);
+  color: var(--foreground);
+}
+.methodology__section p {
+  margin: calc(var(--spacing) * 2) 0 0;
+}
+.methodology__section .methodology__formula {
+  margin-top: calc(var(--spacing) * 2.5);
+  padding: calc(var(--spacing) * 2) calc(var(--spacing) * 3);
+  border-radius: var(--radius-sm);
+  background: var(--surface-secondary);
+  color: var(--foreground);
+  font-weight: var(--font-weight-medium);
+}
+
+/* The two grid factors side by side: the one used gets the strong rule. */
+.methodology__factors {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: calc(var(--spacing) * 3);
+  margin: calc(var(--spacing) * 3) 0 0;
+}
+.methodology__factor {
+  padding: calc(var(--spacing) * 3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+.methodology__factor[data-used] {
+  border-color: var(--foreground);
+}
+.methodology__factor dt {
+  font-size: var(--text-xs);
+  line-height: var(--text-xs--line-height);
+  color: var(--muted);
+}
+.methodology__factor dd {
+  margin: calc(var(--spacing) * 1) 0 0;
+  font-size: var(--text-xs);
+  color: var(--muted);
+}
+.methodology__value {
+  font-size: var(--text-xl);
+  line-height: var(--text-xl--line-height);
+  font-weight: var(--font-weight-medium);
+  color: var(--foreground);
+}
+.methodology__factor .methodology__factor-note {
+  color: var(--faint);
+  line-height: var(--leading-relaxed);
+}
+
+.methodology__table {
+  width: 100%;
+  margin-top: calc(var(--spacing) * 3);
+  border-collapse: collapse;
+  font-size: var(--text-xs);
+  line-height: var(--text-xs--line-height);
+}
+.methodology__table caption {
+  padding-bottom: calc(var(--spacing) * 2);
+  caption-side: top;
+  text-align: left;
+  line-height: var(--leading-relaxed);
+  color: var(--muted);
+}
+.methodology__table th,
+.methodology__table td {
+  padding: calc(var(--spacing) * 1.5) calc(var(--spacing) * 2);
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  vertical-align: baseline;
+}
+.methodology__table thead th {
+  font-weight: var(--font-weight-regular);
+  color: var(--muted);
+  white-space: nowrap;
+}
+.methodology__table tbody th {
+  font-weight: var(--font-weight-medium);
+  color: var(--foreground);
+}
+.methodology__table td {
+  color: var(--muted);
+}
+.methodology__table .methodology__num {
+  text-align: right;
+  white-space: nowrap;
+  color: var(--foreground);
+}
+/* Rows whose value has no verified source. */
+.methodology__table tr[data-assumption] {
+  background: var(--surface-secondary);
+}
+.methodology__assumption {
+  font-style: italic;
+  color: var(--faint);
+}
+
+.methodology__sources {
+  margin: calc(var(--spacing) * 2) 0 0;
+  padding: 0;
+  list-style: none;
+}
+.methodology__source {
+  padding: calc(var(--spacing) * 2.5) 0;
+  border-bottom: 1px solid var(--border);
+}
+.methodology__source:last-child {
+  border-bottom: 0;
+}
+.methodology__section .methodology__source p {
+  margin: calc(var(--spacing) * 0.5) 0 0;
+  font-size: var(--text-xs);
+}
+.methodology__section .methodology__source .methodology__source-name {
+  margin: 0;
+  font-size: var(--text-sm);
+  font-weight: var(--font-weight-medium);
+  color: var(--foreground);
+}
+.methodology__section .methodology__source .methodology__licence {
+  color: var(--faint);
+}
+.methodology a {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+@media (max-width: 720px) {
+  .methodology__factors {
+    grid-template-columns: 1fr;
+  }
+}

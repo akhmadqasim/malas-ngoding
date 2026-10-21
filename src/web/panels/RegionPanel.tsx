@@ -13,6 +13,7 @@ import { METRIC_TEXT } from "../metrics.ts";
 import { DURATION, EASE_IN, EASE_OUT, stagger } from "../motion.ts";
 import { type Metric, useAppStore } from "../store.ts";
 import { mixRamp, rampTokens } from "../theme.ts";
+import { RecommendationPanel } from "./RecommendationPanel.tsx";
 
 interface Props {
   regions: RegionSummary[];
@@ -247,6 +248,7 @@ function RegionDetail({
           {region.villagesNoPln === null ? null : <AnimatedNumber value={region.villagesNoPln} format={whole} />}
         </Fact>
       </dl>
+      <RecommendationPanel regionId={region.id} />
       <footer className="sheet__foot">
         <p className="sheet__note">
           {chem(
