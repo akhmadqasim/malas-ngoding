@@ -33,6 +33,9 @@ function parseInput(body: unknown): { input: BuildingInput } | { problem: string
   if (b.typeOverride !== undefined && !BUILDING_TYPES.includes(b.typeOverride as BuildingType)) {
     return { problem: "Jenis bangunan (typeOverride) tidak dikenal." };
   }
+  if (b.typeHint !== undefined && !BUILDING_TYPES.includes(b.typeHint as BuildingType)) {
+    return { problem: "Petunjuk jenis bangunan (typeHint) tidak dikenal." };
+  }
   if (b.floorsOverride !== undefined && !isNum(b.floorsOverride)) {
     return { problem: "Jumlah lantai (floorsOverride) harus berupa angka." };
   }
@@ -47,6 +50,7 @@ function parseInput(body: unknown): { input: BuildingInput } | { problem: string
       poiType: b.poiType as string | null | undefined,
       typeOverride: b.typeOverride as BuildingType | undefined,
       floorsOverride: b.floorsOverride as number | undefined,
+      typeHint: b.typeHint as BuildingType | undefined,
     },
   };
 }

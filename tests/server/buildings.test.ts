@@ -78,6 +78,21 @@ describe("POST /api/buildings/estimate", () => {
     expect(est.typeSource).toBe("user");
   });
 
+  test("a type hint is used when Tilequery finds no POI, is validated, and changes the cache key", async () => {
+    const local = fakeDeps(null);
+    const s = start(local);
+    const plain = (await (await post(s, { ...SAMARINDA, featureId: "hint-1" })).json()) as BuildingEstimate;
+    expect(plain.typeSource).toBe("footprint");
+    const hinted = (await (await post(s, { ...SAMARINDA, featureId: "hint-1", typeHint: "sekolah" })).json()) as BuildingEstimate;
+    expect([hinted.type, hinted.typeSource]).toEqual(["sekolah", "poi"]);
+    expect((await post(s, { ...SAMARINDA, typeHint: "kastil" })).status).toBe(400);
+  });
+
+  test("a POI at the building beats the type hint", async () => {
+    const res = await post(server, { ...SAMARINDA, featureId: "hint-2", typeHint: "mal" });
+    expect(((await res.json()) as BuildingEstimate).type).toBe("sekolah");
+  });
+
   test("a throwing poi still gives 200 with the footprint fallback type, and is not cached", async () => {
     const local = fakeDeps(new Error("tilequery down"));
     const s = start(local);
@@ -85,7 +100,7 @@ describe("POST /api/buildings/estimate", () => {
     expect(res.status).toBe(200);
     const est = (await res.json()) as BuildingEstimate;
     expect(est.typeSource).toBe("footprint");
-    expect(local.stored.has("building_estimates:down-1|||400|")).toBe(false);
+    expect([...local.stored.keys()].some((k) => k.includes("down-1"))).toBe(false);
     await post(s, { ...SAMARINDA, featureId: "down-1" });
     expect(local.poiCalls).toHaveLength(2);
   });
@@ -96,8 +111,8 @@ describe("POST /api/buildings/estimate", () => {
     const small = (await (await post(s, { ...SAMARINDA, featureId: "fp-1", footprintM2: 400 })).json()) as BuildingEstimate;
     const big = (await (await post(s, { ...SAMARINDA, featureId: "fp-1", footprintM2: 800 })).json()) as BuildingEstimate;
     expect(big.floorAreaM2).toBe(small.floorAreaM2 * 2);
-    expect(local.stored.has("building_estimates:fp-1|||400|")).toBe(true);
-    expect(local.stored.has("building_estimates:fp-1|||800|")).toBe(true);
+    expect(local.stored.has("building_estimates:v2|fp-1|||400||")).toBe(true);
+    expect(local.stored.has("building_estimates:v2|fp-1|||800||")).toBe(true);
     // 400.4 rounds to the same m2 as 400, so it is a cache hit.
     const again = (await (await post(s, { ...SAMARINDA, featureId: "fp-1", footprintM2: 400.4 })).json()) as BuildingEstimate;
     expect(again).toEqual(small);

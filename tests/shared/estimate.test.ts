@@ -102,6 +102,20 @@ describe("estimateBuilding", () => {
     expect(tall.floors).toBe(4);
     expect(tall.assumptions.some((a) => a.includes("Tinggi bangunan"))).toBe(false);
   });
+  test("a type hint (from a place search) is used when no POI is at the building, and says so", () => {
+    const e = estimateBuilding({ ...base, footprintM2: 150, typeHint: "sekolah" }, ctx);
+    expect(e.type).toBe("sekolah");
+    expect(e.typeSource).toBe("poi");
+    expect(e.assumptions.join(" ")).toContain("pencarian tempat");
+    expect(e.assumptions.join(" ")).not.toContain("ditebak");
+  });
+
+  test("a POI at the building and a user choice both beat the type hint", () => {
+    expect(estimateBuilding({ ...base, poiClass: "lodging", poiType: "Hotel", typeHint: "sekolah" }, ctx).type).toBe("hotel");
+    const user = estimateBuilding({ ...base, typeOverride: "mal", typeHint: "sekolah" }, ctx);
+    expect([user.type, user.typeSource]).toEqual(["mal", "user"]);
+  });
+
   test("overrides win", () => {
     const e = estimateBuilding({ ...base, typeOverride: "hotel", floorsOverride: 5 }, ctx);
     expect(e.type).toBe("hotel");

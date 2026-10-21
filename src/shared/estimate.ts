@@ -87,7 +87,12 @@ export function estimateBuilding(
     const inferred = inferType(input.poiClass, input.poiType, footprint);
     type = inferred.type;
     typeSource = inferred.source;
-    if (typeSource === "footprint") {
+    if (typeSource === "footprint" && input.typeHint) {
+      // No POI at the building, but a place search named it (the chat's "gedung sekolah di Samarinda").
+      type = input.typeHint;
+      typeSource = "poi";
+      assumptions.push(`Jenis bangunan dari hasil pencarian tempat: ${type.replace("_", " ")}.`);
+    } else if (typeSource === "footprint") {
       assumptions.push(`Jenis bangunan tidak ada di data peta, ditebak dari luas lantai dasar: ${type.replace("_", " ")}.`);
     }
   }

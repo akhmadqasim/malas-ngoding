@@ -11,18 +11,26 @@ export function poiCacheKey(lng: number, lat: number): string {
 }
 
 /**
- * Estimate cache key: the feature, the user overrides, the footprint (nearest m2) and the client POI
- * class. A changed footprint or POI for the same feature id therefore recomputes.
+ * Version of the cached estimate's shape and wording. Bump it when the stored estimate changes (v2: the
+ * flight equivalent counts passengers), so old rows are no longer read.
+ */
+const ESTIMATE_CACHE_VERSION = "v2";
+
+/**
+ * Estimate cache key: the feature, the user overrides, the footprint (nearest m2), the client POI class
+ * and the place-search type hint. A changed footprint, POI or hint for the same feature id recomputes.
  */
 export function estimateCacheKey(
-  input: Pick<BuildingInput, "featureId" | "typeOverride" | "floorsOverride" | "footprintM2" | "poiClass">,
+  input: Pick<BuildingInput, "featureId" | "typeOverride" | "floorsOverride" | "footprintM2" | "poiClass" | "typeHint">,
 ): string {
   return [
+    ESTIMATE_CACHE_VERSION,
     input.featureId,
     input.typeOverride ?? "",
     input.floorsOverride ?? "",
     Math.round(input.footprintM2),
     input.poiClass ?? "",
+    input.typeHint ?? "",
   ].join("|");
 }
 
