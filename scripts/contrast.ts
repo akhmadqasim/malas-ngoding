@@ -57,7 +57,7 @@ async function preparePage(page: Page, metric: "co2" | "kwh") {
     fc.features.forEach((f, k) => {
       const id = f.properties.id;
       const stop = stops[k % stops.length]!;
-      map.setFeatureState({ source: "regions", id }, { t: stop, h: 40, hover: false, recede: false, dim: false });
+      map.setFeatureState({ source: "regions", id }, { t: stop, h: 40, hover: false, fade: 0 });
       const polys: number[][][][] = f.geometry.type === "Polygon" ? [f.geometry.coordinates] : f.geometry.coordinates;
       const points: [number, number][] = [];
       for (const poly of polys) {

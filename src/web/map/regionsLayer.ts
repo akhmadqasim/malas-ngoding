@@ -1,7 +1,7 @@
 import type { ExpressionSpecification, GeoJSONSourceSpecification, Map as MapboxMap, MapMouseEvent } from "mapbox-gl";
 import type { RegionCollection } from "../api.ts";
 import type { Metric } from "../store.ts";
-import { mixColors, rampTokens, token } from "../theme.ts";
+import { rampTokens, token } from "../theme.ts";
 import { columnHeight, columnZoomScale, HIDE_ZOOM, intensities, metricValue } from "./columns.ts";
 import type { Tone } from "./effects.ts";
 import {
@@ -27,7 +27,7 @@ const HOVER_END_ZOOM = HIDE_ZOOM - 0.5;
 const MS = { rise: 1600, riseStagger: 110, hover: 300, select: 900, sink: 380, swapRise: 900, swapStagger: 40 } as const;
 /** Hover previews a selection: the column under the pointer rises this much ... */
 const HOVER_LIFT = 1.12;
-/** ... and the other columns move this far toward the dimmed colour of a real selection. */
+/** ... and the other columns fade this far toward the dimmed colour of a real selection (which goes all the way). */
 const RECEDE = 0.6;
 /**
  * Self-lit share of the column colour. In the dark presets the scene light is too dim to show the ramp
@@ -47,30 +47,33 @@ export interface RegionHandlers {
 const dimColor = (tone: Tone) => token(tone === "light" ? "--color-dim-light" : "--color-dim-dark");
 
 /**
- * Column colour by intensity `t`, on the ramp for the ground tone. A selection dims the other columns; a
- * hover only previews that (`recede`), moving them part of the way toward the dimmed colour.
+ * Column colour by intensity `t`, on the ramp for the ground tone, faded toward the dimmed colour by the
+ * feature-state `fade`: 0 shows the ramp, RECEDE previews a selection while another column is hovered, 1
+ * is dimmed behind a selection. `fade` is tweened like the heights, so the colour never jumps.
  */
 function colorExpression(metric: Metric, tone: Tone): ExpressionSpecification {
   const stops = rampTokens(metric, tone);
-  const dim = dimColor(tone);
-  const ramp = (colors: string[]) =>
-    ["interpolate", ["linear"], ["coalesce", ["feature-state", "t"], 0], ...colors.flatMap((c, i) => [i / (colors.length - 1), c])] as ExpressionSpecification;
-  return [
-    "case",
-    ["boolean", ["feature-state", "dim"], false],
-    dim,
-    ["boolean", ["feature-state", "recede"], false],
-    ramp(stops.map((c) => mixColors(c, dim, RECEDE))),
-    ramp(stops),
+  const ramp: ExpressionSpecification = [
+    "interpolate",
+    ["linear"],
+    ["coalesce", ["feature-state", "t"], 0],
+    ...stops.flatMap((c, i) => [i / (stops.length - 1), c]),
   ];
+  return ["interpolate", ["linear"], ["coalesce", ["feature-state", "fade"], 0], 0, ramp, 1, dimColor(tone)];
 }
 
 const outlineColor = (tone: Tone) => token(tone === "light" ? "--color-outline-light" : "--color-paper");
 
-// --- Height animation -------------------------------------------------------------------------
-// Heights live in feature-state `h`, so animating them only updates paint buffers (no re-tiling).
+// --- Animation ----------------------------------------------------------------------------------
+// Heights (`h`) and colour fades (`fade`) live in feature-state, so animating them only updates paint
+// buffers (no re-tiling).
+
+/** The animated feature-state values of a column. */
+type Channel = "h" | "fade";
 
 interface Tween {
+  id: string;
+  channel: Channel;
   from: number;
   to: number;
   start: number;
@@ -81,7 +84,8 @@ interface LayerState {
   regions: RegionSummary[];
   metric: Metric;
   tone: Tone;
-  heights: Map<string, number>;
+  /** Current value per `channel:id`. */
+  values: Map<string, number>;
   tweens: Map<string, Tween>;
   frame: number;
   hovered: string | null;
@@ -102,17 +106,22 @@ let state: LayerState | null = null;
 
 const easeOutCubic = (x: number) => 1 - (1 - x) ** 3;
 
+const valueKey = (channel: Channel, id: string) => `${channel}:${id}`;
+
 function tick(now: number) {
   if (!state) return;
   const s = state;
-  for (const [id, tw] of s.tweens) {
+  // One feature-state write per column per frame, with every channel that moved.
+  const writes = new Map<string, Partial<Record<Channel, number>>>();
+  for (const [key, tw] of s.tweens) {
     if (now < tw.start) continue;
     const p = Math.min((now - tw.start) / tw.duration, 1);
-    const h = tw.from + (tw.to - tw.from) * easeOutCubic(p);
-    s.heights.set(id, h);
-    s.map.setFeatureState({ source: REGION_SOURCE, id }, { h });
-    if (p >= 1) s.tweens.delete(id);
+    const value = tw.from + (tw.to - tw.from) * easeOutCubic(p);
+    s.values.set(key, value);
+    writes.set(tw.id, { ...writes.get(tw.id), [tw.channel]: value });
+    if (p >= 1) s.tweens.delete(key);
   }
+  for (const [id, values] of writes) s.map.setFeatureState({ source: REGION_SOURCE, id }, values);
   s.frame = s.tweens.size ? requestAnimationFrame(tick) : 0;
   // Everything stands still: the labels, which float at the resting heights, can show again.
   if (!s.frame && s.labelsPending && !s.swapPending) {
@@ -128,10 +137,12 @@ function holdLabels(s: LayerState) {
   s.labelsPending = true;
 }
 
-function animateTo(id: string, to: number, duration: number, delay = 0) {
+/** Tweens one channel of a column from where it is now to `to`. */
+function animateTo(id: string, channel: Channel, to: number, duration: number, delay = 0) {
   if (!state) return;
-  const from = state.heights.get(id) ?? 0;
-  state.tweens.set(id, { from, to, start: performance.now() + delay, duration });
+  const key = valueKey(channel, id);
+  const from = state.values.get(key) ?? 0;
+  state.tweens.set(key, { id, channel, from, to, start: performance.now() + delay, duration });
   if (!state.frame) state.frame = requestAnimationFrame(tick);
 }
 
@@ -144,20 +155,26 @@ function targetHeight(id: string): number {
   return id === state.selected ? base * 1.1 : base * 0.4;
 }
 
+/**
+ * Target colour fade for a region: a selection dims every other column fully; a hover with no selection
+ * previews that, fading the others part of the way.
+ */
+function targetFade(id: string): number {
+  if (!state) return 0;
+  if (state.selected) return id === state.selected ? 0 : 1;
+  return state.hovered !== null && id !== state.hovered ? RECEDE : 0;
+}
+
+/** Fades every column toward its target colour (see targetFade) over `duration`. */
+function fadeColumns(duration: number) {
+  if (!state) return;
+  for (const r of state.regions) animateTo(r.id, "fade", targetFade(r.id), duration);
+}
+
 function writeIntensity() {
   if (!state) return;
   for (const [id, t] of intensities(state.regions, state.metric)) {
     state.map.setFeatureState({ source: REGION_SOURCE, id }, { t });
-  }
-}
-
-/** Writes `recede` for every region: with a hover and no selection, all but the hovered one recede. */
-function writeRecede() {
-  const s = state;
-  if (!s) return;
-  for (const r of s.regions) {
-    const recede = s.selected === null && s.hovered !== null && r.id !== s.hovered;
-    s.map.setFeatureState({ source: REGION_SOURCE, id: r.id }, { recede });
   }
 }
 
@@ -169,13 +186,13 @@ function applyHover(id: string | null) {
   s.hovered = id;
   if (previous) {
     s.map.setFeatureState({ source: REGION_SOURCE, id: previous }, { hover: false });
-    animateTo(previous, targetHeight(previous), MS.hover);
+    animateTo(previous, "h", targetHeight(previous), MS.hover);
   }
   if (id) {
     s.map.setFeatureState({ source: REGION_SOURCE, id }, { hover: true });
-    animateTo(id, targetHeight(id), MS.hover);
+    animateTo(id, "h", targetHeight(id), MS.hover);
   }
-  writeRecede();
+  fadeColumns(MS.hover);
 }
 
 // --- Public API ---------------------------------------------------------------------------------
@@ -246,7 +263,7 @@ export function addRegions(
     regions,
     metric,
     tone,
-    heights: new Map(regions.map((r) => [r.id, 0])),
+    values: new Map(),
     tweens: new Map(),
     frame: 0,
     hovered: null,
@@ -307,7 +324,7 @@ export function riseRegions(map: MapboxMap, fc: RegionCollection): void {
   state.labelsPending = true;
   const west = new Map(fc.features.map((f) => [f.properties.id, firstLng(f.geometry)]));
   const order = [...state.regions].sort((a, b) => (west.get(a.id) ?? 0) - (west.get(b.id) ?? 0));
-  order.forEach((r, i) => animateTo(r.id, targetHeight(r.id), MS.rise, i * MS.riseStagger));
+  order.forEach((r, i) => animateTo(r.id, "h", targetHeight(r.id), MS.rise, i * MS.riseStagger));
 }
 
 function firstLng(g: RegionCollection["features"][number]["geometry"]): number {
@@ -327,7 +344,7 @@ export function setRegionMetric(map: MapboxMap, metric: Metric): void {
   clearTimeout(s.metricTimer);
   holdLabels(s);
   s.swapPending = true;
-  for (const r of s.regions) animateTo(r.id, (s.heights.get(r.id) ?? 0) * 0.3, MS.sink);
+  for (const r of s.regions) animateTo(r.id, "h", (s.values.get(valueKey("h", r.id)) ?? 0) * 0.3, MS.sink);
   s.metricTimer = setTimeout(() => {
     if (state !== s) return;
     s.swapPending = false;
@@ -335,7 +352,7 @@ export function setRegionMetric(map: MapboxMap, metric: Metric): void {
     setRegionLabelData(map, s.fc, s.metric);
     map.setPaintProperty(REGION_LAYER, "fill-extrusion-color", colorExpression(s.metric, s.tone));
     writeIntensity();
-    s.regions.forEach((r, i) => animateTo(r.id, targetHeight(r.id), MS.swapRise, i * MS.swapStagger));
+    s.regions.forEach((r, i) => animateTo(r.id, "h", targetHeight(r.id), MS.swapRise, i * MS.swapStagger));
   }, MS.sink + 20);
 }
 
@@ -346,11 +363,8 @@ export function setSelectedRegion(map: MapboxMap, id: string | null): void {
   holdLabels(state);
   // A selection keeps only its own label; the others belong to columns that step back.
   setRegionLabelFocus(map, id);
-  for (const r of state.regions) {
-    map.setFeatureState({ source: REGION_SOURCE, id: r.id }, { dim: id !== null && r.id !== id });
-    animateTo(r.id, targetHeight(r.id), MS.select);
-  }
-  writeRecede();
+  for (const r of state.regions) animateTo(r.id, "h", targetHeight(r.id), MS.select);
+  fadeColumns(MS.select);
 }
 
 /** Lifts the column of a region hovered in the list (or clears the lift with `null`). */

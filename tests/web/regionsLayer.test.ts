@@ -15,6 +15,7 @@ import {
 import { REGION_LABEL_LAYER } from "../../src/web/map/regionLabels.ts";
 import { clearTokenCache } from "../../src/web/theme.ts";
 import type { RegionSummary } from "../../src/shared/types.ts";
+import { expressionErrors, styleSpec } from "./styleSpec.ts";
 
 type Handler = (e: Record<string, unknown>) => unknown;
 
@@ -107,6 +108,16 @@ function flush() {
     for (const f of run) f(performance.now() + 10_000);
   }
 }
+/** How far a column's colour has moved toward the dimmed colour (feature-state `fade`, 0 when unset). */
+const fade = (s: Record<string, unknown>) => Number(s.fade ?? 0);
+
+/** Runs the queued frames once, `ms` from now: part of the way through a tween started just before. */
+function step(ms: number) {
+  const run = frames;
+  frames = [];
+  const at = performance.now() + ms;
+  for (const f of run) f(at);
+}
 
 const g = globalThis as unknown as Record<string, unknown>;
 const saved = { document: g.document, getComputedStyle: g.getComputedStyle, raf: g.requestAnimationFrame, caf: g.cancelAnimationFrame };
@@ -179,12 +190,48 @@ describe("hover previews the selection", () => {
     fire("regions-enter", { feature: { id: "samarinda" }, point: { x: 0, y: 0 } });
     flush();
     expect(Number(state("samarinda").h)).toBeCloseTo(resting * 1.12, 0);
-    expect(state("paser").recede).toBe(true);
-    expect(state("samarinda").recede).toBe(false);
+    expect(fade(state("paser"))).toBeCloseTo(0.6, 5);
+    expect(fade(state("samarinda"))).toBe(0);
     fire("regions-leave", { feature: { id: "samarinda" }, point: { x: 0, y: 0 } });
     flush();
     expect(Number(state("samarinda").h)).toBeCloseTo(resting, 0);
-    expect(state("paser").recede).toBe(false);
+    expect(fade(state("paser"))).toBe(0);
+    removeRegions(map);
+  });
+
+  test("the other columns fade toward the dimmed colour over the hover time, never in one jump", () => {
+    const { map, fire, state } = setup();
+    riseRegions(map, fc);
+    flush();
+    fire("regions-enter", { feature: { id: "samarinda" }, point: { x: 0, y: 0 } });
+    // Nothing changes colour on the event itself...
+    expect(fade(state("paser"))).toBe(0);
+    // ...half-way through the 300 ms it is on its way...
+    step(150);
+    expect(fade(state("paser"))).toBeGreaterThan(0.05);
+    expect(fade(state("paser"))).toBeLessThan(0.6);
+    // ...and it settles at the preview's 60%.
+    flush();
+    expect(fade(state("paser"))).toBeCloseTo(0.6, 5);
+    fire("regions-leave", { feature: { id: "samarinda" }, point: { x: 0, y: 0 } });
+    step(150);
+    expect(fade(state("paser"))).toBeGreaterThan(0);
+    expect(fade(state("paser"))).toBeLessThan(0.6);
+    flush();
+    expect(fade(state("paser"))).toBe(0);
+    removeRegions(map);
+  });
+
+  test("the colour follows the fade state: the ramp at 0, the dimmed colour at 1", () => {
+    const { map, specs } = setup();
+    const color = specs.get(REGION_LAYER)?.paint?.["fill-extrusion-color"] as unknown[];
+    expect(color.slice(0, 3)).toEqual(["interpolate", ["linear"], ["coalesce", ["feature-state", "fade"], 0]]);
+    const [, , , atZero, ramp, atOne, dim] = color;
+    expect([atZero, atOne]).toEqual([0, 1]);
+    expect((ramp as unknown[])[2]).toEqual(["coalesce", ["feature-state", "t"], 0]);
+    expect(dim).toBe("#123456");
+    // Mapbox's own parser accepts it as a feature-state driven colour.
+    expect(expressionErrors(color, styleSpec.latest["paint_fill-extrusion"]["fill-extrusion-color"])).toEqual([]);
     removeRegions(map);
   });
 
@@ -198,8 +245,26 @@ describe("hover previews the selection", () => {
     const { map, fire, state } = setup();
     setSelectedRegion(map, "samarinda");
     fire("regions-enter", { feature: { id: "paser" }, point: { x: 0, y: 0 } });
-    expect(state("samarinda").recede).toBe(false);
-    expect(state("paser").dim).toBe(true);
+    flush();
+    expect(fade(state("samarinda"))).toBe(0);
+    expect(fade(state("paser"))).toBe(1);
+    removeRegions(map);
+  });
+
+  test("a selection dims the other columns all the way, over the selection time", () => {
+    const { map, state } = setup();
+    riseRegions(map, fc);
+    flush();
+    setSelectedRegion(map, "samarinda");
+    step(450);
+    expect(fade(state("paser"))).toBeGreaterThan(0.05);
+    expect(fade(state("paser"))).toBeLessThan(1);
+    flush();
+    expect(fade(state("paser"))).toBe(1);
+    expect(fade(state("samarinda"))).toBe(0);
+    setSelectedRegion(map, null);
+    flush();
+    expect(fade(state("paser"))).toBe(0);
     removeRegions(map);
   });
 
@@ -223,7 +288,8 @@ describe("hover after zooming in", () => {
     emit("zoom", {});
     expect(calls.hover).toEqual(["paser", null]);
     expect(hovered("paser")).toBe(false);
-    expect(state("samarinda").recede).toBe(false);
+    flush();
+    expect(fade(state("samarinda"))).toBe(0);
     removeRegions(map);
   });
 });
