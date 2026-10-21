@@ -2,7 +2,7 @@
 
 Date: 21 Oct 2026. Every UI task follows this file. It replaces "Mahakam malam" (Task 6). Sources: reports 01 to 10 in this folder.
 
-**Concept.** A printed thematic atlas, read at night. The map is the page; panels are its margins. Place names in the panels are set in a serif, as on printed maps (names on the map itself use the basemap's DIN Pro, section 7). Everything you read as data is set in a sans with tabular figures. **Colour belongs to data.** The interface itself is ink and paper. **Signature:** the legend is a meter. When you point at a region (on the map or in the list), its needle swings along the scale to that value, the column rises and the other columns recede. Everything else stays quiet.
+**Concept.** A printed thematic atlas, read at night. The map is the page; panels are its margins. On a light map (day, dawn) the margins are printed paper with ink type; on a dark map (dusk, night) they are ink with paper type (section 10). Place names in the panels are set in a serif, as on printed maps (names on the map itself use the basemap's DIN Pro, section 7). Everything you read as data is set in a sans with tabular figures. **Colour belongs to data.** The interface itself is ink and paper. **Signature:** the legend is a meter. When you point at a region (on the map or in the list), its needle swings along the scale to that value, the column rises and the other columns recede. Everything else stays quiet.
 
 ## 1. Anti-slop rules (do not break)
 
@@ -15,7 +15,7 @@ Date: 21 Oct 2026. Every UI task follows this file. It replaces "Mahakam malam" 
 7. One radius per level of hierarchy (`md` panels, `sm` controls, `xs` bars), never one radius on everything.
 8. Shadows only on things that float over the map. Tinted to the ink hue, never grey `rgba(0,0,0,.1)` boxes.
 9. No vanity numbers: every figure has its unit next to it; estimates say "perkiraan"; the panel footer says where the number comes from.
-10. Motion answers an action or tells the one intro story. The only loop is the plant pulse, which means "a working power plant".
+10. Motion answers an action or tells the one intro story. Nothing loops for decoration (the plant pulse went in round 5: its rings read as targets). The idle sway is the one slow movement, and only when nobody touches the page.
 11. Design the unhappy paths: loading, "Belum ada data", and the "Coba lagi" failure card.
 12. Only tokens: no hex, `rgb()`, px font sizes or Tailwind arbitrary values (`[...]`) outside the `@theme` block. `tests/web/tokens.test.ts` enforces it.
 
@@ -41,7 +41,8 @@ Date: 21 Oct 2026. Every UI task follows this file. It replaces "Mahakam malam" 
 
 ## 4. Colour (WCAG contrast, measured)
 
-- Text on `panel #141922`: paper `#ECE9E2` 14.5:1, muted `#A7ADB5` 7.8:1, faint `#878F99` 5.4:1 (4.9:1 on `panel-high`).
+- Text on `panel #141922` (night chrome): paper `#ECE9E2` 14.5:1, muted `#A7ADB5` 7.8:1, faint `#878F99` 5.4:1 (4.9:1 on `panel-high`).
+- Text on `sheet #F7F6F2` (day chrome): ink `#10141B` 17.1:1, `ink-muted #4B525C` 7.3:1, `ink-faint #626973` 5.1:1 (4.6:1 on `sheet-high`).
 - Columns against the ground, measured from rendered pixels by `bun run contrast` (median column pixel against the median ground pixel under the same points; ground: day `#f8f8f8`, dawn `#eaeaea`, dusk `#3c3c3c`, night `#2d4656`). The lowest is 3.2:1. Night stop 5 sits partly over the darker Mahakam delta (`#1a3050`), hence its higher value.
 
 | Preset | CO₂ / kWh | Stop 1 | Stop 2 | Stop 3 | Stop 4 | Stop 5 | Stop 6 |
@@ -51,20 +52,20 @@ Date: 21 Oct 2026. Every UI task follows this file. It replaces "Mahakam malam" 
 | dusk | ramp | 3.4 / 3.5 | 4.2 / 4.3 | 5.1 / 5.2 | 6.0 / 6.2 | 7.1 / 7.4 | 8.4 / 8.7 |
 | night | ramp | 3.2 / 3.3 | 3.9 / 4.0 | 4.7 / 4.9 | 5.6 / 5.8 | 9.0 / 9.3 | 7.8 / 8.2 |
 
-- Plant markers: a fuel-coloured core in a paper ring with an ink edge, and a thin pulse ring built the same way, so they read on a light map, a dark map and the columns. Fuel colours: coal charcoal, gas orange, diesel rust, solar yellow, hydro river blue, biomass leaf green. The legend dot is the same marker. Always shown with a text label.
+- Plant markers: a flat fuel-coloured dot inside a thin paper edge and a thin ink edge (no rings, no pulse). The edges carry the contrast: the ink edge on a light map, the paper edge on a dark map and on the columns. Fuel colours are mid-tone hues away from the amber and teal ramps: coal carmine `#C4456A`, gas violet `#8A63D2`, diesel umber, solar yellow, hydro river blue, biomass leaf green, other grey (coal used to be a charcoal that read as a hole in the map). Size is the square root of MW. Plants closer than 18 px on screen merge into one cluster marker (an ink dot with a paper edge and the count), sized like one plant of their summed MW; its tooltip lists them, a click zooms in until they part (each plant has its own dot from zoom 13). Planned and unverified sites are drawn at 60% opacity; the tooltip names the status. The legend dot is the same marker. Always shown with a text label.
 - Mapbox paint and canvas colours are read from these CSS tokens at runtime (`src/web/theme.ts`), never typed in TS.
 
 ## 5. Tokens (binding copy lives in `src/web/styles.css`)
 
 ```css
 @theme static {
-  --color-*: initial; --font-*: initial; --text-*: initial; --radius-*: initial; --shadow-*: initial;
-  --ease-*: initial;
   --color-ink: #10141b; --color-panel: #141922; --color-panel-high: #1c222c; --color-rule: #283040;
   --color-rule-strong: #384255; --color-scrim: rgb(16 20 27 / 0.86);
   --color-scrim-day: rgb(248 248 248 / 0.94); --color-scrim-day-mid: rgb(248 248 248 / 0.78);
   --color-paper: #ece9e2; --color-paper-muted: #a7adb5; --color-paper-faint: #878f99;
-  --color-accent: #f5f2ea; --color-on-accent: #10141b;
+  --color-paper-bright: #f5f2ea;
+  --color-sheet: #f7f6f2; --color-sheet-high: #ecebe5; --color-sheet-rule: #dad7cf;
+  --color-sheet-rule-strong: #bcb8ad; --color-ink-muted: #4b525c; --color-ink-faint: #626973;
   --color-co2-1: #bc8d46; --color-co2-2: #cb9e5a; --color-co2-3: #dbaf6e; --color-co2-4: #ebc082;
   --color-co2-5: #fbd196; --color-co2-6: #fee5c3;
   --color-kwh-1: #52a4a8; --color-kwh-2: #69b4b8; --color-kwh-3: #7fc4c8; --color-kwh-4: #95d5d8;
@@ -74,9 +75,9 @@ Date: 21 Oct 2026. Every UI task follows this file. It replaces "Mahakam malam" 
   --color-kwh-day-1: #2e8b90; --color-kwh-day-2: #1f7f88; --color-kwh-day-3: #0e7380;
   --color-kwh-day-4: #006878; --color-kwh-day-5: #045c6e; --color-kwh-day-6: #025064;
   --color-dim-dark: #3e4a5a; --color-dim-light: #c2cad0; --color-outline-light: #1c222c;
-  --color-fuel-batubara: #3e444c; --color-fuel-gas: #e58a3e; --color-fuel-diesel: #a86a3d;
-  --color-fuel-surya: #f2d45c; --color-fuel-air: #4fa3d9; --color-fuel-biomassa: #79a94f;
-  --color-fuel-lainnya: #7b8794;
+  --color-fuel-batubara: #c4456a; --color-fuel-gas: #8a63d2; --color-fuel-diesel: #9c7a5b;
+  --color-fuel-surya: #f2c94c; --color-fuel-air: #3a9ad9; --color-fuel-biomassa: #6aa84f;
+  --color-fuel-lainnya: #8b95a1;
   --color-rain: #e2e5ea; --color-rain-day: #f4f5f7; --color-rain-haze: #5f6874;
   --color-rain-haze-high: #4a525e; --color-rain-vignette: #283040; --color-overcast: #3c4757;
   --font-sans: "IBM Plex Sans Variable", "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
@@ -92,31 +93,34 @@ Date: 21 Oct 2026. Every UI task follows this file. It replaces "Mahakam malam" 
   --spacing: 4px; --radius-xs: 2px; --radius-sm: 4px; --radius-md: 6px; --radius-full: 999px;
   --shadow-panel: 0 1px 0 rgb(4 7 12 / 0.3), 0 12px 32px -16px rgb(4 7 12 / 0.55);
   --shadow-float: 0 2px 4px rgb(4 7 12 / 0.4), 0 16px 32px -12px rgb(4 7 12 / 0.65);
+  --shadow-panel-day: 0 1px 0 rgb(16 20 27 / 0.04), 0 12px 32px -16px rgb(16 20 27 / 0.3);
+  --shadow-float-day: 0 2px 4px rgb(16 20 27 / 0.1), 0 16px 32px -12px rgb(16 20 27 / 0.32);
+  --shadow-dot: 0 0 0 1px var(--color-paper), 0 0 0 2px var(--color-ink);
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1); --ease-in: cubic-bezier(0.4, 0, 1, 1);
   --ease-standard: cubic-bezier(0.2, 0, 0, 1); --duration-instant: 120ms; --duration-quick: 200ms;
-  --duration-panel: 240ms; --duration-exit: 180ms; --duration-intro: 6000ms;
+  --duration-panel: 240ms; --duration-exit: 180ms; --duration-intro: 6000ms; --duration-tooltip: 400ms;
   --layout-inset: 24px; --layout-panel: 336px; --layout-reserve-right: 96px; --layout-clear-bottom: 44px;
 }
 ```
 
 ## 6. Motion (JS values live in `src/web/motion.ts`)
 
-- Panel enter 240 ms `ease-out`, exit 180 ms `ease-in`; moves at most 16 px. Controls: spring `visualDuration 0.2, bounce 0.15`. Panels: no bounce.
+- Panel enter 240 ms `ease-out`, exit 180 ms `ease-in`; moves at most 16 px. Controls: the accent block of a segmented choice slides with a spring `visualDuration 0.2, bounce 0.15`; switches use HeroUI's own short CSS transitions. Panels: no bounce. Tooltips open after 400 ms.
 - The needle is the only element with overshoot: spring `visualDuration 0.4, bounce 0.25`, like a meter needle.
 - Count-up: 900 ms `ease-out`, only on first reveal or a real data change, never on hover. Stagger 30 ms, total at most 300 ms, first mount only.
 - The intro is the one orchestrated moment: title and lede settle in 700 ms, the 6 s flight, columns rising, then the panels assemble in 500 ms with an 80 ms stagger.
 - Camera after the intro: `flyTo` 2000 ms, `curve 1.2`; any user gesture stops it. The idle orbit (spec Goal 8) is a slow sway, not a full turn: after 20 s without input the camera swings like a pendulum 12° either side of the bearing it rests at, 36 s there and back (at most about 2.1 deg/s), easing in from rest. Any input stops it where it is; idle again, it carries on around the same resting bearing. The map has no snap to north (`bearingSnap: 0`), so a gesture that ends near north, inside the sway, leaves the bearing where it is. The province stays readable while a presenter talks, and the region names only have to hold over this arc.
-- Map motion: columns rise 1.6 s in a west-to-east wave (intro only), select 900 ms, metric swap sink 380 ms then rise 900 ms. Hover previews a selection in 300 ms: the column rises ×1.12 and the others fade 60% toward the dimmed colour; a selection fades them all the way in 900 ms. Colour fades are tweened like the heights (feature-state `fade`), so no colour ever jumps; nothing glows. Plant pulse: 3.2 s period at 24 fps, only while a marker is on screen. Idle sway only below zoom 11.
-- Reduced motion: `MotionConfig reducedMotion="user"`, the camera jumps, counters show the final value, no pulse, no sway, opacity fades stay.
+- Map motion: columns rise 1.6 s in a west-to-east wave (intro only), select 900 ms, metric swap sink 380 ms then rise 900 ms. Hover previews a selection in 300 ms: the column rises ×1.12 and the others fade 60% toward the dimmed colour; a selection fades them all the way in 900 ms. Colour fades are tweened like the heights (feature-state `fade`), so no colour ever jumps; nothing glows. Idle sway only below zoom 11.
+- Reduced motion: `MotionConfig reducedMotion="user"`, the camera jumps, counters show the final value, no sway, opacity fades stay.
 
 ## 7. Layout and components
 
-- Left sheet (`layout-panel` wide, inset from the top-left): a title block (`Malas Ngoding`, and the span of the data shown, `Data 2019–2026`), the place name, one readout, the ranked list, then one hint and one source line. The region detail names the year of each figure (penduduk "proyeksi 2025", pelanggan and elektrifikasi "data 2024", desa "data 2026", the emission factor "data 2019" in the note). It scrolls inside itself if the screen is short.
-- Bottom legend strip, four groups: metric switch ("Tinggi kolom"), the meter (ramp, ticks with real values, unit, "perkiraan"), data layers (Wilayah, Pembangkit with the fuel key) and the scene (Cahaya: Otomatis, Siang, Malam; Hujan with its hint). Dawn and dusk have no button: from the clock or from a `?cahaya=dawn` link they show as Otomatis, and the label then names the light ("Cahaya fajar", "Cahaya senja"); Otomatis goes back to the link's light. One row down to 1270 px wide (the meter narrows at 1440 and 1360 px), two rows below that, stacked on phones. On screens 820 px tall or less the sheet tightens, and again at 740 px, so all ten regions fit.
-- Basemap labels are Indonesian (`language: "id"`). On the globe and in the first half of the intro (below zoom 5.5, crossed at about 2.4 s, before the columns rise) the basemap names the geography (Malaysia, Brunei, Jakarta, Makassar, Laut Sulu; Standard has no label for Selat Makassar at these zooms). Once the overview has landed, the handover moves out to zoom 4.5, so a small zoom-out from the province view (to about zoom 5) keeps the basemap names off the standing columns. While the columns stand (zoom 5.5 to 12, and from 4.5 after the intro) the basemap place names are off, because Standard draws them ghosted behind the columns; our own region names (`regionLabels.ts`, DIN Pro Medium, paper on an ink halo) sit on top of each column (`symbol-z-elevate` + `symbol-z-offset` = the column's resting height). The crowded coast is hand-placed at the province view (`text-variable-anchor` would switch the lift off) and every label centres from zoom 7.5. Placement priority follows the metric shown, largest first (`symbol-sort-key`, which Mapbox sorts across tiles), so Samarinda, Kutai Kartanegara, Balikpapan and Kutai Timur never yield. All ten names hold, none touching another or a panel, over the whole idle sway at 1280 to 1920 px, CO2 and kWh (the smoke sweeps it); a name that ever has to yield fades with Mapbox's 300 ms symbol fade. Plant markers sit under the names and never push one away; a name over a marker stays legible on its ink halo. Labels are full or nothing, never half-faded; hidden while columns move; a selection keeps only its own. Road names show from zoom 11, place names again from 12.
-- The right side stays free for the building panel (Task 7) and the chat button (Task 8). Mapbox controls sit bottom-right above the chat button.
-- Tooltip and popup: `panel`, `rule-strong` border, `radius-sm`, `shadow-float`; name, then value, unit and "perkiraan". Status notes ("Rencana", "Lokasi perkiraan") are plain muted text.
-- The one primary button per view (for example "Coba lagi") is filled `accent` with `on-accent` text. Every other button is text or outlined.
+- Left sheet (`layout-panel` wide, inset from the top-left), one editorial column: a masthead (`Malas Ngoding`, and the span of the data shown, `Data 2019–2026`), the place name with its one readout right under it, the ranked list as an index (rank, name, value, and a 4 px bar in the ramp colour under the name), then a foot with one hint and one source line. The region detail names the year of each figure (penduduk "proyeksi 2025", pelanggan and elektrifikasi "data 2024", desa "data 2026", the emission factor "data 2019" in the note). It scrolls inside itself if the screen is short.
+- Bottom dock, two cards side by side right of the sheet, bottom-aligned: the legend (what you see: "Tinggi kolom" with its metric switch, the meter with ramp, ticks with real values, unit and "perkiraan", and the "Pembangkit" fuel key, which steps back when the plant layer is off) and the map controls (what you can change: "Lapisan" with Wilayah and Pembangkit, then "Cahaya" Otomatis, Siang, Malam with Hujan and its hint). Every group name has one style (`group-label`). Dawn and dusk have no button: from the clock or from a `?cahaya=dawn` link they show as Otomatis, and the label then names the light ("Cahaya fajar", "Cahaya senja"); Otomatis goes back to the link's light. Both cards fit beside the sheet from 1280 px wide; narrower, the controls card wraps above the legend; on phones both take the full width. On screens 820 px tall or less the sheet tightens, and again at 740 px (with a tighter dock, so it clears the south of the province), so all ten regions fit.
+- Basemap labels are Indonesian (`language: "id"`). On the globe and in the first half of the intro (below zoom 5.5, crossed at about 2.4 s, before the columns rise) the basemap names the geography (Malaysia, Brunei, Jakarta, Makassar, Laut Sulu; Standard has no label for Selat Makassar at these zooms). Once the overview has landed, the basemap names come back only below zoom 4.5, so a small zoom-out from the province view (to about zoom 5) shows the standing columns alone, with no basemap names over them. While the columns stand (zoom 5.5 to 12, and from 4.5 after the intro) the basemap place names are off, because Standard draws them ghosted behind the columns; our own region names (`regionLabels.ts`, DIN Pro Medium, paper on an ink halo) sit on top of each column (`symbol-z-elevate` + `symbol-z-offset` = the column's resting height). The crowded coast is hand-placed at the province view (`text-variable-anchor` would switch the lift off) and every label centres from zoom 7.5. Placement priority follows the metric shown, largest first (`symbol-sort-key`, which Mapbox sorts across tiles), so Samarinda, Kutai Kartanegara, Balikpapan and Kutai Timur never yield. All ten names hold, none touching another or a panel, over the whole idle sway at 1280 to 1920 px, CO2 and kWh (the smoke sweeps it); a name that ever has to yield fades with Mapbox's 300 ms symbol fade. Plant markers sit under the names and never push one away; a name over a marker stays legible on its ink halo. Labels are full or nothing, never half-faded; hidden while columns move; a selection keeps only its own. Road names show from zoom 11, place names again from 12.
+- The right side stays free for the building panel (Task 7) and the chat button (Task 8). Our own map tools (`panels/MapTools.tsx`, not Mapbox's controls) sit bottom-right above the chat button: one vertical toolbar with zoom in, zoom out, north (its needle turns with the map), back to the whole province, and "Tentang peta ini" (a popover with the map and data sources). Arrow keys move between tools; every tool has a tooltip. The Mapbox wordmark and the full attribution line ("© Mapbox © OpenStreetMap Improve this map") stay on screen in the bottom-left corner under the sheet, as the Mapbox terms ask.
+- Tooltip and popup: `overlay` (the panel colour of the theme), `border-strong`, `radius-sm`, the float shadow; name, then value, unit and "perkiraan". A plant's tooltip: name, fuel with its dot, capacity in MW. Status notes ("Rencana", "Lokasi perkiraan") are plain muted text.
+- The one primary button per view (for example "Coba lagi") is filled `accent` with `accent-foreground` text. Every other button is text or outlined.
 
 ## 8. Info panel pattern (Task 7 building panel, also region detail)
 
@@ -124,7 +128,7 @@ Date: 21 Oct 2026. Every UI task follows this file. It replaces "Mahakam malam" 
 - Order: name (Plex Sans 600; place names only in serif), type as an editable select that looks like text with a chevron, floors stepper; then the one readout (kWh per year, perkiraan); then tabs Energi / Emisi / Surya / Cuaca as underlined text tabs; then details as label-value rows with hairlines between groups.
 - `bySource` as one horizontal stacked bar in fuel colours with a labelled list below (a donut is allowed only if its labels sit outside it). Equivalents as a list of rows (number, unit, label); no card grid, no emoji.
 - Loading: a skeleton with the same rows (flat `panel-high` blocks, no shimmer). Error: one sentence about what failed and a "Coba lagi" button. Outside Kaltim: say "Di luar Kalimantan Timur" in place of the region.
-- Building highlight and select colours: `paper-muted` and `accent` on dark presets; `outline-light` on light presets (day, dawn).
+- Building highlight and select colours: `paper-muted` and `paper-bright` on dark presets; `outline-light` on light presets (day, dawn).
 
 ## 9. Rain (`setRainEffect` in `src/web/map/effects.ts`)
 
@@ -138,3 +142,10 @@ map.setRain({ density: reveal(1), intensity: 0.85, color: token("--color-rain"),
 ```
 
 Below zoom 15 the density is 0, so the province and city views never show rain. Off means `setRain(undefined)`. No refraction (`distortion-strength: 0`): it made the streaks glassy smears and costs a full-screen copy per frame. By day the haze is spliced into the basemap's own fog from zoom 15 to 16.5, so the globe and province views keep their atmosphere; switching rain off, or to a dark preset, puts the basemap fog back. Mapbox fog is `(1 - e^(-6r))^3` of the way along its range, so `[-2, 9]` dims the map centre by about 30% and the city two camera-distances further by about 70%: the light streaks show, the whole city stays visible. Spliced values that are plain arrays go in as `["literal", [...]]`, the form every GL JS version parses (3.33 happens to coerce a bare one). A flat `overcast` slate layer between the map and the panels fades in with the rain to 10% on a light ground and 12% on a dark one; it dims streaks and city alike, so it sets the mood, not the contrast. A light change re-applies rain, haze and tint. While rain is on and the view is farther out than zoom 15, the legend says under the switch: "Terlihat saat peta diperbesar sampai tingkat gedung."
+
+## 10. Components: HeroUI v3 and the theme bridge
+
+- UI components come from HeroUI v3 (`@heroui/react`, styles `@heroui/styles`; docs https://heroui.com/react/llms.txt, component pages are `.mdx`). In use: Card (sheet, dock cards, failure card), Button (Semua wilayah, Coba lagi, Lewati intro, map tools), ToggleButtonGroup (metric and light switches: a radiogroup with arrow keys), Switch (layers, rain), Toolbar, Tooltip, Popover, Separator. The ranked list rows stay our own buttons: they are data rows with a bar, not a HeroUI pattern.
+- `src/web/styles.css` imports `tailwindcss`, then `@heroui/styles`, then the bridge `src/web/atlas-theme.css`. Raw values stay in the theme block of `styles.css`; the bridge maps them onto HeroUI's semantic variables (`--background`, `--foreground`, `--surface`, `--overlay`, `--muted`, `--accent`, `--border`, `--separator`, `--focus`, `--field-*`, `--radius`, the shadows and tooltip delays) under `[data-theme="atlas-night"]` and `[data-theme="atlas-day"]`, plus two of ours: `--faint` and `--border-strong`. Our own component classes read the same variables, so a panel and a HeroUI control never drift apart.
+- The theme sits on `<html>` (HeroUI computes `--accent-hover` and friends on `:root`) and follows the ground tone: `atlas-day` (paper sheet, ink type, ink accent) for day and dawn, `atlas-night` (ink panel, paper type, `paper-bright` accent) for dusk and night. Overlays in portals (tooltips, popovers) follow it too.
+- HeroUI's look is adjusted in the bridge, unlayered, by setting each component's own variables (`--button-bg`, `--toggle-button-fg-selected`, `--switch-control-bg-checked`) and only then its properties: radius `sm` for controls and `md` for cards (HeroUI's defaults are pills and 24 px corners), our type sizes, no shadows on controls. Our base element rules sit in `@layer base`, so HeroUI's component rules win over them. HeroUI owns some class names (`.meter`, `.card`, `.button`, ...); our legend scale is `.gauge` for that reason.

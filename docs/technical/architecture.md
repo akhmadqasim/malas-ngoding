@@ -65,6 +65,7 @@ Alur satu permintaan: peramban memanggil route, route memeriksa isi permintaan, 
 | Bahasa | TypeScript | 7.0.2 | Seluruh kode, mode `strict` |
 | Basis data | PostgreSQL dan PostGIS | 17 dan 3.5 (image `postgis/postgis:17-3.5`) | Wilayah, pembangkit, faktor emisi, cache, kueri spasial |
 | Antarmuka | React | 19.3.1 | Panel, legenda, intro |
+| Komponen UI | HeroUI v3 (`@heroui/react`, `@heroui/styles`) | 3.2.6 | Kartu panel, tombol, saklar, pilihan tersegmen, toolbar alat peta, tooltip, popover; tema lewat jembatan token `src/web/atlas-theme.css` |
 | Peta | Mapbox GL JS | 3.33.0 | Gaya Standard, globe, medan 3D, kolom 3D (`fill-extrusion`), penanda pembangkit, efek hujan, Interactions API |
 | Animasi | Motion (`motion/react`) | 14.4.0 | Transisi panel, angka berjalan, meter pada legenda |
 | State | Zustand | 5.0.15 | Wilayah terpilih, metrik, lapisan, cahaya, hujan |
@@ -111,11 +112,14 @@ Tidak ada Vite, Express, atau alat khusus Node: Bun menangani semuanya.
 |---|---|
 | `map/MapView.tsx` | Membuat peta Mapbox, memasang medan dan lapisan data, memutar intro, dan menangani kegagalan (token ditolak, WebGL mati, gaya peta gagal, terlalu lama). |
 | `map/regionsLayer.ts`, `columns.ts`, `regionLabels.ts` | Kolom 3D per wilayah, animasi tinggi, hover dan klik, dan nama wilayah di atas kolom. |
-| `map/plantsLayer.ts`, `fuels.ts` | Penanda pembangkit yang berdenyut dan popup-nya. |
+| `map/plantsLayer.ts`, `fuels.ts` | Titik pembangkit, penanda gabungan untuk pembangkit yang berdekatan, dan keterangannya. |
 | `map/effects.ts`, `camera.ts` | Cahaya mengikuti jam WITA, efek hujan, serta gerak kamera (intro, terbang ke wilayah, orbit saat diam). |
-| `panels/RegionPanel.tsx`, `Legend.tsx` | Panel wilayah di kiri dan legenda di bawah (saklar metrik, meter, lapisan, cahaya, hujan). |
+| `panels/RegionPanel.tsx` | Panel wilayah di kiri: ringkasan provinsi dengan daftar peringkat, atau rincian satu wilayah. |
+| `panels/Legend.tsx`, `MapControls.tsx` | Dua kartu di bawah: legenda (saklar metrik, meter, kunci pembangkit) dan kontrol peta (lapisan, cahaya, hujan). |
+| `panels/MapTools.tsx` | Alat peta di kanan bawah: perbesar, perkecil, hadap utara, kembali ke seluruh provinsi, dan "Tentang peta ini". |
+| `components/` | Komponen kecil yang dipakai ulang: pilihan tersegmen dan saklar (di atas HeroUI), angka berjalan, CO2 dengan subskrip, intro. |
 | `store.ts`, `api.ts` | State aplikasi (Zustand) dan fungsi `fetch` bertipe ke semua endpoint. |
-| `theme.ts`, `styles.css`, `motion.ts` | Token desain, gaya, dan nilai gerak. |
+| `theme.ts`, `styles.css`, `atlas-theme.css`, `motion.ts` | Token desain, gaya, jembatan tema HeroUI (`data-theme` siang dan malam), dan nilai gerak. |
 
 ## Endpoint API
 
@@ -182,7 +186,7 @@ Bila cache di database sendiri gagal dibaca atau ditulis, server mencatat pering
 - **Warna.** Satu rona per metrik dalam enam tingkat: amber (kuning kecokelatan, warna pembakaran) untuk emisi CO2 dan teal (hijau kebiruan) untuk listrik. Dua deret warna dipilih menurut warna tanah peta (terang atau gelap), supaya nilai tertinggi selalu paling kontras. Kontras kolom terhadap tanah diukur dari hasil render dengan `bun run contrast` dan nilai terendahnya 3,2:1.
 - **Interaksi.** Memakai `map.addInteraction`. Hover mengangkat kolom 12 persen dan meredupkan kolom lain, meter di legenda berayun ke nilai wilayah itu, dan tooltip mengikuti penunjuk. Klik memilih wilayah: kolom lain meredup dan memendek, kamera terbang 2 detik, dan panel kiri berganti ke rincian wilayah.
 - **Dari kolom ke gedung.** Kolom memendek mulai pembesaran 6,6 dan hilang di pembesaran 12, saat gedung Mapbox Standard mengambil alih.
-- **Pembangkit.** Lapisan simbol dengan ikon kanvas yang berdenyut (24 gambar per detik, hanya saat ada penanda yang tergambar). Ukuran mengikuti akar kuadrat MW, warna mengikuti bahan bakar, dan popup menampilkan status serta "Lokasi perkiraan" bila `approx`.
+- **Pembangkit.** Lapisan simbol dengan ikon kanvas diam: titik berwarna bahan bakar dengan tepi kertas dan tepi tinta tipis. Ukuran mengikuti akar kuadrat MW. Pembangkit yang berjarak kurang dari 18 piksel di layar digabung menjadi satu penanda berangka (clustering sumber GeoJSON), berukuran menurut jumlah MW-nya; tooltip-nya mendaftar semua pembangkit di dalamnya, dan klik memperbesar peta. Tooltip satu pembangkit menampilkan nama, bahan bakar, kapasitas, status, serta "Lokasi perkiraan" bila `approx`.
 - **Cahaya.** Preset cahaya Standard mengikuti jam WITA (UTC+8, tanpa waktu musim panas): fajar 05.00 sampai 07.00, siang 07.00 sampai 17.00, senja 17.00 sampai 19.00, selebihnya malam. Saklar "Cahaya" (Otomatis, Siang, Malam) dan parameter `?cahaya=day|dawn|dusk|night` bisa mengunci cahaya.
 - **Hujan.** Saklar "Hujan" menyalakan `map.setRain` dengan garis hujan tipis. Efek baru terlihat mulai pembesaran 15 (tingkat gedung) dan penuh di 16,5. Pada peta terang, kabut tipis di dalam peta ikut menyala supaya garis hujan terlihat. Hujan otomatis dari prakiraan cuaca dibangun di Task 9 (diverifikasi ulang di T11b).
 - **Intro.** Kamera terbang 6 detik dari globe ke Kalimantan Timur, dan kolom tumbuh dari barat ke timur saat kamera mendekat. Intro bisa dilewati (tombol, Esc, spasi, Enter, atau gerakan apa pun di peta). Setelah 20 detik tanpa masukan, kamera berputar pelan, hanya di tampilan provinsi (di bawah pembesaran 11).
@@ -381,8 +385,8 @@ Image ini disiapkan agar aplikasi siap di-deploy. Belum ada deploy.
 ## Pengujian
 
 - **`bun test`** menjalankan tes unit dan API. Tes modul hitung (`tests/shared/`) memeriksa rumus dan batas ekstrem. Tes API (`tests/server/`) memakai dependensi tiruan (`tests/server/fakes.ts`), jadi tidak butuh internet. `tests/server/db.test.ts` berjalan terhadap PostGIS sungguhan dan dilewati dengan peringatan bila database belum menyala. Tes klien (`tests/web/`) memeriksa logika peta, cahaya, hujan, label wilayah, dan token desain.
-- **`bun run smoke`** membuka aplikasi di Chromium (Playwright), memutar intro, lalu memeriksa kolom wilayah, penanda pembangkit, hover, klik, saklar metrik, hujan di pembesaran gedung, saklar cahaya, dan kartu "Coba lagi". Skrip gagal bila ada pemeriksaan yang tidak lolos, galat konsol, atau peringatan konsol (peringatan dari Mapbox sendiri didaftar, tidak disembunyikan).
-- **`bun run contrast`** mengukur rasio kontras WCAG tiap warna kolom terhadap tanah peta dari piksel hasil render.
+- **`bun run smoke`** membuka aplikasi di Chromium (Playwright), memutar intro, lalu memeriksa kolom wilayah, penanda pembangkit dan tooltip-nya, tata letak panel, nama wilayah selama ayunan kamera, hover, klik, saklar metrik, pilihan dari daftar (tetikus dan papan ketik), alat peta, atribusi Mapbox, hujan di pembesaran gedung, saklar cahaya, dan kartu "Coba lagi". Skrip gagal bila ada pemeriksaan yang tidak lolos, galat konsol, atau peringatan konsol (peringatan dari Mapbox sendiri didaftar, tidak disembunyikan).
+- **`bun run contrast`** mengukur rasio kontras WCAG tiap warna kolom terhadap tanah peta dari piksel hasil render (garis tepi, penanda pembangkit, dan nama wilayah disembunyikan saat mengukur).
 - **`bun run typecheck`** menjalankan `tsc --noEmit` pada `src`, `tests`, dan `scripts`.
 
 ## Struktur direktori

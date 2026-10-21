@@ -15,7 +15,7 @@ Semua angka per gedung dan per wilayah adalah **perkiraan** hasil model, bukan d
 Fitur bertanda "(diverifikasi ulang di T11b)" bergantung pada bagian kode yang saat draf ini ditulis belum digabung.
 
 - **Peta 3D Kalimantan Timur.** Peta Mapbox Standard dengan medan 3D. Sepuluh kabupaten dan kota berdiri sebagai kolom 3D; tinggi dan warnanya menurut emisi CO2 per tahun atau listrik terpakai (saklar "Tinggi kolom"). Arahkan penunjuk untuk melihat nilainya, klik untuk membuka rincian: penduduk, pelanggan PLN, rasio elektrifikasi, desa yang belum dilayani PLN, dan listrik per orang. Pembukanya animasi kamera dari globe ke Kalimantan Timur.
-- **Pembangkit listrik.** Tiga belas pembangkit tampil sebagai penanda berdenyut, berwarna menurut bahan bakar dan berukuran menurut MW. Popup menampilkan status, dan "Lokasi perkiraan" bila koordinatnya belum pasti (9 dari 13).
+- **Pembangkit listrik.** Tiga belas pembangkit tampil sebagai titik berwarna menurut bahan bakar dan berukuran menurut MW; pembangkit yang berdekatan digabung menjadi satu penanda berangka. Arahkan penunjuk untuk melihat nama, bahan bakar, dan kapasitasnya; keterangan menampilkan status, dan "Lokasi perkiraan" bila koordinatnya belum pasti (9 dari 13).
 - **Cahaya dan hujan.** Cahaya peta mengikuti jam di Kalimantan Timur (fajar, siang, senja, malam) atau dikunci lewat saklar "Cahaya". Saklar "Hujan" menyalakan efek hujan saat peta diperbesar sampai tingkat gedung.
 - **Klik gedung mana pun.** Perkiraan listrik per tahun dan per bulan, bauran sumber listrik di baliknya, CO2 per tahun, dan padanan yang mudah dibayangkan (km naik mobil, pohon, charge HP, penerbangan). Jenis gedung dan jumlah lantai bisa diubah dan angkanya dihitung ulang (diverifikasi ulang di T11b).
 - **Simulasi panel surya.** Dari luas atap: kapasitas, produksi per tahun, bagian kebutuhan yang tertutup, ukuran baterai, biaya, balik modal, dan CO2 yang dihindari (diverifikasi ulang di T11b).
@@ -33,7 +33,7 @@ Keputusan desain: angka hanya muncul bila punya sumber atau ditandai sebagai asu
 |---|---|
 | Runtime dan server | Bun 1.4 (`Bun.serve`, bundler, test runner, `Bun.sql`), TypeScript |
 | Basis data | PostgreSQL 17 dan PostGIS 3.5 (Docker) |
-| Antarmuka | React 19, Zustand, Motion, Tailwind CSS 4 |
+| Antarmuka | React 19, HeroUI v3, Zustand, Motion, Tailwind CSS 4 |
 | Peta | Mapbox GL JS v3 (gaya Standard, globe, medan 3D, kolom `fill-extrusion`) |
 | Data luar | Mapbox Tilequery, NASA POWER, Open-Meteo |
 | AI | Anthropic Claude, model `claude-sonnet-5-5` (diverifikasi ulang di T11b) |
@@ -152,7 +152,7 @@ Catatan riset lengkap, termasuk status verifikasi setiap angka, ada di [docs/res
 | [Global Energy Monitor (gem.wiki)](https://www.gem.wiki/) dan sumber berita dan perusahaan | Kapasitas, status, dan koordinat pembangkit | gem.wiki berlisensi CC BY-NC-SA, dan aplikasi ini non-komersial. 9 dari 13 koordinat adalah perkiraan tim dan ditandai `approx` |
 | Berita dan blog vendor 2026 (tarif PLN, harga panel dan baterai) | Asumsi biaya dan tarif di simulasi surya | Belum diverifikasi, dicatat sebagai asumsi dan diberi label "perkiraan" |
 
-Perangkat lunak pihak ketiga: Bun, React, Motion, Zustand, dan Tailwind CSS berlisensi MIT; TypeScript dan Playwright berlisensi Apache-2.0; font IBM Plex berlisensi SIL OFL 1.1; Mapbox GL JS v3 berlisensi Mapbox Terms of Service; PostgreSQL dan PostGIS berjalan sebagai layanan Docker terpisah dari image resmi `postgis/postgis`.
+Perangkat lunak pihak ketiga: Bun, React, HeroUI, Motion, Zustand, dan Tailwind CSS berlisensi MIT; TypeScript dan Playwright berlisensi Apache-2.0; font IBM Plex berlisensi SIL OFL 1.1; Mapbox GL JS v3 berlisensi Mapbox Terms of Service; PostgreSQL dan PostGIS berjalan sebagai layanan Docker terpisah dari image resmi `postgis/postgis`.
 
 ## Metodologi singkat
 
