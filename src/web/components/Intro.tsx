@@ -1,6 +1,7 @@
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect } from "react";
 import { DURATION, EASE_IN, EASE_OUT } from "../motion.ts";
+import { chem } from "./Chem.tsx";
 
 interface Props {
   /** "loading" while data and map load, "flying" during the globe-to-Kaltim flight, "done" after. */
@@ -39,7 +40,7 @@ export function Intro({ phase, onSkip }: Props) {
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: DURATION.introText, delay: 0.15, ease: EASE_OUT }}
             >
-              Dari mana listrik Kalimantan Timur datang, berapa yang kita pakai, dan berapa CO2 yang ikut terlepas.
+              {chem("Dari mana listrik Kalimantan Timur datang, berapa yang kita pakai, dan berapa CO2 yang ikut terlepas.")}
             </motion.p>
             <motion.div className="intro__actions" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: DURATION.assemble, delay: 0.4 }}>
               {phase === "loading" ? (

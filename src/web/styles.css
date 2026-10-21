@@ -31,19 +31,33 @@
   --color-accent: #f5f2ea;
   --color-on-accent: #10141b;
 
-  /* Data. CO2: amber, kWh: teal; six stops, lightness rising, low to high. */
-  --color-co2-1: #b4863f;
-  --color-co2-2: #c39653;
-  --color-co2-3: #d5a969;
-  --color-co2-4: #e7bc7e;
-  --color-co2-5: #f9cf94;
+  /* Data. CO2: amber, kWh: teal; six stops, low to high. On a dark ground (dusk, night) lightness rises
+     with the value; on a light ground (day, dawn) the -day ramps darken with it. Either way the highest
+     value stands out most. */
+  --color-co2-1: #bc8d46;
+  --color-co2-2: #cb9e5a;
+  --color-co2-3: #dbaf6e;
+  --color-co2-4: #ebc082;
+  --color-co2-5: #fbd196;
   --color-co2-6: #fee5c3;
-  --color-kwh-1: #4a9ca1;
-  --color-kwh-2: #63aeb2;
-  --color-kwh-3: #7bc0c4;
-  --color-kwh-4: #92d2d5;
-  --color-kwh-5: #a9e4e7;
+  --color-kwh-1: #52a4a8;
+  --color-kwh-2: #69b4b8;
+  --color-kwh-3: #7fc4c8;
+  --color-kwh-4: #95d5d8;
+  --color-kwh-5: #abe6e9;
   --color-kwh-6: #c1f7fa;
+  --color-co2-day-1: #a56f1c;
+  --color-co2-day-2: #9e6111;
+  --color-co2-day-3: #965307;
+  --color-co2-day-4: #8d4602;
+  --color-co2-day-5: #843800;
+  --color-co2-day-6: #7a2a01;
+  --color-kwh-day-1: #2e8b90;
+  --color-kwh-day-2: #1f7f88;
+  --color-kwh-day-3: #0e7380;
+  --color-kwh-day-4: #006878;
+  --color-kwh-day-5: #045c6e;
+  --color-kwh-day-6: #025064;
   --color-dim-dark: #3e4a5a;
   --color-dim-light: #c2cad0;
   --color-outline-light: #1c222c;
@@ -151,6 +165,11 @@ button {
   font-variant-numeric: tabular-nums lining-nums;
 }
 
+/* The 2 of CO2: Plex's own small figure (the font has no subscript glyph). */
+.sub {
+  font-feature-settings: "dnom";
+}
+
 /* "perkiraan": the quiet estimate mark after a unit. */
 .est {
   font-style: italic;
@@ -208,7 +227,7 @@ button {
   font-size: var(--text-sm);
   font-weight: var(--font-weight-semibold);
 }
-.sheet__tagline {
+.sheet__edition {
   font-size: var(--text-xs);
   color: var(--color-paper-muted);
   white-space: nowrap;
@@ -226,6 +245,12 @@ button {
 .sheet__note {
   margin: --spacing(5) 0 0;
   font-size: var(--text-xs);
+  line-height: var(--leading-relaxed);
+  color: var(--color-paper-faint);
+}
+.sheet__source {
+  margin: --spacing(1.5) 0 0;
+  font-size: var(--text-2xs);
   line-height: var(--leading-relaxed);
   color: var(--color-paper-faint);
 }
@@ -428,10 +453,14 @@ button {
   pointer-events: none;
 }
 
+/* One row: column metric, meter, data layers, scene (light and rain). Small screens wrap it (see the
+   media queries at the end). */
 .legend {
-  display: flex;
-  align-items: flex-start;
-  gap: --spacing(6);
+  display: grid;
+  grid-template-columns: repeat(4, auto);
+  grid-template-areas: "metric meter layers scene";
+  align-items: start;
+  gap: --spacing(3) --spacing(6);
   min-width: 0;
   max-width: 100%;
   padding: --spacing(3) --spacing(5) --spacing(3) --spacing(4);
@@ -442,6 +471,7 @@ button {
   pointer-events: auto;
 }
 .legend__metric {
+  grid-area: metric;
   display: flex;
   flex-direction: column;
   gap: --spacing(1.5);
@@ -488,7 +518,7 @@ button {
 
 /* The meter: legend scale with a needle (the signature detail). */
 .meter {
-  flex: none;
+  grid-area: meter;
   width: --spacing(60);
 }
 .meter p {
@@ -516,6 +546,8 @@ button {
   position: absolute;
   inset: 0;
   border-radius: var(--radius-xs);
+  /* Frames the ramp, so its dark end (the day ramps) still reads on the ink panel. */
+  outline: 1px solid var(--color-rule-strong);
 }
 .app[data-metric="co2"] .meter__ramp {
   background: linear-gradient(
@@ -537,6 +569,28 @@ button {
     var(--color-kwh-4),
     var(--color-kwh-5),
     var(--color-kwh-6)
+  );
+}
+.app[data-tone="light"][data-metric="co2"] .meter__ramp {
+  background: linear-gradient(
+    to right,
+    var(--color-co2-day-1),
+    var(--color-co2-day-2),
+    var(--color-co2-day-3),
+    var(--color-co2-day-4),
+    var(--color-co2-day-5),
+    var(--color-co2-day-6)
+  );
+}
+.app[data-tone="light"][data-metric="kwh"] .meter__ramp {
+  background: linear-gradient(
+    to right,
+    var(--color-kwh-day-1),
+    var(--color-kwh-day-2),
+    var(--color-kwh-day-3),
+    var(--color-kwh-day-4),
+    var(--color-kwh-day-5),
+    var(--color-kwh-day-6)
   );
 }
 .meter__needle {
@@ -580,6 +634,7 @@ button {
 
 /* Layer switches. */
 .legend__layers {
+  grid-area: layers;
   display: flex;
   align-items: flex-start;
   align-self: stretch;
@@ -592,8 +647,25 @@ button {
   flex-direction: column;
   gap: --spacing(1.5);
 }
+
+/* Cahaya (Otomatis follows WITA time; Siang and Malam are for presenters) and Hujan. */
+.legend__scene {
+  grid-area: scene;
+  display: flex;
+  flex-direction: column;
+  align-self: stretch;
+  gap: --spacing(1.5);
+  padding-left: --spacing(5);
+  border-left: 1px solid var(--color-rule);
+}
+.legend__rain {
+  display: flex;
+  flex-direction: column;
+  gap: --spacing(1);
+  margin-top: --spacing(1.5);
+}
 .layer__hint {
-  max-width: --spacing(36);
+  max-width: --spacing(44);
   margin: 0;
   font-size: var(--text-2xs);
   line-height: var(--text-2xs--line-height);
@@ -911,14 +983,42 @@ button {
     --layout-panel: --spacing(80);
   }
   .legend {
-    gap: --spacing(4);
+    column-gap: --spacing(4);
   }
   .meter {
-    width: --spacing(50);
+    width: --spacing(46);
   }
   .legend__layers {
     gap: --spacing(4);
     padding-left: --spacing(4);
+  }
+  .legend__scene {
+    padding-left: --spacing(4);
+  }
+  /* Two fuels per line, so the layer group stays narrow. */
+  .fuel-key {
+    max-width: --spacing(30);
+  }
+}
+
+/* Small laptops (1280 px): a narrower meter keeps the strip on one row. */
+@media (max-width: 1360px) {
+  .meter {
+    width: --spacing(40);
+  }
+}
+
+/* Below that the strip becomes two rows: data on top, map switches below. */
+@media (max-width: 1260px) {
+  .legend {
+    grid-template-columns: auto auto;
+    grid-template-areas:
+      "metric meter"
+      "layers scene";
+  }
+  .legend__layers {
+    padding-left: 0;
+    border-left: 0;
   }
 }
 
@@ -940,17 +1040,33 @@ button {
   }
 }
 
+/* 720 px tall screens: tighter rows and a smaller readout, so the sheet still needs no scrolling. */
+@media (max-height: 740px) {
+  .sheet__masthead {
+    padding-top: --spacing(2.5);
+    padding-bottom: --spacing(2.5);
+  }
+  .readout__figure {
+    font-size: var(--text-2xl);
+    line-height: var(--text-2xl--line-height);
+  }
+  .ranking__row {
+    padding-top: --spacing(1);
+    padding-bottom: --spacing(1.5);
+  }
+  .sheet__note {
+    margin-top: --spacing(3);
+  }
+}
+
 /* Tablets: the legend takes the full bottom edge and wraps; the sheet stops above it. */
 @media (max-width: 1100px) {
   .legend-slot {
     left: var(--layout-inset);
     right: var(--layout-inset);
   }
-  .legend {
-    flex-wrap: wrap;
-  }
   .sheet-slot {
-    bottom: calc(var(--layout-inset) + --spacing(40));
+    bottom: calc(var(--layout-inset) + --spacing(44));
   }
 }
 
@@ -962,7 +1078,11 @@ button {
     width: auto;
     max-height: 46vh;
   }
-  .legend__layers {
+  .legend {
+    grid-template-columns: auto;
+    grid-template-areas: "metric" "meter" "layers" "scene";
+  }
+  .legend__scene {
     padding-left: 0;
     border-left: 0;
   }

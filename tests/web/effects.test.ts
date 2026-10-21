@@ -1,5 +1,14 @@
 import { describe, expect, test } from "bun:test";
-import { lightPresetFor, presetTone, RAIN_MIN_ZOOM, rainSpec, witaHour } from "../../src/web/map/effects.ts";
+import {
+  basemapTheme,
+  lightModeFromQuery,
+  lightPresetFor,
+  presetTone,
+  RAIN_MIN_ZOOM,
+  rainSpec,
+  resolvePreset,
+  witaHour,
+} from "../../src/web/map/effects.ts";
 
 // WITA is UTC+8, so 05:00 WITA is 21:00 UTC the day before.
 const wita = (hh: number, mm = 0) => new Date(Date.UTC(2026, 9, 21, hh - 8, mm));
@@ -19,11 +28,32 @@ describe("light preset follows WITA time", () => {
     expect(lightPresetFor(wita(19))).toBe("night");
     expect(lightPresetFor(wita(23, 30))).toBe("night");
   });
-  test("only the day preset has a light ground", () => {
+  test("day and dawn have a light ground, dusk and night a dark one (measured from the render)", () => {
     expect(presetTone("day")).toBe("light");
-    expect(presetTone("dawn")).toBe("dark");
+    expect(presetTone("dawn")).toBe("light");
     expect(presetTone("dusk")).toBe("dark");
     expect(presetTone("night")).toBe("dark");
+  });
+  test("the basemap is neutral except at night, where the navy faded theme stays", () => {
+    expect(basemapTheme("day")).toBe("monochrome");
+    expect(basemapTheme("dawn")).toBe("monochrome");
+    expect(basemapTheme("dusk")).toBe("monochrome");
+    expect(basemapTheme("night")).toBe("faded");
+  });
+});
+
+describe("light mode (the Cahaya control and ?cahaya=)", () => {
+  test("the query parameter pins a preset; anything else means automatic", () => {
+    expect(lightModeFromQuery("?cahaya=night")).toBe("night");
+    expect(lightModeFromQuery("?x=1&cahaya=dawn")).toBe("dawn");
+    expect(lightModeFromQuery("?cahaya=pagi")).toBe("auto");
+    expect(lightModeFromQuery("")).toBe("auto");
+  });
+  test("automatic follows WITA time; a pin wins", () => {
+    expect(resolvePreset("auto", wita(12))).toBe("day");
+    expect(resolvePreset("auto", wita(22))).toBe("night");
+    expect(resolvePreset("night", wita(12))).toBe("night");
+    expect(resolvePreset("day", wita(22))).toBe("day");
   });
 });
 
@@ -67,3 +97,4 @@ describe("rain only shows at building zoom", () => {
     expect(spec["vignette-color"]).toBe("#283040");
   });
 });
+

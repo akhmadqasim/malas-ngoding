@@ -12,7 +12,8 @@
     "warm": "bun scripts/warm.ts",
     "setup": "bun scripts/setup.ts",
     "typecheck": "tsc --noEmit",
-    "smoke": "bun scripts/smoke.ts"
+    "smoke": "bun scripts/smoke.ts",
+    "contrast": "bun scripts/contrast.ts"
   },
   "dependencies": {
     "@fontsource-variable/ibm-plex-sans": "^5.3.0",

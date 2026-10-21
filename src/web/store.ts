@@ -1,5 +1,6 @@
 import type { Map as MapboxMap } from "mapbox-gl";
 import { create } from "zustand";
+import { type LightMode, type LightPreset, lightModeFromQuery, resolvePreset } from "./map/effects.ts";
 import type { BuildingEstimate } from "../shared/types.ts";
 
 export type Metric = "co2" | "kwh";
@@ -16,6 +17,10 @@ export interface AppState {
   metric: Metric;
   layers: Record<LayerKey, boolean>;
   rain: RainMode;
+  /** The presenter's light choice (Cahaya: Otomatis, Siang, Malam), or a `?cahaya=` pin. */
+  lightMode: LightMode;
+  /** The light preset the map shows now; MapView keeps it in step with `lightMode` and the clock. */
+  lightPreset: LightPreset;
   panelTab: PanelTab;
   chatOpen: boolean;
 
@@ -26,9 +31,13 @@ export interface AppState {
   setMetric: (metric: Metric) => void;
   setLayer: (layer: LayerKey, visible: boolean) => void;
   setRain: (mode: RainMode) => void;
+  setLightMode: (mode: LightMode) => void;
+  setLightPreset: (preset: LightPreset) => void;
   setPanelTab: (tab: PanelTab) => void;
   setChatOpen: (open: boolean) => void;
 }
+
+const initialLightMode: LightMode = typeof window === "undefined" ? "auto" : lightModeFromQuery(window.location.search);
 
 export const useAppStore = create<AppState>()((set) => ({
   map: null,
@@ -38,6 +47,8 @@ export const useAppStore = create<AppState>()((set) => ({
   metric: "co2",
   layers: { regions: true, plants: true, buildings: true },
   rain: "auto",
+  lightMode: initialLightMode,
+  lightPreset: resolvePreset(initialLightMode, new Date()),
   panelTab: "energi",
   chatOpen: false,
 
@@ -48,6 +59,8 @@ export const useAppStore = create<AppState>()((set) => ({
   setMetric: (metric) => set({ metric }),
   setLayer: (layer, visible) => set((s) => ({ layers: { ...s.layers, [layer]: visible } })),
   setRain: (rain) => set({ rain }),
+  setLightMode: (lightMode) => set({ lightMode }),
+  setLightPreset: (lightPreset) => set({ lightPreset }),
   setPanelTab: (panelTab) => set({ panelTab }),
   setChatOpen: (chatOpen) => set({ chatOpen }),
 }));

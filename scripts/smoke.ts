@@ -12,9 +12,11 @@
  * - SMOKE_SHOTS=<dir> also saves every intermediate screenshot there
  * - SMOKE_HEADED=1 to watch it, SMOKE_GL=swiftshader for software WebGL, CHROMIUM_PATH to pick a browser
  */
-import { existsSync, mkdirSync, readdirSync } from "node:fs";
+import { mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { chromium, type ConsoleMessage, type Page } from "playwright";
+import type { ConsoleMessage, Page } from "playwright";
+import { launchBrowser } from "./chromium.ts";
+import { lightPresetFor } from "../src/web/map/effects.ts";
 
 const BASE_URL = Bun.env.BASE_URL ?? "http://localhost:3000";
 const SCREENS = "docs/technical/screens";
@@ -37,23 +39,6 @@ const KNOWN_UPSTREAM_WARNINGS = [
 ];
 const ignoredWarnings: string[] = [];
 
-/** Newest Chromium already installed by Playwright, so the check never has to download a browser. */
-function findChromium(): string | undefined {
-  if (Bun.env.CHROMIUM_PATH) return Bun.env.CHROMIUM_PATH;
-  const root = join(Bun.env.LOCALAPPDATA ?? join(Bun.env.HOME ?? "", ".cache"), "ms-playwright");
-  if (!existsSync(root)) return undefined;
-  const dirs = readdirSync(root)
-    .filter((d) => /^chromium-\d+$/.test(d))
-    .sort((a, b) => Number(b.split("-")[1]) - Number(a.split("-")[1]));
-  for (const d of dirs) {
-    for (const exe of ["chrome-win64/chrome.exe", "chrome-win/chrome.exe", "chrome-linux64/chrome", "chrome-linux/chrome"]) {
-      const p = join(root, d, exe);
-      if (existsSync(p)) return p;
-    }
-  }
-  return undefined;
-}
-
 async function shot(page: Page, name: string) {
   if (!SHOTS) return;
   mkdirSync(SHOTS, { recursive: true });
@@ -66,6 +51,18 @@ async function screen(page: Page, file: string) {
   await page.screenshot({ path: join(SCREENS, file) });
   console.log(`saved ${SCREENS}/${file}`);
 }
+
+type MapWindow = Window & { __malasMap?: import("mapbox-gl").Map };
+
+/** The basemap light preset and theme, read from the live map. */
+const mapState = (page: Page) =>
+  page.evaluate(() => {
+    const map = (window as MapWindow).__malasMap!;
+    return {
+      preset: map.getConfigProperty("basemap", "lightPreset") as string,
+      theme: map.getConfigProperty("basemap", "theme") as string,
+    };
+  });
 
 /**
  * Resolves once the map has no pending tiles or camera moves, or after `capMs`. The cap matters at
@@ -106,15 +103,7 @@ const listen = (page: Page, sink: string[]) => {
   page.on("pageerror", (err) => sink.push(`pageerror (after "${lastCheck}"): ${err.message}`));
 };
 
-const browser = await chromium.launch({
-  executablePath: findChromium(),
-  headless: !Bun.env.SMOKE_HEADED,
-  // Hardware WebGL by default; SMOKE_GL=swiftshader forces software rendering (slow, but works without a GPU).
-  args:
-    Bun.env.SMOKE_GL === "swiftshader"
-      ? ["--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"]
-      : ["--enable-gpu", "--ignore-gpu-blocklist", "--use-angle=default"],
-});
+const browser = await launchBrowser();
 
 try {
   console.log(`viewport ${VIEW_W}x${VIEW_H}`);
@@ -236,6 +225,22 @@ try {
   check(!(await page.locator(".layer__hint").isVisible()), "the rain hint hides at building zoom");
   await shot(page, "7-rain");
   await screen(page, "rain.png");
+
+  // The Cahaya switch: Siang and Malam pin the light; Otomatis goes back to WITA time.
+  const lightTo = async (label: string) => {
+    await page.getByRole("radio", { name: label }).click();
+    await waitForMapIdle(page, 12_000);
+    await page.waitForTimeout(600);
+    return mapState(page);
+  };
+  const night = await lightTo("Malam");
+  check(night.preset === "night" && night.theme === "faded", `Malam: night light on the navy basemap (${night.preset}, ${night.theme})`);
+  await shot(page, "7-rain-malam");
+  const day = await lightTo("Siang");
+  check(day.preset === "day" && day.theme === "monochrome", `Siang: day light on the neutral basemap (${day.preset}, ${day.theme})`);
+  await shot(page, "7-rain-siang");
+  const auto = await lightTo("Otomatis");
+  check(auto.preset === lightPresetFor(new Date()), `Otomatis follows WITA time (${auto.preset})`);
   await page.getByRole("switch", { name: "Hujan" }).click();
   // Close it so its idle orbit does not keep streaming city tiles in the background during the next check.
   await page.close();

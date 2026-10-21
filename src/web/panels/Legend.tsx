@@ -4,8 +4,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { fmtCompact } from "../../shared/format.ts";
 import type { RegionSummary } from "../../shared/types.ts";
 import type { PlantCollection } from "../api.ts";
+import { chem } from "../components/Chem.tsx";
 import { Estimate } from "../components/Estimate.tsx";
-import { RAIN_MIN_ZOOM } from "../map/effects.ts";
+import { type LightMode, RAIN_MIN_ZOOM } from "../map/effects.ts";
 import { FUEL_LABELS, fuelsPresent } from "../map/fuels.ts";
 import { intensities } from "../map/regionsLayer.ts";
 import { METRIC_TEXT } from "../metrics.ts";
@@ -15,6 +16,13 @@ import { type Metric, useAppStore } from "../store.ts";
 const METRICS: { key: Metric; label: string }[] = [
   { key: "co2", label: "Emisi CO2" },
   { key: "kwh", label: "Listrik" },
+];
+
+/** The presenter's light switch. Otomatis follows the time of day in WITA. */
+const LIGHTS: { key: LightMode; label: string; title?: string }[] = [
+  { key: "auto", label: "Otomatis", title: "Mengikuti jam di Kalimantan Timur (WITA)" },
+  { key: "day", label: "Siang" },
+  { key: "night", label: "Malam" },
 ];
 
 /** The map's zoom, updated when a zoom gesture or camera move ends. */
@@ -40,6 +48,8 @@ export function Legend({ plants, regions }: { plants: PlantCollection; regions: 
   const setLayer = useAppStore((s) => s.setLayer);
   const rain = useAppStore((s) => s.rain);
   const setRain = useAppStore((s) => s.setRain);
+  const lightMode = useAppStore((s) => s.lightMode);
+  const setLightMode = useAppStore((s) => s.setLightMode);
   const map = useAppStore((s) => s.map);
   const zoom = useMapZoom(map);
   const fuels = useMemo(() => fuelsPresent(plants), [plants]);
@@ -62,7 +72,7 @@ export function Legend({ plants, regions }: { plants: PlantCollection; regions: 
               onClick={() => setMetric(m.key)}
             >
               {metric === m.key && <motion.span layoutId="metric-indicator" className="segmented__indicator" transition={SPRING.control} />}
-              <span className="segmented__label">{m.label}</span>
+              <span className="segmented__label">{chem(m.label)}</span>
             </button>
           ))}
         </div>
@@ -85,7 +95,30 @@ export function Legend({ plants, regions }: { plants: PlantCollection; regions: 
             ))}
           </ul>
         </div>
-        <div className="layer">
+      </div>
+
+      {/* The scene's atmosphere: light and rain. */}
+      <div className="legend__scene" role="group" aria-label="Suasana peta">
+        <span className="legend__label" id="legend-light">
+          Cahaya
+        </span>
+        <div className="segmented" role="radiogroup" aria-labelledby="legend-light">
+          {LIGHTS.map((l) => (
+            <button
+              key={l.key}
+              type="button"
+              role="radio"
+              aria-checked={lightMode === l.key}
+              className="segmented__option"
+              title={l.title}
+              onClick={() => setLightMode(l.key)}
+            >
+              {lightMode === l.key && <motion.span layoutId="light-indicator" className="segmented__indicator" transition={SPRING.control} />}
+              <span className="segmented__label">{l.label}</span>
+            </button>
+          ))}
+        </div>
+        <div className="legend__rain">
           <Toggle label="Hujan" on={rain === "on"} onChange={(v) => setRain(v ? "on" : "auto")} />
           <AnimatePresence initial={false}>
             {rainHint && (
@@ -150,7 +183,7 @@ function Meter({ metric, regions }: { metric: Metric; regions: RegionSummary[] }
         <span className="meter__tick meter__tick--end">{fmtCompact(max * m.scale)}</span>
       </div>
       <p className="meter__unit">
-        {m.unit}, <Estimate />
+        {chem(m.unit)}, <Estimate />
       </p>
     </div>
   );

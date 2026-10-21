@@ -2,6 +2,7 @@ import type { ExpressionSpecification, GeoJSONSourceSpecification, Map as Mapbox
 import type { RegionCollection } from "../api.ts";
 import type { Metric } from "../store.ts";
 import { rampTokens, token } from "../theme.ts";
+import type { Tone } from "./effects.ts";
 import type { RegionSummary } from "../../shared/types.ts";
 
 export const REGION_SOURCE = "regions";
@@ -16,9 +17,12 @@ const MIN_HEIGHT_M = 4_000;
 const HIDE_ZOOM = 12;
 /** Map motion in ms (docs/research/design/00-direction.md section 6). */
 const MS = { rise: 1600, riseStagger: 110, hover: 300, select: 900, sink: 380, swapRise: 900, swapStagger: 40 } as const;
-
-/** Light ground (the day preset) or dark ground (dawn, dusk, night). Outlines and dimmed columns follow it. */
-export type Tone = "dark" | "light";
+/**
+ * Self-lit share of the column colour. In the dark presets the scene light is too dim to show the ramp
+ * (measured: the columns rendered about a fifth darker), so the columns light themselves fully; by day
+ * the sun shades their sides.
+ */
+const EMISSIVE: Record<Tone, number> = { light: 0.85, dark: 1 };
 
 export interface RegionHandlers {
   onSelect?: (id: string | null) => void;
@@ -39,9 +43,12 @@ export function intensities(regions: RegionSummary[], metric: Metric): Map<strin
 const heightFor = (t: number) => MIN_HEIGHT_M + (MAX_HEIGHT_M - MIN_HEIGHT_M) * t;
 
 const selected: ExpressionSpecification = ["boolean", ["feature-state", "selected"], false];
+const hovered: ExpressionSpecification = ["boolean", ["feature-state", "hover"], false];
+const emissive = (tone: Tone): ExpressionSpecification => ["case", hovered, 1, EMISSIVE[tone]];
 
+/** Column colour by intensity `t`, on the ramp for the ground tone; dimmed while another region is selected. */
 function colorExpression(metric: Metric, tone: Tone): ExpressionSpecification {
-  const stops = rampTokens(metric);
+  const stops = rampTokens(metric, tone);
   const ramp = stops.flatMap((color, i) => [i / (stops.length - 1), color]);
   return [
     "case",
@@ -176,9 +183,10 @@ export function addRegions(
       "fill-extrusion-color": colorExpression(metric, tone),
       "fill-extrusion-height": zoomScaled(height),
       "fill-extrusion-base": 0,
-      "fill-extrusion-opacity": ["interpolate", ["linear"], ["zoom"], 10, 0.9, HIDE_ZOOM, 0],
-      // High enough that the muted ramp shows its true colour under the night preset; no neon.
-      "fill-extrusion-emissive-strength": ["case", ["boolean", ["feature-state", "hover"], false], 1, 0.85],
+      // Opaque, so the ground does not tint the data colour; fades out on the way to city zoom.
+      "fill-extrusion-opacity": ["interpolate", ["linear"], ["zoom"], 10, 1, HIDE_ZOOM, 0],
+      // The hovered column lights itself fully; the rest show the ramp's true colour, no neon.
+      "fill-extrusion-emissive-strength": emissive(tone),
       "fill-extrusion-vertical-gradient": true,
       "fill-extrusion-ambient-occlusion-intensity": 0.25,
     },
@@ -302,11 +310,14 @@ export function setRegionHover(map: MapboxMap, id: string | null): void {
   applyHover(id);
 }
 
-/** Matches outlines and dimmed columns to a light (day) or dark ground. */
+/** Matches the ramp, outlines and dimmed columns to a light (day, dawn) or dark (dusk, night) ground. */
 export function setRegionTone(map: MapboxMap, tone: Tone): void {
   if (!state || state.map !== map || state.tone === tone) return;
   state.tone = tone;
-  if (map.getLayer(REGION_LAYER)) map.setPaintProperty(REGION_LAYER, "fill-extrusion-color", colorExpression(state.metric, tone));
+  if (map.getLayer(REGION_LAYER)) {
+    map.setPaintProperty(REGION_LAYER, "fill-extrusion-color", colorExpression(state.metric, tone));
+    map.setPaintProperty(REGION_LAYER, "fill-extrusion-emissive-strength", emissive(tone));
+  }
   if (map.getLayer(OUTLINE_LAYER)) map.setPaintProperty(OUTLINE_LAYER, "line-color", outlineColor(tone));
 }
 

@@ -3,9 +3,11 @@ import { type Ref, useCallback, useEffect, useLayoutEffect, useMemo, useRef, use
 import { fmtCompact } from "../shared/format.ts";
 import type { RegionSummary } from "../shared/types.ts";
 import { api, type PlantCollection, type RegionCollection } from "./api.ts";
+import { chem } from "./components/Chem.tsx";
 import { Estimate } from "./components/Estimate.tsx";
 import { Intro } from "./components/Intro.tsx";
 import { skipIntro } from "./map/camera.ts";
+import { presetTone } from "./map/effects.ts";
 import { MapView } from "./map/MapView.tsx";
 import { METRIC_TEXT } from "./metrics.ts";
 import { DURATION, EASE_OUT } from "./motion.ts";
@@ -31,6 +33,7 @@ export function App() {
   // Which region the pointer is over on the map. Changes on enter and leave only, never per mouse move.
   const [mapHoverId, setMapHoverId] = useState<string | null>(null);
   const metric = useAppStore((s) => s.metric);
+  const tone = useAppStore((s) => presetTone(s.lightPreset));
   const regionList = useMemo(() => data?.regions.features.map((f) => f.properties) ?? [], [data]);
   const attempt = useRef(0);
 
@@ -86,7 +89,7 @@ export function App() {
 
   return (
     <MotionConfig reducedMotion="user">
-      <main className="app" data-metric={metric}>
+      <main className="app" data-metric={metric} data-tone={tone}>
         {data && (
           <MapView
             token={data.token}
@@ -143,7 +146,7 @@ function RegionTooltip({ ref, region, metric }: { ref: Ref<HTMLDivElement>; regi
     <div ref={ref} className="map-tooltip" role="status">
       <div className="map-tooltip__name">{region.name}</div>
       <div className="map-tooltip__value">
-        <span className="num">{fmtCompact(m.value(region) * m.scale)}</span> {m.unit}, <Estimate />
+        <span className="num">{fmtCompact(m.value(region) * m.scale)}</span> {chem(m.unit)}, <Estimate />
       </div>
     </div>
   );

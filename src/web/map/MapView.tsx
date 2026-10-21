@@ -4,7 +4,15 @@ import { useEffect, useRef } from "react";
 import { api, type PlantCollection, type RegionCollection } from "../api.ts";
 import { useAppStore } from "../store.ts";
 import { abortIntro, FLY_MS, flyToRegion, GLOBE_VIEW, introFlight, KALTIM_VIEW, startIdleOrbit, stopIdleOrbit } from "./camera.ts";
-import { applyLightPreset, type LightPreset, lightPresetFor, presetTone, setRainEffect } from "./effects.ts";
+import {
+  applyLightPreset,
+  basemapTheme,
+  type LightPreset,
+  lightPresetFor,
+  presetTone,
+  resolvePreset,
+  setRainEffect,
+} from "./effects.ts";
 import { addPlants, removePlants, setPlantsVisible } from "./plantsLayer.ts";
 import {
   addRegions,
@@ -43,13 +51,11 @@ const FAILURE = {
 const LOAD_GUARD_MS = 15_000;
 /** The intro waits for the first complete frame, but never longer than this. */
 const IDLE_WAIT_MS = 4_000;
-
-const PRESETS: readonly LightPreset[] = ["dawn", "day", "dusk", "night"];
-/** `?cahaya=night` pins the light preset (screenshots, a night demo in daylight). Otherwise it follows WITA time. */
-function pinnedPreset(): LightPreset | null {
-  const v = new URLSearchParams(window.location.search).get("cahaya");
-  return PRESETS.includes(v as LightPreset) ? (v as LightPreset) : null;
-}
+/**
+ * Road names and shields (AH150, 1-74) only add noise at the province view; from city zoom they help.
+ * Place names stay on at every zoom for orientation.
+ */
+const ROAD_LABEL_ZOOM = 11;
 
 /** Bounding box of a region polygon, used to frame it when selected. */
 function bboxOf(fc: RegionCollection, id: string): [[number, number], [number, number]] | undefined {
@@ -113,9 +119,8 @@ export function MapView({ token, regions, plants, onIntroStart, onIntroEnd, onRe
     };
 
     mapboxgl.accessToken = token;
-    const store = useAppStore.getState();
-    const pinned = pinnedPreset();
-    let preset: LightPreset = pinned ?? lightPresetFor(new Date());
+    // The light: the presenter's choice (Cahaya control, or `?cahaya=`), or the time of day in WITA.
+    let preset: LightPreset = resolvePreset(useAppStore.getState().lightMode, new Date());
     let map: mapboxgl.Map;
     try {
       map = new mapboxgl.Map({
@@ -125,13 +130,16 @@ export function MapView({ token, regions, plants, onIntroStart, onIntroEnd, onRe
         ...GLOBE_VIEW,
         antialias: true,
         attributionControl: false,
+        // Indonesian place names on the basemap (Selat Makassar, Laut Sulawesi).
+        language: "id",
         config: {
           basemap: {
             lightPreset: preset,
-            theme: "faded",
+            theme: basemapTheme(preset),
             show3dLandmarks: false,
             showPointOfInterestLabels: false,
             showTransitLabels: false,
+            showRoadLabels: GLOBE_VIEW.zoom >= ROAD_LABEL_ZOOM,
           },
         },
       });
@@ -140,6 +148,7 @@ export function MapView({ token, regions, plants, onIntroStart, onIntroEnd, onRe
       fail(FAILURE.webgl, err);
       return;
     }
+    useAppStore.getState().setLightPreset(preset);
     map.addControl(new mapboxgl.AttributionControl({ compact: true }), "bottom-right");
     map.addControl(new mapboxgl.NavigationControl({ visualizePitch: true, showCompass: true }), "bottom-right");
 
@@ -160,12 +169,28 @@ export function MapView({ token, regions, plants, onIntroStart, onIntroEnd, onRe
       console.warn("[peta]", e.error?.message ?? e);
     });
 
-    const lightTimer = pinned
-      ? undefined
-      : setInterval(() => {
-          preset = applyLightPreset(map, new Date());
-          setRegionTone(map, presetTone(preset));
-        }, 60_000);
+    // Road labels follow the zoom; the config only changes when the view crosses the threshold.
+    let roadLabels = GLOBE_VIEW.zoom >= ROAD_LABEL_ZOOM;
+    const updateRoadLabels = () => {
+      const show = map.getZoom() >= ROAD_LABEL_ZOOM;
+      if (show === roadLabels) return;
+      roadLabels = show;
+      map.setConfigProperty("basemap", "showRoadLabels", show);
+    };
+    map.on("zoomend", updateRoadLabels);
+
+    /** Switches the light and everything that follows the ground tone: ramps and outlines. */
+    const applyLight = (next: LightPreset) => {
+      if (next === preset) return;
+      preset = next;
+      applyLightPreset(map, next);
+      setRegionTone(map, presetTone(next));
+      useAppStore.getState().setLightPreset(next);
+    };
+    // In automatic mode the light follows the clock; the check is cheap, so once a minute is plenty.
+    const lightTimer = setInterval(() => {
+      if (ready && !failed && useAppStore.getState().lightMode === "auto") applyLight(lightPresetFor(new Date()));
+    }, 60_000);
 
     /** Adds terrain and the data layers. Safe to run again if the style ever reloads. */
     const setupStyle = async () => {
@@ -239,6 +264,7 @@ export function MapView({ token, regions, plants, onIntroStart, onIntroEnd, onRe
       if (s.layers.regions !== prev.layers.regions) setRegionsVisible(map, s.layers.regions);
       if (s.layers.plants !== prev.layers.plants) setPlantsVisible(map, s.layers.plants);
       if (s.rain !== prev.rain) setRainEffect(map, s.rain === "on");
+      if (s.lightMode !== prev.lightMode) applyLight(resolvePreset(s.lightMode, new Date()));
       if (s.hoveredRegionId !== prev.hoveredRegionId) setRegionHover(map, s.hoveredRegionId);
       if (s.selectedRegionId !== prev.selectedRegionId) {
         setSelectedRegion(map, s.selectedRegionId);

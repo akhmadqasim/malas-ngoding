@@ -2,6 +2,12 @@ import type { Map as MapboxMap, RainSpecification } from "mapbox-gl";
 import { token } from "../theme.ts";
 
 export type LightPreset = "dawn" | "day" | "dusk" | "night";
+/** "auto" follows WITA time; a preset pins the light (the Cahaya control, or `?cahaya=`). */
+export type LightMode = "auto" | LightPreset;
+/** Whether the ground under the data is light or dark. Ramps, outlines, dimming and rain follow it. */
+export type Tone = "light" | "dark";
+
+const PRESETS: readonly LightPreset[] = ["dawn", "day", "dusk", "night"];
 
 /** Kalimantan Timur uses WITA, a fixed UTC+8 with no daylight saving. */
 const WITA_OFFSET_HOURS = 8;
@@ -21,16 +27,38 @@ export function lightPresetFor(date: Date): LightPreset {
   return "night";
 }
 
-/** Whether the basemap ground is light or dark under a preset; outlines and dimmed columns follow it. */
-export function presetTone(preset: LightPreset): "light" | "dark" {
-  return preset === "day" ? "light" : "dark";
+/** `?cahaya=night` (or dawn, day, dusk) pins the light; anything else leaves it automatic. */
+export function lightModeFromQuery(search: string): LightMode {
+  const v = new URLSearchParams(search).get("cahaya");
+  return PRESETS.includes(v as LightPreset) ? (v as LightPreset) : "auto";
 }
 
-/** Sets the basemap light to match the real time of day in WITA and returns the preset used. */
-export function applyLightPreset(map: MapboxMap, date: Date): LightPreset {
-  const preset = lightPresetFor(date);
+/** The preset in effect: the pinned one, or the one for the time of day in WITA. */
+export function resolvePreset(mode: LightMode, date: Date): LightPreset {
+  return mode === "auto" ? lightPresetFor(date) : mode;
+}
+
+/**
+ * Ground tone per preset, measured from the render: the land is near white at day and dawn, dark grey at
+ * dusk and navy at night (values in docs/research/design/00-direction.md section 4).
+ */
+export function presetTone(preset: LightPreset): Tone {
+  return preset === "day" || preset === "dawn" ? "light" : "dark";
+}
+
+/**
+ * Standard basemap theme per preset. The neutral `monochrome` ground lets the data colours carry the
+ * map and does not clash with the ink panels; at night the navy `faded` theme reads better, above all
+ * at building zoom, where monochrome night turns the city black.
+ */
+export function basemapTheme(preset: LightPreset): "monochrome" | "faded" {
+  return preset === "night" ? "faded" : "monochrome";
+}
+
+/** Sets the basemap light and theme for a preset. */
+export function applyLightPreset(map: MapboxMap, preset: LightPreset): void {
   map.setConfigProperty("basemap", "lightPreset", preset);
-  return preset;
+  map.setConfigProperty("basemap", "theme", basemapTheme(preset));
 }
 
 /** Rain starts to show at this zoom, where Standard draws solid buildings, and is full at RAIN_FULL_ZOOM. */

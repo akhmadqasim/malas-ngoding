@@ -1,3 +1,4 @@
+import type { Tone } from "./map/effects.ts";
 import type { Metric } from "./store.ts";
 
 /*
@@ -25,15 +26,26 @@ export function clearTokenCache(): void {
 
 export const RAMP_STEPS = 6;
 
-/** The six stops of a metric's colour ramp, low to high. */
-export function rampTokens(metric: Metric): string[] {
-  return Array.from({ length: RAMP_STEPS }, (_, i) => token(`--color-${metric}-${i + 1}`));
+/**
+ * The six stops of a metric's colour ramp, low to high. On a dark ground the highest value is the
+ * lightest; on a light ground (the `-day` ramps) it is the darkest, so the top value always stands out most.
+ */
+export function rampTokens(metric: Metric, tone: Tone): string[] {
+  const set = tone === "light" ? `${metric}-day` : metric;
+  return Array.from({ length: RAMP_STEPS }, (_, i) => token(`--color-${set}-${i + 1}`));
 }
 
 const channels = (hex: string): [number, number, number] => {
   const n = Number.parseInt(hex.replace("#", ""), 16);
   return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
 };
+
+/** `a` moved `f` (0..1) of the way toward `b`, per sRGB channel. */
+export function mixColors(a: string, b: string, f: number): string {
+  const x = channels(a);
+  const y = channels(b);
+  return `#${x.map((v, k) => Math.round(v + (y[k]! - v) * f).toString(16).padStart(2, "0")).join("")}`;
+}
 
 /**
  * Colour at `t` (0..1) along evenly spaced hex stops, mixed per channel like Mapbox's linear
@@ -44,7 +56,5 @@ export function mixRamp(stops: readonly string[], t: number): string {
   const pos = x * (stops.length - 1);
   const i = Math.min(Math.floor(pos), stops.length - 2);
   const f = pos - i;
-  const a = channels(stops[i]!);
-  const b = channels(stops[i + 1]!);
-  return `#${a.map((v, k) => Math.round(v + (b[k]! - v) * f).toString(16).padStart(2, "0")).join("")}`;
+  return mixColors(stops[i]!, stops[i + 1]!, f);
 }

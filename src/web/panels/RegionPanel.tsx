@@ -3,7 +3,9 @@ import { type ReactNode, useMemo, useRef } from "react";
 import { fmtCompact, fmtNumber } from "../../shared/format.ts";
 import type { RegionSummary } from "../../shared/types.ts";
 import { AnimatedNumber } from "../components/AnimatedNumber.tsx";
+import { chem } from "../components/Chem.tsx";
 import { Estimate } from "../components/Estimate.tsx";
+import { presetTone } from "../map/effects.ts";
 import { intensities } from "../map/regionsLayer.ts";
 import { METRIC_TEXT } from "../metrics.ts";
 import { DURATION, EASE_IN, EASE_OUT, stagger } from "../motion.ts";
@@ -41,7 +43,7 @@ export function RegionPanel({ regions }: Props) {
     <section className="sheet" aria-label="Data wilayah">
       <header className="sheet__masthead">
         <span className="sheet__brand">Malas Ngoding</span>
-        <span className="sheet__tagline">Peta energi Kalimantan Timur</span>
+        <span className="sheet__edition">Data 2024</span>
       </header>
       <div className="sheet__scroll">
         <AnimatePresence mode="wait" initial={false}>
@@ -63,12 +65,12 @@ export function RegionPanel({ regions }: Props) {
 function Readout({ label, value, unit }: { label: string; value: number; unit: string }) {
   return (
     <div className="readout">
-      <p className="readout__label">{label}</p>
+      <p className="readout__label">{chem(label)}</p>
       <p className="readout__figure">
         <AnimatedNumber value={value} format={compact} />
       </p>
       <p className="readout__unit">
-        {unit}, <Estimate />
+        {chem(unit)}, <Estimate />
       </p>
     </div>
   );
@@ -91,7 +93,8 @@ function Overview({
   const total = regions.reduce((sum, r) => sum + m.value(r), 0);
   const ranked = useMemo(() => [...regions].sort((a, b) => m.value(b) - m.value(a)), [regions, m]);
   const t = useMemo(() => intensities(regions, metric), [regions, metric]);
-  const ramp = useMemo(() => rampTokens(metric), [metric]);
+  const tone = useAppStore((s) => presetTone(s.lightPreset));
+  const ramp = useMemo(() => rampTokens(metric, tone), [metric, tone]);
   const max = Math.max(...regions.map(m.value), 1);
   // Leaving a row clears the hover only if no other row or the map took it over meanwhile.
   const leave = (id: string) => {
@@ -108,7 +111,7 @@ function Overview({
         <p className="ranking__head">
           <span>Wilayah</span>
           <span>
-            {m.unitShort}, <Estimate />
+            {chem(m.unitShort)}, <Estimate />
           </span>
         </p>
         <ol className="ranking__list" aria-label={`Wilayah menurut ${m.label}`}>
@@ -140,7 +143,8 @@ function Overview({
           ))}
         </ol>
       </div>
-      <p className="sheet__note">Pilih wilayah di peta atau di daftar untuk melihat rinciannya.</p>
+      <p className="sheet__note">Pilih wilayah untuk melihat rinciannya.</p>
+      <p className="sheet__source">Sumber: BPS Kalimantan Timur 2024 dan Kementerian ESDM.</p>
     </div>
   );
 }
@@ -209,8 +213,9 @@ function RegionDetail({
         </Fact>
       </dl>
       <p className="sheet__note">
-        Listrik terpakai diperkirakan dari penjualan PLN 2024 per cabang, dibagi menurut jumlah pelanggan. Emisi CO2 = kWh dikali
-        faktor emisi jaringan Kaltim.
+        {chem(
+          "Listrik terpakai diperkirakan dari penjualan PLN 2024 per cabang, dibagi menurut jumlah pelanggan. Emisi CO2 = kWh dikali faktor emisi jaringan Kaltim.",
+        )}
       </p>
     </div>
   );
@@ -220,7 +225,7 @@ function RegionDetail({
 function Fact({ label, unit, estimate, children }: { label: string; unit?: string; estimate?: boolean; children: ReactNode }) {
   return (
     <div className="fact">
-      <dt className="fact__label">{label}</dt>
+      <dt className="fact__label">{chem(label)}</dt>
       <dd className="fact__value">
         {children === null ? (
           <span className="fact__none">Belum ada data</span>
@@ -229,7 +234,7 @@ function Fact({ label, unit, estimate, children }: { label: string; unit?: strin
             <span className="fact__number">{children}</span>
             {(unit || estimate) && (
               <span className="fact__unit">
-                {unit}
+                {unit && chem(unit)}
                 {unit && estimate && ", "}
                 {estimate && <Estimate />}
               </span>
