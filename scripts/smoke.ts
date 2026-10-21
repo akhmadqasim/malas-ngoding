@@ -1770,6 +1770,14 @@ async function chatChecks(page: Page) {
   await page.waitForTimeout(400); // the panel finishes sliding in
   const emptyOverlaps = await chatOverlaps();
   check(emptyOverlaps.length === 0, `the empty chat panel covers no dock card and not the map tools (${emptyOverlaps.join(", ") || "none"})`);
+  // Toggling "Lapisan dan tampilan" with the chat open: the panel follows the controls card both ways.
+  const dockToggle = page.getByRole("button", { name: DOCK_TRIGGER });
+  for (const step of ["toggled once", "toggled back"]) {
+    await dockToggle.click();
+    await page.waitForTimeout(700);
+    const overlaps = await chatOverlaps();
+    check(overlaps.length === 0, `with "${DOCK_TRIGGER}" ${step}, the chat panel covers no dock card (${overlaps.join(", ") || "none"})`);
+  }
   check(await toolsReachable(), "every map tool can still be pressed while the chat is open");
   const focused = await page.evaluate(() => document.activeElement?.getAttribute("aria-label"));
   check(focused === "Pertanyaan untuk asisten AI", `opening the chat puts the cursor in the question box (${focused})`);

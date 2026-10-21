@@ -54,16 +54,21 @@ function useDockClearance(panel: RefObject<HTMLElement | null>, open: boolean, b
     };
     measure();
     const resized = new ResizeObserver(measure);
-    // Opening or closing "Lapisan dan tampilan" changes which cards count, not always the dock's size.
+    // Opening or closing "Lapisan dan tampilan" changes which cards count, not always the dock's size, and
+    // the controls card slides into place: measure on the toggle and again when its transition ends.
     const toggled = new MutationObserver(measure);
     if (dock) {
       resized.observe(dock);
       toggled.observe(dock, { subtree: true, attributes: true, attributeFilter: ["data-expanded"] });
+      dock.addEventListener("transitionend", measure);
+      dock.addEventListener("animationend", measure);
     }
     window.addEventListener("resize", measure);
     return () => {
       resized.disconnect();
       toggled.disconnect();
+      dock?.removeEventListener("transitionend", measure);
+      dock?.removeEventListener("animationend", measure);
       window.removeEventListener("resize", measure);
     };
   }, [panel, open, beside]);
