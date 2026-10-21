@@ -14,8 +14,7 @@ import { MapView } from "./map/MapView.tsx";
 import { METRIC_TEXT } from "./metrics.ts";
 import { DURATION, EASE_OUT } from "./motion.ts";
 import { BuildingPanel } from "./panels/BuildingPanel.tsx";
-import { Legend } from "./panels/Legend.tsx";
-import { MapControls } from "./panels/MapControls.tsx";
+import { Dock } from "./panels/Dock.tsx";
 import { MapTools } from "./panels/MapTools.tsx";
 import { RegionPanel } from "./panels/RegionPanel.tsx";
 import { type Metric, useAppStore } from "./store.ts";
@@ -129,14 +128,9 @@ export function App() {
                 <RegionPanel regions={regionList} />
               </motion.div>
               <BuildingPanel />
-              <div className="dock-slot">
-                <motion.div variants={assemble(12, 0)}>
-                  <Legend plants={data.plants} regions={regionList} />
-                </motion.div>
-                <motion.div variants={assemble(12, 0)}>
-                  <MapControls />
-                </motion.div>
-              </div>
+              <motion.div className="dock-slot" variants={assemble(12, 0)}>
+                <Dock plants={data.plants} regions={regionList} />
+              </motion.div>
               {/* After the dock in the tab order: the tools sit to its right. */}
               <motion.div className="tools-slot" variants={assemble(0, 12)}>
                 <MapTools />

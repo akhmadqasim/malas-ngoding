@@ -203,7 +203,21 @@ async function swaySweep(page: Page, label: string, regionIds: string[]) {
  * switch is a visually hidden `role="switch"` input inside that label, so the role and name are still
  * what the locator finds, and the check below confirms the state really changed.
  */
+/** The dock's disclosure: the layer switches, the fuel key, Cahaya and Hujan sit behind it. */
+const DOCK_TRIGGER = "Lapisan dan tampilan";
+
+/** Opens the dock's disclosure if it is closed (a check that needs one of its controls calls this first). */
+async function openDock(page: Page) {
+  const trigger = page.getByRole("button", { name: DOCK_TRIGGER });
+  if ((await trigger.getAttribute("aria-expanded")) !== "true") {
+    await trigger.click();
+    await page.locator(".controls").waitFor({ state: "visible", timeout: 2000 });
+    await page.waitForTimeout(300); // the panel's height transition
+  }
+}
+
 async function flipSwitch(page: Page, name: string) {
+  await openDock(page);
   const input = page.getByRole("switch", { name });
   const before = await input.isChecked();
   await input.locator("xpath=ancestor::label[1]").click();
@@ -558,12 +572,14 @@ let weatherStubHits = 0;
  * Answers every /api/weather call of the page with a fixed three-day forecast (a sun curve from 06.00 to
  * 18.00 WITA), so the real weather at the view centre cannot switch the rain on in the middle of the rain
  * checks (auto rain, map/autoRain.ts). "rain" rains every hour; "stale" is a cached rainy forecast from
- * three days ago, which auto rain must ignore.
+ * days ago, which auto rain must ignore. It starts four days back, so its last hour is a full day old: from
+ * three days back, its last hour was 23.00 yesterday, within the 2 hours a stale forecast still counts
+ * for (STALE_GAP_MS) between midnight and 01.00 WITA, and the check failed then.
  */
 async function stubWeather(page: Page, sky: "dry" | "rain" | "stale") {
   await page.unroute("**/api/weather?*");
   const raining = sky !== "dry";
-  const start = Date.parse(`${witaDateText(Date.now() - (sky === "stale" ? 3 * 86_400_000 : 0))}T00:00:00+08:00`);
+  const start = Date.parse(`${witaDateText(Date.now() - (sky === "stale" ? 4 * 86_400_000 : 0))}T00:00:00+08:00`);
   const forecast = Array.from({ length: 72 }, (_, i) => {
     const hour = i % 24;
     const sun = Math.max(0, Math.sin((Math.PI * (hour - 6)) / 12));
@@ -780,8 +796,56 @@ try {
   await waitForMapIdle(page);
   await page.waitForTimeout(800);
 
-  // Layout: the sheet and every card of the bottom dock inside the viewport, none overlapping another, nothing
-  // cut off, the right edge free for the chat button.
+  // The dock, closed (a new session): the metric switch and the legend meter only, the controls behind one
+  // disclosure. Opened, the controls card stands beside the legend, no taller than it, the fuel key under
+  // Pembangkit only while the plants are on; the open state is remembered for the session.
+  const closedDock = await page.evaluate(() => {
+    // A folded panel keeps its children's boxes (hidden="until-found", content-visibility: hidden), so
+    // visibility is asked of the browser itself.
+    const shown = (el: Element | null | undefined) => Boolean(el?.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true }));
+    const visible = (sel: string) => shown(document.querySelector(sel));
+    return {
+      legend: visible(".legend"),
+      metric: document.querySelectorAll('.legend [role="radio"]').length,
+      ramp: visible(".legend .gauge__ramp") && visible(".legend .gauge__ticks") && /perkiraan/.test(document.querySelector(".legend .gauge__unit")?.textContent ?? ""),
+      controls: visible(".controls"),
+      switches: [...document.querySelectorAll<HTMLElement>('[role="switch"]')].filter((el) => shown(el.closest("label"))).length,
+    };
+  });
+  check(
+    closedDock.legend && closedDock.metric === 2 && closedDock.ramp && !closedDock.controls && closedDock.switches === 0,
+    `a new session shows the metric switch and the legend meter, with the layers, light and rain folded away (metric ${closedDock.metric}, controls ${closedDock.controls}, switches in view ${closedDock.switches})`,
+  );
+  const trigger = page.getByRole("button", { name: DOCK_TRIGGER });
+  await trigger.focus();
+  await page.keyboard.press("Enter");
+  await page.waitForTimeout(500);
+  const openedDock = await page.evaluate(() => {
+    const r = (sel: string) => document.querySelector(sel)?.getBoundingClientRect();
+    return {
+      legend: r(".legend"),
+      controls: r(".controls"),
+      remembered: sessionStorage.getItem("malas:dock-open"),
+      fuelKey: document.querySelectorAll(".controls .fuel-key li").length,
+    };
+  });
+  check(
+    (await trigger.getAttribute("aria-expanded")) === "true" && !!openedDock.controls && openedDock.controls.width > 0,
+    "the disclosure opens with the keyboard and shows the map controls",
+  );
+  check(
+    !!openedDock.legend && !!openedDock.controls && openedDock.controls.top >= openedDock.legend.top - 0.5 && Math.abs(openedDock.controls.bottom - openedDock.legend.bottom) <= 1,
+    `the open controls stand beside the legend on its bottom edge, no taller than it (legend top ${Math.round(openedDock.legend?.top ?? 0)}, controls top ${Math.round(openedDock.controls?.top ?? 0)})`,
+  );
+  check(openedDock.remembered === "1", `the open dock is remembered for the session (${openedDock.remembered})`);
+  check(openedDock.fuelKey > 0, `the plant fuel key sits under Pembangkit while the plants are on (${openedDock.fuelKey} fuels)`);
+  await flipSwitch(page, "Pembangkit");
+  const keyWhenOff = await page.locator(".controls .fuel-key").count();
+  await flipSwitch(page, "Pembangkit");
+  check(keyWhenOff === 0 && (await page.locator(".controls .fuel-key li").count()) === openedDock.fuelKey, `with the plants off the fuel key goes, and comes back with them (${keyWhenOff} while off)`);
+
+  // Layout, with the dock open (its largest): the sheet and every card of the bottom dock inside the
+  // viewport, none overlapping another, nothing cut off, the right edge free for the chat button.
   const layout = await page.evaluate((cards) => {
     const box = (el: Element) => {
       const r = el.getBoundingClientRect();
@@ -895,6 +959,22 @@ try {
   await waitForMapIdle(page);
   await shot(page, "4-region");
   await regionClearOfChrome(page, "paser");
+  // The region's grid mix and equivalents are folded under one row; the key figures stay in view.
+  const more = page.getByRole("button", { name: "Asal listrik dan pembanding emisi" });
+  // A folded panel keeps its children's boxes (hidden="until-found"), so the browser is asked directly.
+  const contextShown = () =>
+    page.evaluate(() => Boolean(document.querySelector(".sheet .context")?.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true })));
+  const folded = (await more.getAttribute("aria-expanded")) === "false" && !(await contextShown());
+  check(folded && (await page.locator(".sheet .readout").first().isVisible()) && (await page.locator(".sheet .facts").isVisible()), "the region's grid mix and equivalents start folded, the key figures in view");
+  await more.click();
+  await page.waitForTimeout(500);
+  const context = (await page.locator(".sheet .context").textContent().catch(() => null)) ?? "";
+  check(
+    (await contextShown()) && /Asal listrik Kaltim/.test(context) && /Batu bara/.test(context) && (await page.locator(".sheet .equivalents__row").count()) >= 3,
+    "opening it shows the grid mix by fuel and the equivalents",
+  );
+  await more.click();
+  await page.waitForTimeout(400);
 
   await page.getByRole("radio", { name: "Listrik" }).click();
   await page.waitForTimeout(1800);
@@ -1037,6 +1117,7 @@ try {
 
   // The Cahaya switch: Siang and Malam pin the light, rain, haze and tint follow; Otomatis goes back to WITA time.
   const lightTo = async (label: string) => {
+    await openDock(page);
     await page.getByRole("radio", { name: label }).click();
     await waitForMapIdle(page, 12_000);
     await page.waitForTimeout(600);
@@ -1126,6 +1207,7 @@ function pickRegionRow(page: Page, name: string) {
 
 /** Light switch, then a quiet map for the shot. */
 async function lightFor(page: Page, label: "Siang" | "Malam" | "Otomatis") {
+  await openDock(page);
   await page.getByRole("radio", { name: label }).click();
   await waitForMapIdle(page, 12_000);
   await page.waitForTimeout(600);
@@ -1441,6 +1523,7 @@ async function buildingChecks(page: Page) {
       // The selection stays clear by day and by night (its colours follow the ground tone).
       const colours: string[] = [];
       for (const light of ["Siang", "Malam", "Otomatis"]) {
+        await openDock(page);
         await page.getByRole("radio", { name: light }).click();
         await waitForMapIdle(page, 12_000);
         await page.waitForTimeout(600);

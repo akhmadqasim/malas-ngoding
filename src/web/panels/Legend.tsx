@@ -1,12 +1,10 @@
 import { Card } from "@heroui/react";
 import { motion } from "motion/react";
-import { useMemo, useRef } from "react";
+import { type ReactNode, useMemo, useRef } from "react";
 import { fmtCompact } from "../../shared/format.ts";
 import type { RegionSummary } from "../../shared/types.ts";
-import type { PlantCollection } from "../api.ts";
 import { chem } from "../components/Chem.tsx";
 import { Estimate } from "../components/Estimate.tsx";
-import { FUEL_LABELS, fuelsPresent } from "../map/fuels.ts";
 import { intensities } from "../map/regionsLayer.ts";
 import { METRIC_TEXT } from "../metrics.ts";
 import { DURATION, SPRING } from "../motion.ts";
@@ -18,13 +16,14 @@ const METRICS: { key: Metric; label: string }[] = [
   { key: "kwh", label: "Listrik" },
 ];
 
-
-/** The legend card: what the column heights and colours mean (the gauge), and what the plant dots mean. */
-export function Legend({ plants, regions }: { plants: PlantCollection; regions: RegionSummary[] }) {
+/**
+ * The legend card: what the column heights and colours mean (the metric switch and the gauge). `more` is
+ * the dock's disclosure trigger, set beside the unit (Dock.tsx); the plant fuel key sits with the layer
+ * switches behind it (MapControls).
+ */
+export function Legend({ regions, more }: { regions: RegionSummary[]; more?: ReactNode }) {
   const metric = useAppStore((s) => s.metric);
   const setMetric = useAppStore((s) => s.setMetric);
-  const plantsShown = useAppStore((s) => s.layers.plants);
-  const fuels = useMemo(() => fuelsPresent(plants), [plants]);
 
   return (
     <Card className="legend" role="region" aria-label="Legenda peta">
@@ -41,21 +40,7 @@ export function Legend({ plants, regions }: { plants: PlantCollection; regions: 
         />
       </div>
 
-      <Meter metric={metric} regions={regions} />
-
-      <div className="legend__plants" data-off={plantsShown ? undefined : ""}>
-        <span className="group-label" id="legend-plants">
-          Pembangkit
-        </span>
-        <ul className="fuel-key" aria-labelledby="legend-plants">
-          {fuels.map((f) => (
-            <li key={f}>
-              <span className="fuel-dot" data-fuel={f} aria-hidden />
-              {FUEL_LABELS[f]}
-            </li>
-          ))}
-        </ul>
-      </div>
+      <Meter metric={metric} regions={regions} more={more} />
     </Card>
   );
 }
@@ -64,7 +49,7 @@ export function Legend({ plants, regions }: { plants: PlantCollection; regions: 
  * The legend scale as a meter: ramp, tick values and unit. Pointing at a region (map or list) swings
  * the needle to its value; a selected region keeps the needle when nothing is pointed at.
  */
-function Meter({ metric, regions }: { metric: Metric; regions: RegionSummary[] }) {
+function Meter({ metric, regions, more }: { metric: Metric; regions: RegionSummary[]; more?: ReactNode }) {
   const hoveredId = useAppStore((s) => s.hoveredRegionId);
   const selectedId = useAppStore((s) => s.selectedRegionId);
   const m = METRIC_TEXT[metric];
@@ -103,9 +88,12 @@ function Meter({ metric, regions }: { metric: Metric; regions: RegionSummary[] }
         <span className="gauge__tick gauge__tick--mid">{fmtCompact((max / 4) * m.scale)}</span>
         <span className="gauge__tick gauge__tick--end">{fmtCompact(max * m.scale)}</span>
       </div>
-      <p className="gauge__unit">
-        {chem(m.unit)}, <Estimate />
-      </p>
+      <div className="gauge__foot">
+        <p className="gauge__unit">
+          {chem(m.unit)}, <Estimate />
+        </p>
+        {more}
+      </div>
     </div>
   );
 }

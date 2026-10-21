@@ -1,5 +1,5 @@
 import { ChevronLeft } from "@gravity-ui/icons";
-import { Button, Card } from "@heroui/react";
+import { Button, Card, Disclosure } from "@heroui/react";
 import { AnimatePresence, motion } from "motion/react";
 import { type ReactNode, type RefObject, useEffect, useMemo, useRef } from "react";
 import { fmtCompact, fmtNumber } from "../../shared/format.ts";
@@ -7,6 +7,7 @@ import type { RegionSummary } from "../../shared/types.ts";
 import { AnimatedNumber } from "../components/AnimatedNumber.tsx";
 import { chem } from "../components/Chem.tsx";
 import { Estimate } from "../components/Estimate.tsx";
+import { useSessionFlag } from "../components/useSessionFlag.ts";
 import { presetTone } from "../map/effects.ts";
 import { intensities } from "../map/regionsLayer.ts";
 import { METRIC_TEXT } from "../metrics.ts";
@@ -250,7 +251,7 @@ function RegionDetail({
           {region.villagesNoPln === null ? null : <AnimatedNumber value={region.villagesNoPln} format={whole} />}
         </Fact>
       </dl>
-      <EmissionContext co2KgYear={region.co2KgYear} />
+      <MoreContext co2KgYear={region.co2KgYear} />
       <RecommendationPanel regionId={region.id} regionName={region.name} kind={region.kind} />
       <footer className="sheet__foot">
         <p className="sheet__note">
@@ -260,6 +261,30 @@ function RegionDetail({
         </p>
       </footer>
     </div>
+  );
+}
+
+/** The session key of the region sheet's "Asal listrik dan pembanding" disclosure. */
+export const CONTEXT_OPEN_KEY = "malas:context-open";
+
+/**
+ * The grid mix and the equivalents of a region, folded away by default: the key figures stay above, and
+ * the recommendations come into view sooner. The open or closed state holds for the session.
+ */
+function MoreContext({ co2KgYear }: { co2KgYear: number }) {
+  const [open, setOpen] = useSessionFlag(CONTEXT_OPEN_KEY, false);
+  return (
+    <Disclosure className="more" isExpanded={open} onExpandedChange={setOpen}>
+      <Disclosure.Heading className="more__heading">
+        <Button slot="trigger" variant="ghost" size="sm" className="more__trigger">
+          Asal listrik dan pembanding emisi
+          <Disclosure.Indicator className="more__indicator" />
+        </Button>
+      </Disclosure.Heading>
+      <Disclosure.Content className="more__content">
+        <EmissionContext co2KgYear={co2KgYear} />
+      </Disclosure.Content>
+    </Disclosure>
   );
 }
 

@@ -1,10 +1,12 @@
 import { Card } from "@heroui/react";
 import type { Map as MapboxMap } from "mapbox-gl";
 import { AnimatePresence, motion } from "motion/react";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import type { PlantCollection } from "../api.ts";
 import { LayerSwitch } from "../components/LayerSwitch.tsx";
 import { Segmented } from "../components/Segmented.tsx";
 import { nextRainMode, rainNote, rainVisible } from "../map/autoRain.ts";
+import { FUEL_LABELS, fuelsPresent } from "../map/fuels.ts";
 import { LIGHT_NOTE, type LightOption, lightModeFor, lightOption } from "../map/effects.ts";
 import { DURATION } from "../motion.ts";
 import { linkedLightMode, useAppStore } from "../store.ts";
@@ -37,8 +39,12 @@ function useMapZoom(map: MapboxMap | null): number {
   return zoom;
 }
 
-/** The map controls card: the data layers, then the scene (light and rain). */
-export function MapControls() {
+/**
+ * The map controls card, behind the dock's disclosure: the data layers (with the plant fuel key while the
+ * plants are on), then the scene (light and rain).
+ */
+export function MapControls({ plants }: { plants: PlantCollection }) {
+  const fuels = useMemo(() => fuelsPresent(plants), [plants]);
   const layers = useAppStore((s) => s.layers);
   const setLayer = useAppStore((s) => s.setLayer);
   const rain = useAppStore((s) => s.rain);
@@ -62,6 +68,16 @@ export function MapControls() {
           <LayerSwitch label="Pembangkit" on={layers.plants} onChange={(v) => setLayer("plants", v)} />
         </div>
       </div>
+      {layers.plants && (
+        <ul className="fuel-key" aria-label="Warna pembangkit">
+          {fuels.map((f) => (
+            <li key={f}>
+              <span className="fuel-dot" data-fuel={f} aria-hidden />
+              {FUEL_LABELS[f]}
+            </li>
+          ))}
+        </ul>
+      )}
       <div className="controls__row" role="group" aria-label="Suasana peta">
         <span className="group-label" id="controls-light">
           {lightNote ? `Cahaya ${lightNote}` : "Cahaya"}
