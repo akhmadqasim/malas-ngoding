@@ -3,7 +3,8 @@ import type { AppDeps } from "../index.ts";
 import { ACTION_TOOL_DEFINITIONS, ACTIONS, type ChatAction, type ClientActionName } from "./chatTools/actions.ts";
 import { estimateBuildingAt, simulateSolar } from "./chatTools/buildingTools.ts";
 import type { ServerTool } from "./chatTools/common.ts";
-import { getGridMix, getRegionStats, listRegions } from "./chatTools/regionTools.ts";
+import { findPlaces } from "./chatTools/placeTools.ts";
+import { getGridMix, getRecommendations, getRegionStats, listRegions } from "./chatTools/regionTools.ts";
 import { getWeather } from "./chatTools/weatherTool.ts";
 
 // The tools Claude can call in the chat, and the loop step that runs them. Server tools (chatTools/*Tools.ts)
@@ -19,7 +20,16 @@ export { buildingTypeLabel, KALTIM_AREA } from "./chatTools/common.ts";
 /** Server-tool calls run per Claude reply; the rest get an error result (map actions are not counted). */
 export const MAX_SERVER_TOOLS_PER_REPLY = 6;
 
-const SERVER_TOOLS: ServerTool[] = [listRegions, getRegionStats, getGridMix, estimateBuildingAt, simulateSolar, getWeather];
+const SERVER_TOOLS: ServerTool[] = [
+  listRegions,
+  getRegionStats,
+  getGridMix,
+  getRecommendations,
+  estimateBuildingAt,
+  simulateSolar,
+  getWeather,
+  findPlaces,
+];
 const SERVER_TOOLS_BY_NAME = new Map(SERVER_TOOLS.map((t) => [t.definition.name, t]));
 
 /** Every chat tool, in a fixed order so the prompt prefix stays cacheable. */

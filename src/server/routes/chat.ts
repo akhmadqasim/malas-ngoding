@@ -2,7 +2,7 @@ import type { BunRequest, Server } from "bun";
 import { resolveRegion } from "../../shared/regionAlias.ts";
 import type { BuildingEstimate, BuildingType } from "../../shared/types.ts";
 import type { AppDeps } from "../index.ts";
-import { error, safe } from "../http.ts";
+import { error, json, safe } from "../http.ts";
 import type { ChatAction } from "../services/chatTools.ts";
 import {
   type ChatContext,
@@ -10,6 +10,7 @@ import {
   type SelectedBuilding,
   buildMessages,
   chatErrorMessage,
+  isChatModelConfigured,
   runChat,
 } from "../services/claude.ts";
 
@@ -25,6 +26,8 @@ export interface ChatRequest {
   context: {
     selectedRegionId: string | null;
     selectedBuilding: BuildingEstimate | null;
+    /** Where the selected building is, [lng, lat]. Optional. */
+    selectedBuildingAt?: [number, number] | null;
     view: { center: [number, number]; zoom: number };
   };
 }
@@ -96,20 +99,27 @@ function parseBuilding(v: unknown): SelectedBuilding | null | undefined {
   };
 }
 
+/** A [lng, lat] pair in range. */
+function isLngLat(v: unknown): v is [number, number] {
+  return (
+    Array.isArray(v) &&
+    v.length === 2 &&
+    isNum(v[0]) &&
+    v[0] >= -180 &&
+    v[0] <= 180 &&
+    isNum(v[1]) &&
+    v[1] >= -90 &&
+    v[1] <= 90
+  );
+}
+
 function parseContext(v: unknown): { context: ChatContext } | { problem: string } {
   if (!isObject(v)) return { problem: "Konteks peta (context) harus berupa objek." };
   const view = v.view;
   const center = isObject(view) ? view.center : undefined;
   if (
     !isObject(view) ||
-    !Array.isArray(center) ||
-    center.length !== 2 ||
-    !isNum(center[0]) ||
-    center[0] < -180 ||
-    center[0] > 180 ||
-    !isNum(center[1]) ||
-    center[1] < -90 ||
-    center[1] > 90 ||
+    !isLngLat(center) ||
     !isNum(view.zoom) ||
     view.zoom < 0 ||
     view.zoom > 24
@@ -123,10 +133,16 @@ function parseContext(v: unknown): { context: ChatContext } | { problem: string 
   }
   const building = parseBuilding(v.selectedBuilding ?? null);
   if (building === undefined) return { problem: "Gedung terpilih (context.selectedBuilding) tidak valid." };
+  const at = v.selectedBuildingAt ?? null;
+  if (at !== null && !isLngLat(at)) {
+    return { problem: "Letak gedung terpilih (context.selectedBuildingAt) harus berupa [lng, lat] atau null." };
+  }
   return {
     context: {
       selectedRegionId: regionId === null ? null : resolveRegion(regionId),
       selectedBuilding: building,
+      // A point without a building says nothing.
+      selectedBuildingAt: building && at ? [at[0], at[1]] : null,
       view: { center: [center[0], center[1]], zoom: view.zoom },
     },
   };
@@ -203,27 +219,39 @@ async function converse(
 const encoder = new TextEncoder();
 
 /**
- * A text/event-stream response fed by `produce`. When the client disconnects (request signal or stream
- * cancel), the signal given to `produce` aborts. The stream closes when `produce` settles.
+ * A comment line sent while the answer is quiet (a slow tool, the first recommendations for a region), so
+ * proxies and browsers that drop idle connections keep this one open. Clients ignore comments.
  */
-function eventStream(
+export const KEEP_ALIVE_MS = 15_000;
+const KEEP_ALIVE = encoder.encode(": ping\n\n");
+
+/**
+ * A text/event-stream response fed by `produce`. When the client disconnects (request signal or stream
+ * cancel), the signal given to `produce` aborts. The stream closes when `produce` settles. Every
+ * `keepAliveMs` it sends a keep-alive comment.
+ */
+export function eventStream(
   req: Request,
   produce: (send: (event: ChatEvent) => void, signal: AbortSignal) => Promise<void>,
+  keepAliveMs = KEEP_ALIVE_MS,
 ): Response {
   const disconnect = new AbortController();
   const onAbort = () => disconnect.abort();
   req.signal.addEventListener("abort", onAbort, { once: true });
   let open = true;
+  let keepAlive: ReturnType<typeof setInterval> | undefined;
   const body = new ReadableStream<Uint8Array>({
     start(controller) {
-      const send = (event: ChatEvent) => {
+      const write = (bytes: Uint8Array) => {
         if (!open) return;
         try {
-          controller.enqueue(encoder.encode(`event: ${event.event}\ndata: ${JSON.stringify(event.data)}\n\n`));
+          controller.enqueue(bytes);
         } catch {
           open = false;
         }
       };
+      const send = (event: ChatEvent) => write(encoder.encode(`event: ${event.event}\ndata: ${JSON.stringify(event.data)}\n\n`));
+      keepAlive = setInterval(() => write(KEEP_ALIVE), keepAliveMs);
       void produce(send, disconnect.signal)
         .catch((err) => {
           // produce() handles its own failures; this only keeps a bug from becoming an unhandled rejection.
@@ -231,6 +259,7 @@ function eventStream(
           send({ event: "error", data: { message: chatErrorMessage(err) } });
         })
         .finally(() => {
+          clearInterval(keepAlive);
           req.signal.removeEventListener("abort", onAbort);
           if (!open) return;
           open = false;
@@ -243,6 +272,7 @@ function eventStream(
     },
     cancel() {
       open = false;
+      clearInterval(keepAlive);
       disconnect.abort();
     },
   });
@@ -258,6 +288,10 @@ function eventStream(
 
 export function chatRoutes(deps: AppDeps) {
   return {
+    // Lets the chat panel say up front that the assistant is off, instead of failing on the first question.
+    "/api/chat/status": {
+      GET: () => json({ enabled: isChatModelConfigured(deps.chatModel) }),
+    },
     "/api/chat": {
       POST: (req: BunRequest, server: Server<undefined>) =>
         safe(async (r) => {

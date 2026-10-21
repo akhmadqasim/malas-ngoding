@@ -13,6 +13,7 @@ import { regionRoutes } from "./routes/regions.ts";
 import { solarRoutes } from "./routes/solar.ts";
 import { weatherRoutes } from "./routes/weather.ts";
 import { type ChatModel, createChatModel } from "./services/claude.ts";
+import { createPlaceSearch, type PlaceSearch } from "./services/chatTools/placeSearch.ts";
 import { createNasaLookup, type NasaLookup } from "./services/nasaPower.ts";
 import { createMeteoLookup, type MeteoLookup } from "./services/openMeteo.ts";
 import { createClaudeRecommender, type RecommendationWriter } from "./services/recommendations.ts";
@@ -49,6 +50,8 @@ export interface AppDeps {
   nasa: NasaLookup;
   /** Open-Meteo seven-day hourly forecast. Throws when the upstream fails. */
   meteo: MeteoLookup;
+  /** Mapbox place search by category (the chat's find_places). Throws when the upstream fails. */
+  places: PlaceSearch;
   /** Opens one streaming Claude request for the chat. Throws ChatNotConfiguredError without an API key. */
   chatModel: ChatModel;
   /** Claude writing the government recommendations; null without ANTHROPIC_API_KEY. Throws when it fails. */
@@ -90,6 +93,7 @@ if (import.meta.main) {
       poi: createPoiLookup(env.mapboxToken),
       nasa: createNasaLookup(),
       meteo: createMeteoLookup(),
+      places: createPlaceSearch(env.mapboxToken),
       chatModel: createChatModel(env.anthropicApiKey),
       recommender: env.anthropicApiKey ? createClaudeRecommender(env.anthropicApiKey) : null,
     },

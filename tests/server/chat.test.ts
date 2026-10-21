@@ -2,6 +2,8 @@ import Anthropic from "@anthropic-ai/sdk";
 import { afterAll, afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import type { Server } from "bun";
 import { createServer } from "../../src/server/index.ts";
+import { eventStream } from "../../src/server/routes/chat.ts";
+import type { PlaceHit } from "../../src/server/services/chatTools/placeSearch.ts";
 import {
   CHAT_MAX_ITERATIONS,
   CHAT_MAX_TOKENS,
@@ -39,9 +41,11 @@ const TOOL_NAMES = [
   "list_regions",
   "get_region_stats",
   "get_grid_mix",
+  "get_recommendations",
   "estimate_building_at",
   "simulate_solar",
   "get_weather",
+  "find_places",
   "fly_to_region",
   "fly_to",
   "select_building_at",
@@ -187,7 +191,8 @@ interface Received {
 function parseSse(text: string): Received[] {
   return text
     .split("\n\n")
-    .filter((chunk) => chunk.trim() !== "")
+    // Keep-alive comments (": ping") carry no event.
+    .filter((chunk) => chunk.trim() !== "" && !chunk.startsWith(":"))
     .map((chunk) => {
       let event = "message";
       const data: string[] = [];
@@ -547,6 +552,36 @@ describe("POST /api/chat", () => {
     expect(state).not.toContain("asumsi6");
   });
 
+  test("the selected building's own point is used for the tool values when the app sends it", async () => {
+    const model = fakeModel([{ text: "Baik." }]);
+    const { server } = start({ chat: model.model });
+    const context = { ...CONTEXT, selectedBuilding: BUILDING, selectedBuildingAt: [117.16123456, -0.49] };
+    await chat(server, body("Kalau gedung ini pakai panel surya?", context));
+    const state = (model.calls[0]!.messages.at(-1)!.content as Anthropic.TextBlockParam[])[0]!.text;
+    expect(state).toContain('{"lat":-0.49,"lng":117.16123,"roofAreaM2":400,"kwhYear":145600}');
+    expect(state).toContain("koordinat gedung");
+    expect(state).not.toContain("dipakai pusat peta");
+  });
+
+  test.each([["x"], [[117.1]], [[200, 0]], [[117.1, "a"]]])(
+    "an invalid selectedBuildingAt %j is a 400",
+    async (at) => {
+      const model = fakeModel([{ text: "Baik." }]);
+      const { server } = start({ chat: model.model });
+      const res = await post(server, body("Halo", { ...CONTEXT, selectedBuilding: BUILDING, selectedBuildingAt: at }));
+      expect(res.status).toBe(400);
+      expect((await res.json()).error).toContain("selectedBuildingAt");
+      expect(model.calls).toHaveLength(0);
+    },
+  );
+
+  test("selectedBuildingAt null is fine", async () => {
+    const model = fakeModel([{ text: "Baik." }]);
+    const { server } = start({ chat: model.model });
+    const events = await chat(server, body("Halo", { ...CONTEXT, selectedBuildingAt: null }));
+    expect(eventNames(events).at(-1)).toBe("done");
+  });
+
   test("with nothing selected the app state says so", async () => {
     const model = fakeModel([{ text: "Baik." }]);
     const { server } = start({ chat: model.model });
@@ -899,6 +934,145 @@ describe("chat server tools", () => {
     expect(String(result?.content)).toContain("tidak tersedia");
   });
 
+  // ---------- get_recommendations ----------
+
+  test("get_recommendations without Claude gives the rule-based items and says so", async () => {
+    const { json, result } = await callTool("get_recommendations", { region: "Kukar" });
+    expect(result?.is_error).toBeUndefined();
+    expect(json.region).toBe("Kutai Kartanegara");
+    expect(json.source).toContain("berbasis aturan");
+    expect(json.items.length).toBeGreaterThanOrEqual(3);
+    for (const item of json.items) {
+      expect(typeof item.title).toBe("string");
+      expect(typeof item.body).toBe("string");
+      expect(typeof item.impact).toBe("string");
+      expect(item.priority).toMatch(/^prioritas [123]/);
+      expect(["energi terbarukan", "efisiensi energi", "tata ruang", "akses listrik", "kebijakan"]).toContain(item.category);
+    }
+    expect(json.note).toContain("panel wilayah");
+  });
+
+  test("get_recommendations serves the cached Claude items with the model and the date", async () => {
+    const model = fakeModel([{ tools: [{ name: "get_recommendations", input: { region: "samarinda" } }] }, { text: "Selesai." }]);
+    const { server, fake } = start({ chat: model.model });
+    const items = [1, 2, 3].map((n) => ({
+      title: `Saran ${n}`,
+      category: "efisiensi" as const,
+      body: `Isi saran ${n}.`,
+      impact: `Dampak ${n}.`,
+      priority: n as 1 | 2 | 3,
+    }));
+    await fake.deps.db.recommendationsSet("samarinda", items, "claude-sonnet-5-5");
+    await chat(server, body("Apa saran untuk Samarinda?"));
+    const json = resultJson(toolResults(model.calls[1])[0]);
+    expect(json.source).toContain("claude-sonnet-5-5");
+    expect(json.source).toMatch(/dibuat \d+ \w+ \d{4}/);
+    expect(json.items.map((i: { title: string }) => i.title)).toEqual(["Saran 1", "Saran 2", "Saran 3"]);
+    expect(json.items[0]).toMatchObject({ category: "efisiensi energi", priority: "prioritas 1 (paling penting)" });
+  });
+
+  test("get_recommendations for a region outside Kaltim returns an error result", async () => {
+    const { result } = await callTool("get_recommendations", { region: "Jakarta" });
+    expect(result?.is_error).toBe(true);
+    expect(String(result?.content)).toContain("Jakarta");
+  });
+
+  // ---------- find_places ----------
+
+  const hit = (name: string, lng: number, lat: number, distanceM: number | null = 100): PlaceHit => ({
+    name,
+    lng,
+    lat,
+    address: `${name}, Samarinda`,
+    distanceM,
+  });
+  /** Fake Samarinda is lng 116.5 to 118 (fakes.ts); 116.2 lies outside it. */
+  const SCHOOLS = [hit("SMA Negeri 1", 117.151, -0.501), hit("SD di Balikpapan", 116.2, -1.2), hit("SD Negeri 2", 117.16, -0.49, 1500)];
+
+  test("find_places searches near the region, keeps the places inside it and marks them on the map", async () => {
+    const model = fakeModel([
+      { tools: [{ name: "find_places", input: { category: "school", region: "Kota Samarinda" } }] },
+      { text: "Ini sekolahnya." },
+    ]);
+    const { server, fake } = start({ chat: model.model, places: SCHOOLS });
+    const events = await chat(server, body("Tunjukkan gedung sekolah di Samarinda"));
+
+    expect(fake.placeCalls).toHaveLength(1);
+    expect(fake.placeCalls[0]).toMatchObject({ category: "school", near: [117.15, -0.5], limit: 25 });
+    expect(fake.placeCalls[0]!.exclude).toContain("driving_school");
+    const json = resultJson(toolResults(model.calls[1])[0]);
+    expect(json.category).toBe("sekolah");
+    expect(json.near).toBe("Samarinda");
+    expect(json.places).toEqual([
+      { n: 1, name: "SMA Negeri 1", address: "SMA Negeri 1, Samarinda", lng: 117.151, lat: -0.501, region: "Samarinda" },
+      { n: 2, name: "SD Negeri 2", address: "SD Negeri 2, Samarinda", lng: 117.16, lat: -0.49, region: "Samarinda" },
+    ]);
+    expect(json.note).toContain("ditandai");
+    expect(eventNames(events)[0]).toBe("action");
+    expect(actions(events)).toEqual([
+      {
+        name: "mark_places",
+        input: {
+          label: "sekolah",
+          places: [
+            { name: "SMA Negeri 1", lng: 117.151, lat: -0.501 },
+            { name: "SD Negeri 2", lng: 117.16, lat: -0.49 },
+          ],
+        },
+      },
+    ]);
+  });
+
+  test("find_places near a point keeps every place and says how far each one is", async () => {
+    const { json, fake } = await callTool("find_places", { category: "hospital", lng: 117.15, lat: -0.5 }, { places: SCHOOLS });
+    expect(fake.placeCalls[0]).toMatchObject({ category: "hospital", near: [117.15, -0.5] });
+    expect(json.near).toBe("titik lng 117.15, lat -0.5");
+    expect(json.places).toHaveLength(3);
+    expect(json.places[0]).toMatchObject({ n: 1, distanceText: "100 m dari titik itu" });
+    expect(json.places[1]).toMatchObject({ region: "Di luar Kalimantan Timur" });
+    expect(json.places[2]).toMatchObject({ distanceText: "1,5 km dari titik itu" });
+  });
+
+  test.each([
+    [{}, 5],
+    [{ limit: 3 }, 3],
+    [{ limit: 50 }, 10],
+  ])("find_places returns at most limit places, 5 by default and 10 at most (%j)", async (extra, expected) => {
+    const many = Array.from({ length: 14 }, (_, i) => hit(`Sekolah ${i + 1}`, 117 + i / 100, -0.5));
+    const { json } = await callTool("find_places", { category: "school", region: "samarinda", ...extra }, { places: many });
+    expect(json.places).toHaveLength(expected);
+  });
+
+  test.each([
+    [{ category: "kasino", region: "samarinda" }, "category"],
+    [{ category: "school" }, "region"],
+    [{ category: "school", lng: 106.8, lat: -6.2 }, "luar Kalimantan Timur"],
+    [{ category: "school", region: "Jakarta" }, "Jakarta"],
+  ])("find_places with %j returns an error result without searching", async (input, words) => {
+    const { result, fake } = await callTool("find_places", input, { places: SCHOOLS });
+    expect(result?.is_error).toBe(true);
+    expect(String(result?.content)).toContain(words);
+    expect(fake.placeCalls).toHaveLength(0);
+  });
+
+  test("find_places with the search down returns an error result and marks nothing", async () => {
+    const { result, events } = await callTool("find_places", { category: "school", region: "samarinda" }, { places: new Error("HTTP 503") });
+    expect(result?.is_error).toBe(true);
+    expect(String(result?.content)).toContain("tidak bisa");
+    expect(actions(events)).toEqual([]);
+  });
+
+  test("find_places with nothing found in the region says so and marks nothing", async () => {
+    const { result, events } = await callTool(
+      "find_places",
+      { category: "school", region: "samarinda" },
+      { places: [hit("Jauh", 116.2, -1.2)] },
+    );
+    expect(result?.is_error).toBe(true);
+    expect(String(result?.content)).toContain("Tidak ditemukan sekolah di Samarinda");
+    expect(actions(events)).toEqual([]);
+  });
+
   test("a server tool that throws gives Claude an error result instead of breaking the chat", async () => {
     const model = fakeModel([{ tools: [{ name: "get_grid_mix", input: {} }] }, { text: "Maaf, datanya belum ada." }]);
     const { server, fake } = start({ chat: model.model });
@@ -910,6 +1084,46 @@ describe("chat server tools", () => {
     const [result] = toolResults(model.calls[1]);
     expect(result?.is_error).toBe(true);
     expect(warn).toHaveBeenCalled();
+  });
+});
+
+describe("the event stream", () => {
+  test("sends a keep-alive comment while the answer is quiet, then the events", async () => {
+    const req = new Request("http://localhost/api/chat", { method: "POST" });
+    const res = eventStream(
+      req,
+      async (send) => {
+        await Bun.sleep(90);
+        send({ event: "done", data: {} });
+      },
+      20,
+    );
+    const text = await res.text();
+    expect(text.startsWith(": ping\n\n")).toBe(true);
+    expect(text.endsWith("event: done\ndata: {}\n\n")).toBe(true);
+    expect(parseSse(text)).toEqual([{ event: "done", data: {} }]);
+  });
+
+  test("no keep-alive comment once the stream has ended", async () => {
+    const req = new Request("http://localhost/api/chat", { method: "POST" });
+    const res = eventStream(req, async (send) => send({ event: "done", data: {} }), 10);
+    expect(await res.text()).toBe("event: done\ndata: {}\n\n");
+    // The timer is gone: nothing writes to the closed stream later (that would throw and be logged).
+    await Bun.sleep(40);
+  });
+});
+
+describe("GET /api/chat/status", () => {
+  test("says the chat is on when the server has a model", async () => {
+    const { server } = start({ chat: fakeModel([]).model });
+    const res = await fetch(new URL("/api/chat/status", server.url));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ enabled: true });
+  });
+
+  test("says the chat is off without an API key", async () => {
+    const { server } = start({ chat: createChatModel("") });
+    expect(await (await fetch(new URL("/api/chat/status", server.url))).json()).toEqual({ enabled: false });
   });
 });
 

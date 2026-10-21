@@ -2,6 +2,7 @@ import type { RegionPlant } from "../../src/server/db.ts";
 import type { AppDeps } from "../../src/server/index.ts";
 import type { ChatModel } from "../../src/server/services/claude.ts";
 import type { Climatology } from "../../src/server/services/nasaPower.ts";
+import type { PlaceHit, PlaceQuery } from "../../src/server/services/chatTools/placeSearch.ts";
 import type { RecommendationWriter } from "../../src/server/services/recommendations.ts";
 import type { PoiHit } from "../../src/server/services/tilequery.ts";
 import type { ForecastHour } from "../../src/shared/pvForecast.ts";
@@ -88,6 +89,8 @@ export interface FakeDeps {
   poiCalls: Array<[number, number]>;
   nasaCalls: Array<[number, number]>;
   meteoCalls: Array<[number, number]>;
+  /** Place searches asked for by the chat's find_places tool. */
+  placeCalls: PlaceQuery[];
   /** Chat session ids created so far. */
   chatSessions: Set<string>;
   /** Chat messages stored so far, oldest first. Push to it to seed a history. */
@@ -103,6 +106,8 @@ export interface FakeUpstreams {
   chat?: ChatModel;
   /** Claude recommendations writer. Default: none, as with an empty ANTHROPIC_API_KEY. */
   recommender?: RecommendationWriter | null;
+  /** Mapbox place search answer: hits or an Error to throw. Default: one that fails the test if used. */
+  places?: PlaceHit[] | Error;
 }
 
 /**
@@ -115,11 +120,13 @@ export function fakeDeps(poiAnswer: PoiHit | null | Error = null, upstreams: Fak
   const poiCalls: Array<[number, number]> = [];
   const nasaCalls: Array<[number, number]> = [];
   const meteoCalls: Array<[number, number]> = [];
+  const placeCalls: PlaceQuery[] = [];
   const chatSessions = new Set<string>();
   const chatMessages: FakeChatMessage[] = [];
   let lastWrite = 0;
   const nasaAnswer = upstreams.nasa ?? { pshByMonth: Array<number>(12).fill(4.8), pshYear: 4.8 };
   const meteoAnswer = upstreams.meteo ?? new Error("meteo not expected");
+  const placesAnswer = upstreams.places ?? new Error("place search not expected");
   const deps: AppDeps = {
     db: {
       regionAt: async (lng, lat) =>
@@ -204,6 +211,11 @@ export function fakeDeps(poiAnswer: PoiHit | null | Error = null, upstreams: Fak
       if (meteoAnswer instanceof Error) throw meteoAnswer;
       return meteoAnswer;
     },
+    places: async (query) => {
+      placeCalls.push(structuredClone(query));
+      if (placesAnswer instanceof Error) throw placesAnswer;
+      return placesAnswer;
+    },
     chatModel:
       upstreams.chat ??
       (() => {
@@ -211,5 +223,5 @@ export function fakeDeps(poiAnswer: PoiHit | null | Error = null, upstreams: Fak
       }),
     recommender: upstreams.recommender ?? null,
   };
-  return { deps, stored, ages, poiCalls, nasaCalls, meteoCalls, chatSessions, chatMessages };
+  return { deps, stored, ages, poiCalls, nasaCalls, meteoCalls, placeCalls, chatSessions, chatMessages };
 }

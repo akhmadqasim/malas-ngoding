@@ -67,6 +67,7 @@ export const ACTION_TOOL_DEFINITIONS: Anthropic.Tool[] = [
   },
 ];
 
+/** Map actions Claude calls as tools. */
 export type ClientActionName =
   | "fly_to_region"
   | "fly_to"
@@ -76,9 +77,13 @@ export type ClientActionName =
   | "set_rain"
   | "open_tab";
 
-/** A map action for the browser, with its input checked and normalised (region aliases resolved to ids). */
+/**
+ * A map action for the browser, with its input checked and normalised (region aliases resolved to ids).
+ * Besides the action tools there is `mark_places` (`{ label, places: [{ name, lng, lat }] }`), which the
+ * server sends itself with the places find_places found.
+ */
 export interface ChatAction {
-  name: ClientActionName;
+  name: ClientActionName | "mark_places";
   input: Record<string, unknown>;
 }
 

@@ -1,5 +1,6 @@
 import { fmtNumber } from "../../../shared/format.ts";
-import type { FuelType, RegionSummary } from "../../../shared/types.ts";
+import type { FuelType, RecommendationCategory, RecommendationItem, RegionSummary } from "../../../shared/types.ts";
+import { recommendationsFor } from "../recommendations.ts";
 import {
   co2PerYear,
   estimated,
@@ -94,6 +95,51 @@ export const getRegionStats: ServerTool = {
           "Desa belum dilayani PLN": r.villagesNoPln === null ? NO_DATA : `${fmtNumber(r.villagesNoPln)} desa`,
         },
         note: REGION_NOTE,
+      },
+    };
+  },
+};
+
+const CATEGORY_WORDS: Record<RecommendationCategory, string> = {
+  energi_terbarukan: "energi terbarukan",
+  efisiensi: "efisiensi energi",
+  tata_ruang: "tata ruang",
+  akses_listrik: "akses listrik",
+  kebijakan: "kebijakan",
+};
+const PRIORITY_WORDS: Record<RecommendationItem["priority"], string> = {
+  1: "prioritas 1 (paling penting)",
+  2: "prioritas 2",
+  3: "prioritas 3",
+};
+const WITA_DATE = new Intl.DateTimeFormat("id-ID", { timeZone: "Asia/Makassar", day: "numeric", month: "long", year: "numeric" });
+
+export const getRecommendations: ServerTool = {
+  definition: {
+    name: "get_recommendations",
+    description:
+      "Recommendations for the local government of one kabupaten/kota (renewable energy, efficiency, spatial planning, electricity access, policy), written from the region's data, with their priority and expected impact. The same list shows in the region's panel on the map, so call fly_to_region too. The first answer for a region can take about 10 seconds.",
+    input_schema: { type: "object", properties: { region: REGION_PARAM }, required: ["region"] },
+  },
+  run: async (deps, i) => {
+    const wanted = region(i.region);
+    if ("problem" in wanted) return wanted;
+    const [recs, summary] = await Promise.all([recommendationsFor(deps, wanted.id), deps.db.regionById(wanted.id)]);
+    if (!recs) return { problem: `Data wilayah ${wanted.id} belum ada.` };
+    return {
+      result: {
+        region: summary?.name ?? wanted.id,
+        source: recs.model
+          ? `ditulis AI (${recs.model}) dari data wilayah, dibuat ${WITA_DATE.format(new Date(recs.generatedAt))}`
+          : "berbasis aturan dari data wilayah (AI sedang tidak tersedia)",
+        items: recs.items.map((item) => ({
+          priority: PRIORITY_WORDS[item.priority],
+          category: CATEGORY_WORDS[item.category],
+          title: item.title,
+          body: item.body,
+          impact: item.impact,
+        })),
+        note: "Rekomendasi ini juga tampil di panel wilayah di peta. Angka dampaknya perkiraan.",
       },
     };
   },
