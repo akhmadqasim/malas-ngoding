@@ -2,7 +2,8 @@
  * Browser smoke check of the running app. Start `bun dev` first, then run `bun run smoke`.
  *
  * It opens the app in Chromium, lets the intro play (basemap names on the globe), checks the regions,
- * plants, layout, the region names across the whole idle sway (CO2 and kWh), the hover preview, click,
+ * plants, layout, the region names across the whole idle sway (CO2 and kWh), the sway keeping its arc
+ * after a gesture near north, the basemap names after the intro, the hover preview, click,
  * metric switch, picking from the list and coming back (mouse and keyboard), the rain reveal and overcast
  * tint at building zoom, the Cahaya light switch and the "Coba lagi" failure path, and exits non-zero on
  * any failed check, console error or console warning (known Mapbox warnings are listed, not counted).
@@ -20,7 +21,7 @@ import type { ConsoleMessage, Page } from "playwright";
 import { launchBrowser } from "./chromium.ts";
 import { KALTIM_VIEW, SWAY_DEG } from "../src/web/map/camera.ts";
 import { lightPresetFor } from "../src/web/map/effects.ts";
-import { GLOBE_LABEL_ZOOM } from "../src/web/map/regionLabels.ts";
+import { GLOBE_LABEL_ZOOM, LANDED_LABEL_ZOOM } from "../src/web/map/regionLabels.ts";
 
 const BASE_URL = Bun.env.BASE_URL ?? "http://localhost:3000";
 const SCREENS = "docs/technical/screens";
@@ -188,6 +189,73 @@ async function swaySweep(page: Page, label: string, regionIds: string[]) {
   check(flicker.length === 0, `${label}: no name flickers on and off during the sway (${flicker.join(", ") || "none"})`);
 }
 
+/** Samples the map bearing every frame for `ms`, or until `until` (a bearing test) holds; returns what it saw. */
+const watchBearing = (page: Page, ms: number, until?: { above: number }) =>
+  page.evaluate(
+    ({ ms, above }) =>
+      new Promise<{ min: number; max: number; last: number; reached: boolean }>((resolve) => {
+        const map = (window as MapWindow).__malasMap!;
+        const start = performance.now();
+        let min = Infinity;
+        let max = -Infinity;
+        const tick = () => {
+          const b = map.getBearing();
+          min = Math.min(min, b);
+          max = Math.max(max, b);
+          const reached = above !== null && b > above;
+          if (reached || performance.now() - start > ms) return resolve({ min, max, last: b, reached });
+          requestAnimationFrame(tick);
+        };
+        tick();
+      }),
+    { ms, above: until?.above ?? null },
+  );
+
+/**
+ * The idle sway passes within 7 degrees of north. A wheel zoom there must not snap the camera to north
+ * (Mapbox `bearingSnap`), and the next sway must stay on the same arc around the resting bearing, where
+ * the region names are known to hold.
+ */
+async function swayKeepsItsArc(page: Page) {
+  const rest = KALTIM_VIEW.bearing;
+  const lo = rest - SWAY_DEG - 0.3;
+  const hi = rest + SWAY_DEG + 0.3;
+  // Wait for the sway (20 s idle) to swing up to about -2 degrees, its end nearest north.
+  const up = await watchBearing(page, 50_000, { above: rest + SWAY_DEG - 0.8 });
+  check(up.reached, `the idle sway swings up to ${(rest + SWAY_DEG).toFixed(0)}° (got to ${up.max.toFixed(1)}°)`);
+  if (!up.reached) return;
+  // A wheel zoom right there: the pointer on the map stops the sway, the wheel zooms a little.
+  await page.mouse.move(VIEW_W * 0.62, VIEW_H * 0.45);
+  const before = await page.evaluate(() => (window as MapWindow).__malasMap!.getBearing());
+  await page.mouse.wheel(0, -120);
+  const after = await watchBearing(page, 2000);
+  check(
+    Math.abs(after.min - before) < 0.5 && Math.abs(after.max - before) < 0.5,
+    `a wheel zoom at ${before.toFixed(1)}° does not snap the camera to north (bearing ${after.min.toFixed(1)}° to ${after.max.toFixed(1)}°)`,
+  );
+  // Idle again: the next sway carries on around the resting bearing, inside the arc the smoke sweeps.
+  await page.mouse.move(40, VIEW_H - 10);
+  const resumed = await page.evaluate(
+    (b) =>
+      new Promise<boolean>((resolve) => {
+        const map = (window as MapWindow).__malasMap!;
+        const start = performance.now();
+        const tick = () => {
+          if (Math.abs(map.getBearing() - b) > 0.05) return resolve(true);
+          if (performance.now() - start > 30_000) return resolve(false);
+          requestAnimationFrame(tick);
+        };
+        tick();
+      }),
+    after.last,
+  );
+  const next = await watchBearing(page, 8000);
+  check(
+    resumed && next.min >= lo && next.max <= hi,
+    `the next sway stays on its arc, ${(rest - SWAY_DEG).toFixed(0)}° to ${(rest + SWAY_DEG).toFixed(0)}° (${resumed ? `${next.min.toFixed(1)}° to ${next.max.toFixed(1)}°` : "it never started"})`,
+  );
+}
+
 /** The hover preview as the map and the panels show it: lifted and faded columns, list row, needle, tooltip. */
 const previewState = (page: Page, regionIds: string[]) =>
   page.evaluate((ids) => {
@@ -232,6 +300,11 @@ async function pickFromList(page: Page, how: "mouse" | "keyboard", region: { id:
     await page.keyboard.press("Enter");
   }
   await page.waitForTimeout(1500); // the columns rise again and their colour comes back
+  if (how === "keyboard") {
+    // "Semua wilayah" went away with the detail view; focus must land on the row just left, not on <body>.
+    const focused = await page.evaluate(() => document.activeElement?.closest(".ranking__row")?.querySelector(".ranking__name")?.textContent ?? document.activeElement?.tagName ?? null);
+    check(focused === region.name, `keyboard: after going back, focus returns to the ${region.name} row (focus on ${focused ?? "nothing"})`);
+  }
   const after = await previewState(page, regionIds);
   check(
     after.lifted.length === 0 && after.faded === 0 && after.activeRow === null && after.needle === null,
@@ -311,6 +384,22 @@ try {
   const overview = await mapState(page);
   check(overview.regionLabels === 10, `all 10 region names stand on their columns (got ${overview.regionLabels})`);
   check(overview.placeLabels === false, "no basemap place names over the columns at the province view");
+  // After the intro a small zoom-out keeps the basemap names off the standing columns; well out they return.
+  const placeLabelsAt = (zoom: number) =>
+    page.evaluate(
+      ({ view, zoom }) => {
+        const map = (window as MapWindow).__malasMap!;
+        map.jumpTo({ ...view, zoom });
+        return map.getConfigProperty("basemap", "showPlaceLabels") as boolean;
+      },
+      { view: KALTIM_VIEW, zoom },
+    );
+  const smallOut = await placeLabelsAt(5.1);
+  const farOut = await placeLabelsAt(LANDED_LABEL_ZOOM - 0.2);
+  check(!smallOut && farOut, `after the intro, place names stay off the columns at zoom 5.1 (${smallOut ? "on" : "off"}) and return below zoom ${LANDED_LABEL_ZOOM} (${farOut ? "on" : "off"})`);
+  await page.evaluate((view) => (window as MapWindow).__malasMap!.jumpTo(view), KALTIM_VIEW);
+  await waitForMapIdle(page);
+  await page.waitForTimeout(800);
 
   // Layout: both panels inside the viewport, no overlap, nothing cut off, right edge free for the chat button.
   const layout = await page.evaluate(() => {
@@ -355,6 +444,10 @@ try {
   await page.keyboard.press("Shift");
   await page.evaluate((view) => (window as MapWindow).__malasMap!.jumpTo(view), KALTIM_VIEW);
   await page.waitForTimeout(2200);
+  await swayKeepsItsArc(page);
+  await page.keyboard.press("Shift");
+  await page.evaluate((view) => (window as MapWindow).__malasMap!.jumpTo(view), KALTIM_VIEW);
+  await page.waitForTimeout(1200);
 
   // Hover and click Paser through the map, not the panel. It is the southernmost region, so no other
   // column stands in front of it, and it has no power plant marker on top.

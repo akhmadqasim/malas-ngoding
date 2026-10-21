@@ -128,6 +128,9 @@ export function MapView({ token, regions, plants, onIntroStart, onIntroEnd, onRe
         ...GLOBE_VIEW,
         antialias: true,
         attributionControl: false,
+        // No snap to north: the idle sway passes within 7° of north (it swings from -26° to -2°), and a
+        // gesture ending there would ease the camera to 0° and move the sway off the arc the names hold on.
+        bearingSnap: 0,
         // Indonesian place names on the basemap (Selat Makassar, Laut Sulawesi).
         language: "id",
         config: {
@@ -181,7 +184,7 @@ export function MapView({ token, regions, plants, onIntroStart, onIntroEnd, onRe
     // the view crosses a threshold, and that includes the middle of a flight (the intro crosses zoom 5.5).
     let basemapLabels = basemapLabelConfig(GLOBE_VIEW.zoom);
     const updateBasemapLabels = () => {
-      const next = basemapLabelConfig(map.getZoom());
+      const next = basemapLabelConfig(map.getZoom(), introDone ? "landed" : "intro");
       for (const key of Object.keys(next) as (keyof typeof next)[]) {
         if (next[key] !== basemapLabels[key]) map.setConfigProperty("basemap", key, next[key]);
       }
@@ -269,6 +272,7 @@ export function MapView({ token, regions, plants, onIntroStart, onIntroEnd, onRe
       clearTimeout(riseTimer);
       riseRegions(map, regions);
       introDone = true;
+      updateBasemapLabels();
       handlers.current.onIntroEnd();
       startIdleOrbit(map);
     };

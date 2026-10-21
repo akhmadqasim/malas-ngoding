@@ -25,11 +25,21 @@ export const GLOBE_LABEL_ZOOM = 5.5;
 export const PLACE_LABEL_ZOOM = HIDE_ZOOM;
 /** Road names and shields only help from city zoom on. */
 export const ROAD_LABEL_ZOOM = 11;
+/**
+ * Once the overview has landed, the handover moves out to here: a small zoom-out from the province view
+ * (to about zoom 5) keeps the columns and our names, and the basemap names (Malaysia, Nusantara, Bontang)
+ * only come back once the whole island is small, well past the columns.
+ */
+export const LANDED_LABEL_ZOOM = 4.5;
+
+/** "intro": the globe and the flight in. "landed": the overview has landed, the columns stand. */
+export type LabelPhase = "intro" | "landed";
 
 /** Basemap label switches for a zoom (Standard config `showPlaceLabels` and `showRoadLabels`). */
-export function basemapLabelConfig(zoom: number): { showPlaceLabels: boolean; showRoadLabels: boolean } {
+export function basemapLabelConfig(zoom: number, phase: LabelPhase = "intro"): { showPlaceLabels: boolean; showRoadLabels: boolean } {
+  const handover = phase === "landed" ? LANDED_LABEL_ZOOM : GLOBE_LABEL_ZOOM;
   return {
-    showPlaceLabels: zoom < GLOBE_LABEL_ZOOM || zoom >= PLACE_LABEL_ZOOM,
+    showPlaceLabels: zoom < handover || zoom >= PLACE_LABEL_ZOOM,
     showRoadLabels: zoom >= ROAD_LABEL_ZOOM,
   };
 }
@@ -123,10 +133,12 @@ export function labelLift(): ExpressionSpecification {
 /**
  * Full or nothing by zoom, never in between: the camera of a selected region rests anywhere from zoom 7.5
  * to 10.5, and a fade band there left a ghosted name. Shown only while the columns are the map: below
- * GLOBE_LABEL_ZOOM the basemap names the geography, from PLACE_LABEL_ZOOM the place names are back.
+ * LANDED_LABEL_ZOOM the basemap names the geography, from PLACE_LABEL_ZOOM the place names are back. The
+ * labels are only revealed once the columns stand, after the intro, so the landed handover is the one
+ * that applies.
  */
 export function labelOpacity(): ExpressionSpecification {
-  return ["step", ["zoom"], 0, GLOBE_LABEL_ZOOM, 1, PLACE_LABEL_ZOOM, 0];
+  return ["step", ["zoom"], 0, LANDED_LABEL_ZOOM, 1, PLACE_LABEL_ZOOM, 0];
 }
 
 /** Adds the labels, hidden. `setRegionLabelsShown` reveals them once the columns stand still. */

@@ -4,6 +4,7 @@ import {
   basemapLabelConfig,
   CLOSE_LABEL_ZOOM,
   GLOBE_LABEL_ZOOM,
+  LANDED_LABEL_ZOOM,
   LABEL_PLACEMENT,
   labelAnchor,
   labelFeatures,
@@ -114,7 +115,9 @@ describe("label opacity", () => {
   test("full or nothing, only while the columns are the map: never half-faded", () => {
     // A selected region's camera can rest anywhere from zoom 7.5 to 10.5; a fade band there left a ghost.
     // On the globe the basemap names the geography instead, and from city zoom the place names return.
-    expect(labelOpacity()).toEqual(["step", ["zoom"], 0, GLOBE_LABEL_ZOOM, 1, PLACE_LABEL_ZOOM, 0]);
+    // The labels are only revealed once the columns stand (after the intro), so they hand over at the
+    // landed zoom: a small zoom-out from the province view keeps our names, not the basemap's.
+    expect(labelOpacity()).toEqual(["step", ["zoom"], 0, LANDED_LABEL_ZOOM, 1, PLACE_LABEL_ZOOM, 0]);
   });
 });
 
@@ -141,5 +144,16 @@ describe("basemap labels make room for the region labels", () => {
     expect(basemapLabelConfig(11)).toEqual({ showPlaceLabels: false, showRoadLabels: true });
     expect(basemapLabelConfig(12)).toEqual({ showPlaceLabels: true, showRoadLabels: true });
     expect(basemapLabelConfig(16.6)).toEqual({ showPlaceLabels: true, showRoadLabels: true });
+  });
+  test("once the overview has landed, a small zoom-out keeps basemap names off the columns", () => {
+    // Round 5: z5.1 drew Malaysia, Nusantara and Bontang over the standing columns.
+    expect(LANDED_LABEL_ZOOM).toBe(4.5);
+    expect(basemapLabelConfig(5.1, "landed")).toEqual({ showPlaceLabels: false, showRoadLabels: false });
+    expect(basemapLabelConfig(LANDED_LABEL_ZOOM, "landed")).toEqual({ showPlaceLabels: false, showRoadLabels: false });
+    expect(basemapLabelConfig(4.4, "landed")).toEqual({ showPlaceLabels: true, showRoadLabels: false });
+    expect(basemapLabelConfig(12, "landed")).toEqual({ showPlaceLabels: true, showRoadLabels: true });
+    // During the intro the handover stays at the globe zoom.
+    expect(basemapLabelConfig(5.1)).toEqual({ showPlaceLabels: true, showRoadLabels: false });
+    expect(basemapLabelConfig(5.1, "intro")).toEqual({ showPlaceLabels: true, showRoadLabels: false });
   });
 });
