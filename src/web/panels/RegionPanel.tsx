@@ -1,5 +1,5 @@
 import { AnimatePresence, motion } from "motion/react";
-import { type ReactNode, useEffect, useMemo, useRef } from "react";
+import { type ReactNode, type RefObject, useEffect, useMemo, useRef } from "react";
 import { fmtCompact, fmtNumber } from "../../shared/format.ts";
 import type { RegionSummary } from "../../shared/types.ts";
 import { AnimatedNumber } from "../components/AnimatedNumber.tsx";
@@ -38,6 +38,12 @@ export function RegionPanel({ regions }: Props) {
   const overviewShown = useRef(false);
   const growBars = !overviewShown.current;
   if (!selected) overviewShown.current = true;
+  // "Semua wilayah" unmounts while it has focus; the list takes focus back on the row just left.
+  const returnTo = useRef<string | null>(null);
+  const back = () => {
+    returnTo.current = selected?.id ?? null;
+    selectRegion(null);
+  };
 
   return (
     <section className="sheet" aria-label="Data wilayah">
@@ -51,11 +57,11 @@ export function RegionPanel({ regions }: Props) {
         <AnimatePresence mode="wait" initial={false}>
           {selected ? (
             <motion.div key={selected.id} {...swap}>
-              <RegionDetail region={selected} regions={regions} metric={metric} onBack={() => selectRegion(null)} />
+              <RegionDetail region={selected} regions={regions} metric={metric} onBack={back} />
             </motion.div>
           ) : (
             <motion.div key="overview" {...swap}>
-              <Overview regions={regions} metric={metric} onPick={selectRegion} growBars={growBars} />
+              <Overview regions={regions} metric={metric} onPick={selectRegion} growBars={growBars} returnTo={returnTo} />
             </motion.div>
           )}
         </AnimatePresence>
@@ -83,11 +89,14 @@ function Overview({
   metric,
   onPick,
   growBars,
+  returnTo,
 }: {
   regions: RegionSummary[];
   metric: Metric;
   onPick: (id: string) => void;
   growBars: boolean;
+  /** The region just left with "Semua wilayah": its row takes the focus when the list comes back. */
+  returnTo: RefObject<string | null>;
 }) {
   const m = METRIC_TEXT[metric];
   const hoveredId = useAppStore((s) => s.hoveredRegionId);
@@ -102,6 +111,18 @@ function Overview({
   // A row that disappears while pointed at or focused (a pick swaps the list for the detail view) fires
   // no pointerleave or blur, so the list ends its own preview when it goes away.
   useEffect(() => () => useAppStore.getState().endListHover(), []);
+  // Focus handed back after "Semua wilayah" is not pointing: that row gets the focus ring but no preview.
+  const rows = useRef(new Map<string, HTMLButtonElement>());
+  const quietFocus = useRef(false);
+  useEffect(() => {
+    const id = returnTo.current;
+    returnTo.current = null;
+    const row = id ? rows.current.get(id) : undefined;
+    if (!row) return;
+    quietFocus.current = true;
+    row.focus();
+    quietFocus.current = false;
+  }, [returnTo]);
 
   return (
     <div className="sheet__body">
@@ -120,6 +141,10 @@ function Overview({
           {ranked.map((r, i) => (
             <li key={r.id}>
               <button
+                ref={(el) => {
+                  if (el) rows.current.set(r.id, el);
+                  else rows.current.delete(r.id);
+                }}
                 type="button"
                 className="ranking__row"
                 data-active={hoveredId === r.id || undefined}
@@ -127,7 +152,9 @@ function Overview({
                 onPointerEnter={() => setHovered(r.id, "list")}
                 // Leaving ends the preview only if no other row or the map took it over meanwhile.
                 onPointerLeave={() => endListHover(r.id)}
-                onFocus={() => setHovered(r.id, "list")}
+                onFocus={() => {
+                  if (!quietFocus.current) setHovered(r.id, "list");
+                }}
                 onBlur={() => endListHover(r.id)}
               >
                 <span className="ranking__name">{r.name}</span>
