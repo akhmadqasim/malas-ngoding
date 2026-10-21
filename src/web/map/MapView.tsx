@@ -9,6 +9,7 @@ import {
   basemapTheme,
   type LightPreset,
   lightPresetFor,
+  overcastOpacity,
   presetTone,
   resolvePreset,
   setRainEffect,
@@ -98,6 +99,7 @@ type TestWindow = Window & { __malasMap?: mapboxgl.Map };
 
 export function MapView({ token, regions, plants, onIntroStart, onIntroEnd, onRegionHover, onRegionPointer, onFailure }: Props) {
   const container = useRef<HTMLDivElement>(null);
+  const overcast = useRef<HTMLDivElement>(null);
   // Keep the latest callbacks without re-creating the map.
   const handlers = useRef({ onIntroStart, onIntroEnd, onRegionHover, onRegionPointer, onFailure });
   handlers.current = { onIntroStart, onIntroEnd, onRegionHover, onRegionPointer, onFailure };
@@ -169,6 +171,13 @@ export function MapView({ token, regions, plants, onIntroStart, onIntroEnd, onRe
       console.warn("[peta]", e.error?.message ?? e);
     });
 
+    /** The overcast tint follows the rain: none from afar, fading in with it toward building zoom. */
+    const updateOvercast = () => {
+      const el = overcast.current;
+      if (el) el.style.opacity = String(overcastOpacity(useAppStore.getState().rain === "on", presetTone(preset), map.getZoom()));
+    };
+    map.on("zoom", updateOvercast);
+
     // Road labels follow the zoom; the config only changes when the view crosses the threshold.
     let roadLabels = GLOBE_VIEW.zoom >= ROAD_LABEL_ZOOM;
     const updateRoadLabels = () => {
@@ -179,12 +188,15 @@ export function MapView({ token, regions, plants, onIntroStart, onIntroEnd, onRe
     };
     map.on("zoomend", updateRoadLabels);
 
-    /** Switches the light and everything that follows the ground tone: ramps and outlines. */
+    /** Switches the light and everything that follows the ground tone: ramps, outlines, rain, tint. */
     const applyLight = (next: LightPreset) => {
       if (next === preset) return;
       preset = next;
       applyLightPreset(map, next);
-      setRegionTone(map, presetTone(next));
+      const tone = presetTone(next);
+      setRegionTone(map, tone);
+      setRainEffect(map, useAppStore.getState().rain === "on", tone);
+      updateOvercast();
       useAppStore.getState().setLightPreset(next);
     };
     // In automatic mode the light follows the clock; the check is cheap, so once a minute is plenty.
@@ -215,7 +227,8 @@ export function MapView({ token, regions, plants, onIntroStart, onIntroEnd, onRe
       );
       addPlants(map, plants, now.layers.plants);
       setRegionsVisible(map, now.layers.regions);
-      setRainEffect(map, now.rain === "on");
+      setRainEffect(map, now.rain === "on", presetTone(preset));
+      updateOvercast();
       if (now.selectedRegionId) setSelectedRegion(map, now.selectedRegionId);
 
       // Clicking empty ground at the province view clears the region selection. Interactions outlive a
@@ -263,7 +276,10 @@ export function MapView({ token, regions, plants, onIntroStart, onIntroEnd, onRe
       if (s.metric !== prev.metric) setRegionMetric(map, s.metric);
       if (s.layers.regions !== prev.layers.regions) setRegionsVisible(map, s.layers.regions);
       if (s.layers.plants !== prev.layers.plants) setPlantsVisible(map, s.layers.plants);
-      if (s.rain !== prev.rain) setRainEffect(map, s.rain === "on");
+      if (s.rain !== prev.rain) {
+        setRainEffect(map, s.rain === "on", presetTone(preset));
+        updateOvercast();
+      }
       if (s.lightMode !== prev.lightMode) applyLight(resolvePreset(s.lightMode, new Date()));
       if (s.hoveredRegionId !== prev.hoveredRegionId) setRegionHover(map, s.hoveredRegionId);
       if (s.selectedRegionId !== prev.selectedRegionId) {
@@ -306,6 +322,11 @@ export function MapView({ token, regions, plants, onIntroStart, onIntroEnd, onRe
     };
   }, [token, regions, plants]);
 
-  // Inline style: mapbox-gl.css sets `.mapboxgl-map { position: relative }`, which would beat a class.
-  return <div ref={container} style={{ position: "absolute", inset: 0 }} aria-label="Peta 3D Kalimantan Timur" role="region" />;
+  return (
+    <>
+      {/* Inline style: mapbox-gl.css sets `.mapboxgl-map { position: relative }`, which would beat a class. */}
+      <div ref={container} style={{ position: "absolute", inset: 0 }} aria-label="Peta 3D Kalimantan Timur" role="region" />
+      <div ref={overcast} className="overcast" aria-hidden />
+    </>
+  );
 }

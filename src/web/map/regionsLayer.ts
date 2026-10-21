@@ -1,7 +1,7 @@
 import type { ExpressionSpecification, GeoJSONSourceSpecification, Map as MapboxMap, MapMouseEvent } from "mapbox-gl";
 import type { RegionCollection } from "../api.ts";
 import type { Metric } from "../store.ts";
-import { rampTokens, token } from "../theme.ts";
+import { mixColors, rampTokens, token } from "../theme.ts";
 import type { Tone } from "./effects.ts";
 import type { RegionSummary } from "../../shared/types.ts";
 
@@ -17,6 +17,10 @@ const MIN_HEIGHT_M = 4_000;
 const HIDE_ZOOM = 12;
 /** Map motion in ms (docs/research/design/00-direction.md section 6). */
 const MS = { rise: 1600, riseStagger: 110, hover: 300, select: 900, sink: 380, swapRise: 900, swapStagger: 40 } as const;
+/** Hover previews a selection: the column under the pointer rises this much ... */
+const HOVER_LIFT = 1.12;
+/** ... and the other columns move this far toward the dimmed colour of a real selection. */
+const RECEDE = 0.6;
 /**
  * Self-lit share of the column colour. In the dark presets the scene light is too dim to show the ramp
  * (measured: the columns rendered about a fifth darker), so the columns light themselves fully; by day
@@ -42,19 +46,24 @@ export function intensities(regions: RegionSummary[], metric: Metric): Map<strin
 
 const heightFor = (t: number) => MIN_HEIGHT_M + (MAX_HEIGHT_M - MIN_HEIGHT_M) * t;
 
-const selected: ExpressionSpecification = ["boolean", ["feature-state", "selected"], false];
-const hovered: ExpressionSpecification = ["boolean", ["feature-state", "hover"], false];
-const emissive = (tone: Tone): ExpressionSpecification => ["case", hovered, 1, EMISSIVE[tone]];
+const dimColor = (tone: Tone) => token(tone === "light" ? "--color-dim-light" : "--color-dim-dark");
 
-/** Column colour by intensity `t`, on the ramp for the ground tone; dimmed while another region is selected. */
+/**
+ * Column colour by intensity `t`, on the ramp for the ground tone. A selection dims the other columns; a
+ * hover only previews that (`recede`), moving them part of the way toward the dimmed colour.
+ */
 function colorExpression(metric: Metric, tone: Tone): ExpressionSpecification {
   const stops = rampTokens(metric, tone);
-  const ramp = stops.flatMap((color, i) => [i / (stops.length - 1), color]);
+  const dim = dimColor(tone);
+  const ramp = (colors: string[]) =>
+    ["interpolate", ["linear"], ["coalesce", ["feature-state", "t"], 0], ...colors.flatMap((c, i) => [i / (colors.length - 1), c])] as ExpressionSpecification;
   return [
     "case",
     ["boolean", ["feature-state", "dim"], false],
-    token(tone === "light" ? "--color-dim-light" : "--color-dim-dark"),
-    ["interpolate", ["linear"], ["coalesce", ["feature-state", "t"], 0], ...ramp] as ExpressionSpecification,
+    dim,
+    ["boolean", ["feature-state", "recede"], false],
+    ramp(stops.map((c) => mixColors(c, dim, RECEDE))),
+    ramp(stops),
   ];
 }
 
@@ -115,7 +124,7 @@ function targetHeight(id: string): number {
   if (!state?.risen) return 0;
   const t = intensities(state.regions, state.metric).get(id) ?? 0;
   const base = heightFor(t);
-  if (!state.selected) return state.hovered === id ? base * 1.06 : base;
+  if (!state.selected) return state.hovered === id ? base * HOVER_LIFT : base;
   return id === state.selected ? base * 1.1 : base * 0.4;
 }
 
@@ -126,7 +135,17 @@ function writeIntensity() {
   }
 }
 
-/** Moves the hover lift to `id` (or clears it). Shared by map hover and list hover. */
+/** Writes `recede` for every region: with a hover and no selection, all but the hovered one recede. */
+function writeRecede() {
+  const s = state;
+  if (!s) return;
+  for (const r of s.regions) {
+    const recede = s.selected === null && s.hovered !== null && r.id !== s.hovered;
+    s.map.setFeatureState({ source: REGION_SOURCE, id: r.id }, { recede });
+  }
+}
+
+/** Moves the hover preview to `id` (or clears it). Shared by map hover and list hover. */
 function applyHover(id: string | null) {
   const s = state;
   if (!s || s.hovered === id) return;
@@ -140,6 +159,7 @@ function applyHover(id: string | null) {
     s.map.setFeatureState({ source: REGION_SOURCE, id }, { hover: true });
     animateTo(id, targetHeight(id), MS.hover);
   }
+  writeRecede();
 }
 
 // --- Public API ---------------------------------------------------------------------------------
@@ -185,8 +205,8 @@ export function addRegions(
       "fill-extrusion-base": 0,
       // Opaque, so the ground does not tint the data colour; fades out on the way to city zoom.
       "fill-extrusion-opacity": ["interpolate", ["linear"], ["zoom"], 10, 1, HIDE_ZOOM, 0],
-      // The hovered column lights itself fully; the rest show the ramp's true colour, no neon.
-      "fill-extrusion-emissive-strength": emissive(tone),
+      // One value for every column: hover is shown by the lift and the receding neighbours, not by glow.
+      "fill-extrusion-emissive-strength": EMISSIVE[tone],
       "fill-extrusion-vertical-gradient": true,
       "fill-extrusion-ambient-occlusion-intensity": 0.25,
     },
@@ -198,8 +218,10 @@ export function addRegions(
     slot: "middle",
     paint: {
       "line-color": outlineColor(tone),
-      "line-opacity": ["interpolate", ["linear"], ["zoom"], 5, ["case", selected, 0.95, 0.28], 9, ["case", selected, 0.95, 0.45], 13, ["case", selected, 0.5, 0.12]],
-      "line-width": ["interpolate", ["linear"], ["zoom"], 5, ["case", selected, 1.6, 0.6], 10, ["case", selected, 2.6, 1.4]],
+      // Borders on the ground. They show between and beside the columns, so they do not mark a selection
+      // (the dimming does that); a selected outline would sit under its own column.
+      "line-opacity": ["interpolate", ["linear"], ["zoom"], 5, 0.28, 9, 0.45, 13, 0.12],
+      "line-width": ["interpolate", ["linear"], ["zoom"], 5, 0.6, 10, 1.4],
       "line-emissive-strength": 1,
     },
   });
@@ -294,14 +316,15 @@ export function setRegionMetric(map: MapboxMap, metric: Metric): void {
   }, MS.sink + 20);
 }
 
-/** Highlights one region (others dim and step back, its outline brightens), or clears it with `null`. */
+/** Highlights one region (the others dim and step back), or clears the selection with `null`. */
 export function setSelectedRegion(map: MapboxMap, id: string | null): void {
   if (!state || state.map !== map || state.selected === id) return;
   state.selected = id;
   for (const r of state.regions) {
-    map.setFeatureState({ source: REGION_SOURCE, id: r.id }, { dim: id !== null && r.id !== id, selected: r.id === id });
+    map.setFeatureState({ source: REGION_SOURCE, id: r.id }, { dim: id !== null && r.id !== id });
     animateTo(r.id, targetHeight(r.id), MS.select);
   }
+  writeRecede();
 }
 
 /** Lifts the column of a region hovered in the list (or clears the lift with `null`). */
@@ -316,7 +339,7 @@ export function setRegionTone(map: MapboxMap, tone: Tone): void {
   state.tone = tone;
   if (map.getLayer(REGION_LAYER)) {
     map.setPaintProperty(REGION_LAYER, "fill-extrusion-color", colorExpression(state.metric, tone));
-    map.setPaintProperty(REGION_LAYER, "fill-extrusion-emissive-strength", emissive(tone));
+    map.setPaintProperty(REGION_LAYER, "fill-extrusion-emissive-strength", EMISSIVE[tone]);
   }
   if (map.getLayer(OUTLINE_LAYER)) map.setPaintProperty(OUTLINE_LAYER, "line-color", outlineColor(tone));
 }

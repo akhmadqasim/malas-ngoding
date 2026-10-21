@@ -89,7 +89,7 @@ export function App() {
 
   return (
     <MotionConfig reducedMotion="user">
-      <main className="app" data-metric={metric} data-tone={tone}>
+      <main className="app" data-metric={metric} data-tone={tone} data-failed={failure ? "" : undefined}>
         {data && (
           <MapView
             token={data.token}

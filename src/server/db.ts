@@ -67,13 +67,25 @@ export async function listRegions(): Promise<RegionSummary[]> {
   return rows.map((r: Record<string, unknown>) => toSummary(r, factor));
 }
 
+/**
+ * Polygon parts smaller than this are left out of the display geometry: tiny islands and delta slivers
+ * extrude into thin "fence" columns at the province view. `regionAt` still uses the full geometry, so a
+ * click on Derawan still resolves to Berau.
+ */
+export const DISPLAY_MIN_PART_M2 = 30e6;
+
 export async function regionGeoJSON(): Promise<FeatureCollection> {
   const factor = await latestGridFactor();
   const rows = await sql`
     SELECT id, name, kind, kwh_year, population, customers, electrification_pct,
            villages_no_pln, estimated,
-           ST_AsGeoJSON(geom, 6)::text AS geometry
-    FROM regions ORDER BY name`;
+           ST_AsGeoJSON(
+             COALESCE(
+               (SELECT ST_Multi(ST_Collect(d.geom)) FROM ST_Dump(r.geom) d
+                WHERE ST_Area(d.geom::geography) >= ${DISPLAY_MIN_PART_M2}),
+               r.geom),
+             6)::text AS geometry
+    FROM regions r ORDER BY name`;
   return {
     type: "FeatureCollection",
     features: rows.map((r: Record<string, unknown>) => ({

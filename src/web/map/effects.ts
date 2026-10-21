@@ -63,36 +63,53 @@ export function applyLightPreset(map: MapboxMap, preset: LightPreset): void {
 
 /** Rain starts to show at this zoom, where Standard draws solid buildings, and is full at RAIN_FULL_ZOOM. */
 export const RAIN_MIN_ZOOM = 15;
-const RAIN_FULL_ZOOM = 16.5;
+export const RAIN_FULL_ZOOM = 16.5;
 
 type ZoomRamp = ["interpolate", ["linear"], ["zoom"], number, number, number, number];
 const zoomReveal = (value: number): ZoomRamp => ["interpolate", ["linear"], ["zoom"], RAIN_MIN_ZOOM, 0, RAIN_FULL_ZOOM, value];
 
 /**
  * The rain look (docs/research/design/00-direction.md section 9): nothing below building zoom, then thin
- * streaks. The Mapbox example uses [2.6, 18.2] drops from zoom 11, which read as blobs over a city.
+ * streaks. On a light ground the drops are darker, more opaque and bend the light more, or they vanish
+ * against pale buildings. The Mapbox example uses [2.6, 18.2] drops from zoom 11, which read as blobs.
  */
-export function rainSpec(colors: { color: string; vignetteColor: string }) {
+export function rainSpec(tone: Tone, colors: { color: string; vignetteColor: string }) {
+  const light = tone === "light";
   return {
     density: zoomReveal(0.9),
     intensity: 0.85,
     color: colors.color,
-    opacity: 0.6,
+    opacity: light ? 0.7 : 0.6,
     vignette: zoomReveal(0.35),
     "vignette-color": colors.vignetteColor,
     direction: [0, 80] as [number, number],
-    "droplet-size": [1.1, 11] as [number, number],
-    "distortion-strength": 0.3,
+    "droplet-size": (light ? [1.2, 12] : [1.1, 11]) as [number, number],
+    "distortion-strength": light ? 0.5 : 0.3,
     // Keeps the middle of the screen, where the user clicks buildings, a little clearer.
     "center-thinning": 0.15,
   } satisfies RainSpecification;
 }
 
-/** Turns the (experimental) Mapbox rain effect on or off. */
-export function setRainEffect(map: MapboxMap, on: boolean): void {
+/** Turns the (experimental) Mapbox rain effect on or off, styled for the ground tone. */
+export function setRainEffect(map: MapboxMap, on: boolean, tone: Tone): void {
   if (!on) {
     map.setRain(undefined);
     return;
   }
-  map.setRain(rainSpec({ color: token("--color-rain"), vignetteColor: token("--color-rain-vignette") }));
+  map.setRain(
+    rainSpec(tone, {
+      color: token(tone === "light" ? "--color-rain-day" : "--color-rain"),
+      vignetteColor: token("--color-rain-vignette"),
+    }),
+  );
+}
+
+/** Strength of the overcast tint at full rain, per ground tone. */
+export const OVERCAST_OPACITY: Record<Tone, number> = { light: 0.24, dark: 0.12 };
+
+/** Opacity of the overcast tint: none without rain, then it fades in with the rain from zoom 15 to 16.5. */
+export function overcastOpacity(rainOn: boolean, tone: Tone, zoom: number): number {
+  if (!rainOn) return 0;
+  const t = Math.min(1, Math.max(0, (zoom - RAIN_MIN_ZOOM) / (RAIN_FULL_ZOOM - RAIN_MIN_ZOOM)));
+  return OVERCAST_OPACITY[tone] * t;
 }

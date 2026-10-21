@@ -3,6 +3,7 @@ import {
   basemapTheme,
   lightModeFromQuery,
   lightPresetFor,
+  overcastOpacity,
   presetTone,
   RAIN_MIN_ZOOM,
   rainSpec,
@@ -69,7 +70,7 @@ function atZoom(value: unknown, zoom: number): number {
 }
 
 describe("rain only shows at building zoom", () => {
-  const spec = rainSpec({ color: "#a8adbc", vignetteColor: "#283040" });
+  const spec = rainSpec("dark", { color: "#a8adbc", vignetteColor: "#283040" });
 
   test("no rain at the province, region or city view", () => {
     for (const zoom of [2, 6.5, 9, 12, 14, 14.99]) {
@@ -98,3 +99,28 @@ describe("rain only shows at building zoom", () => {
   });
 });
 
+describe("rain on a light ground (day, dawn)", () => {
+  const light = rainSpec("light", { color: "#4a5262", vignetteColor: "#283040" });
+  test("still nothing below building zoom", () => {
+    expect(atZoom(light.density, 14.9)).toBe(0);
+    expect(atZoom(light.vignette, 14.9)).toBe(0);
+  });
+  test("darker, more opaque drops that read on pale buildings, still thin", () => {
+    expect(light.color).toBe("#4a5262");
+    expect(light.opacity).toBeGreaterThanOrEqual(0.7);
+    expect(light["droplet-size"]).toEqual([1.2, 12]);
+    expect(light["distortion-strength"]).toBe(0.5);
+  });
+});
+
+describe("overcast tint while it rains", () => {
+  test("none without rain or above building zoom", () => {
+    expect(overcastOpacity(false, "light", 17)).toBe(0);
+    expect(overcastOpacity(true, "light", 14)).toBe(0);
+  });
+  test("fades in with the rain between zoom 15 and 16.5, stronger on a light ground", () => {
+    expect(overcastOpacity(true, "light", 16.5)).toBeCloseTo(0.24);
+    expect(overcastOpacity(true, "light", 18)).toBeCloseTo(0.24);
+    expect(overcastOpacity(true, "dark", 15.75)).toBeCloseTo(0.06);
+  });
+});

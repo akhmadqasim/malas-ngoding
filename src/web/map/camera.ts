@@ -102,12 +102,18 @@ export function flyToRegion(map: MapboxMap, centroid: [number, number], opts: Fl
 
 const IDLE_MS = 20_000;
 const DEG_PER_SECOND = 2.2;
+/** The orbit is an overview effect. From city zoom up it would keep the GPU streaming new tiles. */
+export const ORBIT_MAX_ZOOM = 11;
+
+/** Whether the idle orbit may turn the camera at this zoom. */
+export const canOrbit = (zoom: number) => zoom < ORBIT_MAX_ZOOM;
 
 let orbit: { stop: () => void } | null = null;
 
 /**
- * After 20 s without input, slowly turns the camera around the view centre. Any input stops the turn
- * and restarts the 20 s wait. Call `stopIdleOrbit()` to switch the behaviour off.
+ * After 20 s without input, slowly turns the camera around the view centre, at the overview only
+ * (below zoom 11). Any input stops the turn and restarts the 20 s wait. Call `stopIdleOrbit()` to
+ * switch the behaviour off.
  */
 export function startIdleOrbit(map: MapboxMap): void {
   stopIdleOrbit();
@@ -121,6 +127,12 @@ export function startIdleOrbit(map: MapboxMap): void {
   let last = 0;
 
   const spin = (now: number) => {
+    // A camera move took the view to city zoom: stop until the next input re-arms the wait.
+    if (!canOrbit(map.getZoom())) {
+      frame = 0;
+      last = 0;
+      return;
+    }
     // Never fight a camera animation (fly to region, intro): wait for it to finish.
     if (!map.isEasing()) {
       const dt = last ? Math.min(now - last, 64) : 16;
@@ -134,7 +146,9 @@ export function startIdleOrbit(map: MapboxMap): void {
     frame = 0;
     last = 0;
     clearTimeout(timer);
-    timer = setTimeout(() => (frame = requestAnimationFrame(spin)), IDLE_MS);
+    timer = setTimeout(() => {
+      if (canOrbit(map.getZoom())) frame = requestAnimationFrame(spin);
+    }, IDLE_MS);
   };
 
   for (const i of pageInputs) window.addEventListener(i, arm, { passive: true });

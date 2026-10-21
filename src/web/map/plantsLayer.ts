@@ -36,25 +36,34 @@ export function plantPopupHtml(p: PlantProperties): string {
 let popup: mapboxgl.Popup | null = null;
 
 // --- Pulse ---------------------------------------------------------------------------------------
-// One shared ticker asks the map for a frame 24 times a second while the plants are shown. Each marker
-// redraws at most once per tick, and nothing redraws or repaints while the layer is hidden.
+// One shared ticker asks the map for a frame 24 times a second, but only while Mapbox is actually
+// drawing a marker: it calls render() only for images in view, so with every plant off screen (or the
+// layer hidden) the ticker stops asking and the map can sit idle. Any later frame (a pan, a hover) that
+// draws a marker again restarts the pulse. Each marker redraws at most once per tick.
 
 const IMAGE_PX = 128;
 const FRAME_MS = 1000 / 24;
 const PERIOD_MS = 3200;
+/** How long after the last drawn marker the ticker keeps asking for frames. */
+export const PULSE_IDLE_MS = 500;
 
 const pulse = {
   map: null as MapboxMap | null,
   visible: true,
   still: false,
   timer: undefined as ReturnType<typeof setInterval> | undefined,
+  /** When Mapbox last asked a marker image for a frame. */
+  lastRender: Number.NEGATIVE_INFINITY,
 };
+
+/** Whether the pulse should ask for another frame, given when a marker was last drawn. */
+export const pulseWantsFrame = (now: number, lastRender: number) => now - lastRender < PULSE_IDLE_MS;
 
 function startPulse() {
   if (pulse.timer || pulse.still || !pulse.visible || !pulse.map) return;
   const map = pulse.map;
   pulse.timer = setInterval(() => {
-    if (!document.hidden) map.triggerRepaint();
+    if (!document.hidden && pulseWantsFrame(performance.now(), pulse.lastRender)) map.triggerRepaint();
   }, FRAME_MS);
 }
 
@@ -128,8 +137,9 @@ function markerImage(colors: MarkerColors, phase: number): mapboxgl.StyleImageIn
     height: size,
     data: ctx ? ctx.getImageData(0, 0, size, size).data : new Uint8Array(size * size * 4),
     render() {
-      if (!ctx || pulse.still || !pulse.visible) return false;
       const now = performance.now();
+      pulse.lastRender = now;
+      if (!ctx || pulse.still || !pulse.visible) return false;
       if (now - lastDraw < FRAME_MS - 1) return false;
       lastDraw = now;
       draw(now);
@@ -211,6 +221,7 @@ export function addPlants(map: MapboxMap, fc: PlantCollection, visible = true): 
 /** Shows or hides the plants. Hidden plants neither redraw nor ask the map for frames. */
 export function setPlantsVisible(map: MapboxMap, visible: boolean): void {
   pulse.visible = visible;
+  // The layout change makes Mapbox draw a frame, so shown markers report in and the pulse restarts.
   if (map.getLayer(PLANT_LAYER)) map.setLayoutProperty(PLANT_LAYER, "visibility", visible ? "visible" : "none");
   if (visible) {
     startPulse();

@@ -71,9 +71,12 @@
   --color-fuel-biomassa: #79a94f;
   --color-fuel-lainnya: #7b8794;
 
-  /* Rain (Mapbox setRain). */
+  /* Rain (Mapbox setRain): pale drops on a dark ground, dark drops on a light one, and the slate
+     overcast tint that dims the scene while it rains. */
   --color-rain: #b4b9c6;
+  --color-rain-day: #4a5262;
   --color-rain-vignette: #283040;
+  --color-overcast: #3c4757;
 
   --font-sans: "IBM Plex Sans Variable", "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
   --font-serif: "IBM Plex Serif", ui-serif, Georgia, serif;
@@ -186,6 +189,21 @@ button {
   position: absolute;
   inset: 0;
   pointer-events: none;
+}
+
+/* Slate tint between the map and the panels while it rains at building zoom; MapView sets the opacity. */
+.overcast {
+  position: absolute;
+  inset: 0;
+  background: var(--color-overcast);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--duration-panel) var(--ease-standard);
+}
+
+/* A failed map: only the card speaks, not the dead map controls. */
+.app[data-failed] .mapboxgl-control-container {
+  display: none;
 }
 
 /* ---------- Left sheet ---------- */

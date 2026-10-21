@@ -87,6 +87,33 @@ describe.skipIf(!reachable)("db", () => {
     }
   });
 
+  test("display geometry drops island slivers under 30 km2, the lookup keeps them", async () => {
+    const fc = await regionGeoJSON();
+    const berau = fc.features.find((f) => f.properties?.id === "berau");
+    expect(berau).toBeDefined();
+    const shape = JSON.stringify(berau!.geometry);
+    // Points inside two small Berau islands (from ST_PointOnSurface): Derawan (0.3 km2) and Maratua (22.6 km2).
+    const islands: [number, number][] = [
+      [118.24354062903225, 2.2836],
+      [118.57871952952685, 2.230055],
+    ];
+    for (const [lng, lat] of islands) {
+      const [row] = await sql`
+        SELECT bool_or(ST_Intersects(d.geom, ST_SetSRID(ST_MakePoint(${lng}, ${lat}), 4326))) AS shown
+        FROM ST_Dump(ST_SetSRID(ST_GeomFromGeoJSON(${shape}), 4326)) d`;
+      expect(row?.shown).toBe(false);
+      expect(await regionAt(lng, lat)).toEqual({ id: "berau", name: "Berau" });
+    }
+    // Every region keeps its main body, and no displayed part is smaller than the threshold.
+    for (const f of fc.features) {
+      const [row] = await sql`
+        SELECT min(ST_Area(d.geom::geography)) AS min_m2, count(*)::int AS parts
+        FROM ST_Dump(ST_SetSRID(ST_GeomFromGeoJSON(${JSON.stringify(f.geometry)}), 4326)) d`;
+      expect(row?.parts).toBeGreaterThanOrEqual(1);
+      expect(Number(row?.min_m2)).toBeGreaterThanOrEqual(30e6);
+    }
+  });
+
   test("getGridMix shares sum to 1 and carry the official factor", async () => {
     const mix = await getGridMix();
     const total = Object.values(mix.shares).reduce((a, b) => a + b, 0);

@@ -54,13 +54,18 @@ async function screen(page: Page, file: string) {
 
 type MapWindow = Window & { __malasMap?: import("mapbox-gl").Map };
 
-/** The basemap light preset and theme, read from the live map. */
+/** Hover and recede states of two regions, the basemap light, the rain colour and the overcast tint. */
 const mapState = (page: Page) =>
   page.evaluate(() => {
     const map = (window as MapWindow).__malasMap!;
+    const fs = (id: string) => map.getFeatureState({ source: "regions", id }) ?? {};
     return {
+      paser: fs("paser"),
+      samarinda: fs("samarinda"),
       preset: map.getConfigProperty("basemap", "lightPreset") as string,
       theme: map.getConfigProperty("basemap", "theme") as string,
+      rainColor: map.getRain()?.color as string | undefined,
+      overcast: Number(getComputedStyle(document.querySelector(".overcast")!).opacity),
     };
   });
 
@@ -179,6 +184,8 @@ try {
   await page.waitForTimeout(600);
   check(await page.locator(".map-tooltip").isVisible(), "hovering a region shows its tooltip");
   check((await page.locator(".meter__name").textContent()) === "Paser", "the legend needle reads the hovered region");
+  const hover = await mapState(page);
+  check(hover.paser.hover === true && hover.samarinda.recede === true && hover.paser.recede === false, "hover lifts the region and the others recede");
   await shot(page, "3-hover");
   await page.mouse.click(point.x, point.y - 20);
   await page.getByRole("button", { name: "Semua wilayah" }).waitFor({ timeout: 5000 });
@@ -193,6 +200,8 @@ try {
   await shot(page, "5-kwh");
   await page.getByRole("radio", { name: "Emisi CO2" }).click();
   await page.getByRole("button", { name: "Semua wilayah" }).click();
+  await page.waitForTimeout(400);
+  check((await mapState(page)).samarinda.recede !== true, "nothing recedes once the pointer has left the regions");
   await page.waitForTimeout(2600);
   await waitForMapIdle(page);
   await shot(page, "6-back");
@@ -223,10 +232,13 @@ try {
   await waitForMapIdle(page, 12_000);
   await page.waitForTimeout(1500);
   check(!(await page.locator(".layer__hint").isVisible()), "the rain hint hides at building zoom");
+  await page.waitForTimeout(500); // the tint fades in
+  const autoRain = await mapState(page);
+  check(autoRain.overcast > 0.05, `the overcast tint is on while it rains up close (opacity ${autoRain.overcast.toFixed(2)})`);
   await shot(page, "7-rain");
   await screen(page, "rain.png");
 
-  // The Cahaya switch: Siang and Malam pin the light; Otomatis goes back to WITA time.
+  // The Cahaya switch: Siang and Malam pin the light, rain and tint follow; Otomatis goes back to WITA time.
   const lightTo = async (label: string) => {
     await page.getByRole("radio", { name: label }).click();
     await waitForMapIdle(page, 12_000);
@@ -238,6 +250,7 @@ try {
   await shot(page, "7-rain-malam");
   const day = await lightTo("Siang");
   check(day.preset === "day" && day.theme === "monochrome", `Siang: day light on the neutral basemap (${day.preset}, ${day.theme})`);
+  check(day.rainColor !== night.rainColor && day.overcast > night.overcast, "Siang: darker drops and a stronger tint than at night");
   await shot(page, "7-rain-siang");
   const auto = await lightTo("Otomatis");
   check(auto.preset === lightPresetFor(new Date()), `Otomatis follows WITA time (${auto.preset})`);
@@ -254,6 +267,8 @@ try {
   const alert = failPage.getByRole("alert");
   await alert.waitFor({ timeout: 20_000 });
   check((await alert.textContent())?.includes("Coba lagi") === true, "a rejected Mapbox token shows the 'Coba lagi' card");
+  check(!(await failPage.locator(".mapboxgl-control-container").isVisible()), "the dead map controls hide behind the card");
+  await failPage.waitForTimeout(700); // the intro title finishes fading out
   await shot(failPage, "8-failure");
   // "Coba lagi" with a working token brings the map back.
   await failPage.unroute("**/api/config");
