@@ -1,7 +1,9 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import {
   canOrbit,
+  chatInsetRight,
   KALTIM_VIEW,
+  provinceView,
   ORBIT_MAX_ZOOM,
   SWAY_DEG,
   SWAY_PERIOD_MS,
@@ -101,5 +103,42 @@ describe("idle sway: a slow pendulum around the resting bearing, not a full turn
     const s = swayFrom(null, rest + 6, rest);
     expect(s.returning).toBeUndefined();
     expect(swayStep(s, 16).bearing).toBeCloseTo(rest + 6, 1);
+  });
+});
+
+describe("the province view leaves room for the open chat", () => {
+  const g = globalThis as unknown as Record<string, unknown>;
+  const saved = { document: g.document, window: g.window };
+  /** A 1366 px window; `chat` is the chat panel's box, or null when it is closed. */
+  const screen = (chat: { left: number; width: number } | null) => {
+    g.window = { innerWidth: 1366, innerHeight: 768, matchMedia: () => ({ matches: false }) };
+    g.document = { querySelector: (sel: string) => (sel === ".chat" && chat ? { getBoundingClientRect: () => chat } : null) };
+  };
+  afterEach(() => {
+    g.document = saved.document;
+    g.window = saved.window;
+  });
+
+  test("closed: the designed overview", () => {
+    screen(null);
+    expect(chatInsetRight()).toBe(0);
+    expect(provinceView()).toBe(KALTIM_VIEW);
+  });
+
+  test("open: padded past the chat, and zoomed out as much as the free strip narrows", () => {
+    screen({ left: 910, width: 360 });
+    expect(chatInsetRight()).toBe(1366 - 910 + 24);
+    const view = provinceView();
+    expect(view.padding.right).toBe(480);
+    expect(view.padding.left).toBe(KALTIM_VIEW.padding.left);
+    // The free strip goes from 946 px (1366 - 380 - 40) to 506 px (1366 - 380 - 480).
+    expect(view.zoom).toBeCloseTo(KALTIM_VIEW.zoom + Math.log2(506 / 946), 9);
+    expect(view.bearing).toBe(KALTIM_VIEW.bearing);
+  });
+
+  test("a chat that covers most of the width (phones) is left out: no padding could clear it", () => {
+    screen({ left: 0, width: 1366 });
+    expect(chatInsetRight()).toBe(0);
+    expect(provinceView()).toBe(KALTIM_VIEW);
   });
 });

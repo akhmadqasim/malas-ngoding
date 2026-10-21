@@ -5,7 +5,7 @@ import { type MarkedPlace, showPlaces } from "../chat/placesLayer.ts";
 import type { ChatAction } from "../chat/sse.ts";
 import { type AppState, type BuildingHint, type LayerKey, type Metric, type PanelTab, type RainMode, useAppStore } from "../store.ts";
 import { BUILDING_ZOOM, buildingViewPadding, type Padding, revealBuilding } from "./buildings.ts";
-import { FLY_MS, flyToProvince, flyToRegion, onNextRegionFlight, regionFlightCount } from "./camera.ts";
+import { chatInsetRight, FLY_MS, flyToProvince, flyToRegion, onNextRegionFlight, regionFlightCount, regionFlyer } from "./camera.ts";
 
 // Turns the map actions of the AI chat (server `action` events) into store and camera calls.
 
@@ -52,8 +52,7 @@ function panelsPadding(): Padding | undefined {
   if (typeof document === "undefined") return undefined;
   const pad = buildingViewPadding();
   const w = window.innerWidth;
-  const chat = document.querySelector(".chat")?.getBoundingClientRect();
-  if (chat && chat.width > 0 && chat.width < w / 2) pad.right = Math.max(pad.right, w - chat.left + PANEL_GAP);
+  pad.right = Math.max(pad.right, chatInsetRight(PANEL_GAP));
   // Never pad the view away entirely (narrow windows). With the sheet, the building panel and the chat open
   // side by side a 1280 px window keeps a strip of about 200 px, enough for one building.
   if (pad.left + pad.right > w * 0.9) [pad.left, pad.right] = [PANEL_GAP, PANEL_GAP];
@@ -286,12 +285,20 @@ export async function runAction(
           state.selectRegion(id); // MapView flies to a newly selected region.
           return "ok";
         }
-        // Already open: fly there again. The flight starts here, so a building pick after it waits for
+        // Already open: fly there again, framed as MapView frames a selection (clear of the open chat).
+        // That flight starts once the region's centre has loaded, so a building pick after it waits for it.
+        const fly = state.map ? regionFlyer(state.map) : undefined;
+        if (state.map && fly) {
+          regionAskedAt.set(state.map, { at: Date.now(), flights: regionFlightCount(state.map) });
+          fly(id);
+          return "ok";
+        }
+        // Without MapView's flight (tests): fly there from here, so a building pick after it waits for
         // nothing and simply takes the camera over.
         const centroid = await target.regionCentroid(id);
         const map = target.getState().map;
         if (!centroid || !map) return "skipped";
-        flyToRegion(map, centroid);
+        flyToRegion(map, centroid, { padding: target.viewPadding() });
         return "ok";
       }
       case "show_all_regions": {

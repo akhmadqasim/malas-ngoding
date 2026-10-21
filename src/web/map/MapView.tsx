@@ -4,7 +4,17 @@ import { useEffect, useRef } from "react";
 import { api, type PlantCollection, type RegionCollection } from "../api.ts";
 import { useAppStore } from "../store.ts";
 import { rainVisible, startAutoRain } from "./autoRain.ts";
-import { abortIntro, flyToProvince, flyToRegion, GLOBE_VIEW, introFlight, startIdleOrbit, stopIdleOrbit } from "./camera.ts";
+import {
+  abortIntro,
+  chatInsetRight,
+  flyToProvince,
+  flyToRegion,
+  GLOBE_VIEW,
+  introFlight,
+  setRegionFlyer,
+  startIdleOrbit,
+  stopIdleOrbit,
+} from "./camera.ts";
 import {
   applyLightPreset,
   basemapLight,
@@ -100,7 +110,8 @@ const FRAME_GAP_PX = 24;
 
 /**
  * Camera padding measured from the chrome on screen: left of the sheet's right edge, above the dock's
- * highest card, right of the map tools. Falls back to a fixed frame when the chrome is not there.
+ * highest card, right of the map tools or, when it is open, of the chat panel. Falls back to a fixed frame
+ * when the chrome is not there.
  */
 function chromePadding(): { top: number; bottom: number; left: number; right: number } {
   const rect = (sel: string) => document.querySelector(sel)?.getBoundingClientRect();
@@ -116,7 +127,7 @@ function chromePadding(): { top: number; bottom: number; left: number; right: nu
     top: (sheet && !sheetBeside ? sheet.bottom : 0) + FRAME_GAP_PX,
     bottom: Math.max(h - dockTop, 0) + FRAME_GAP_PX,
     left: (sheet && sheetBeside ? sheet.right : 0) + FRAME_GAP_PX,
-    right: (tools ? w - tools.left : 0) + FRAME_GAP_PX,
+    right: Math.max((tools ? w - tools.left : 0) + FRAME_GAP_PX, chatInsetRight(FRAME_GAP_PX)),
   };
 }
 
@@ -319,6 +330,20 @@ export function MapView({ token, regions, plants, onIntroStart, onIntroEnd, onRe
       setupStyle().catch((err: unknown) => fail(FAILURE.setup, err));
     });
 
+    /** Frames a selected region inside the space the chrome (and the open chat) leaves free. */
+    const flyToSelected = (id: string) => {
+      const bounds = bboxOf(regions, id);
+      api
+        .region(id)
+        .then((r) => r.centroid)
+        .catch(() => (bounds ? centerOf(bounds) : null))
+        .then((centroid) => {
+          // Skip when the user picked another region while the request was out.
+          if (!disposed && centroid && useAppStore.getState().selectedRegionId === id) flyToRegion(map, centroid, { bounds, padding: chromePadding() });
+        });
+    };
+    setRegionFlyer(map, flyToSelected);
+
     // React to store changes that the map must follow.
     const unsubscribe = useAppStore.subscribe((s, prev) => {
       if (!ready || failed) return;
@@ -334,16 +359,7 @@ export function MapView({ token, regions, plants, onIntroStart, onIntroEnd, onRe
       if (s.selectedRegionId !== prev.selectedRegionId) {
         setSelectedRegion(map, s.selectedRegionId);
         if (s.selectedRegionId) {
-          const id = s.selectedRegionId;
-          const bounds = bboxOf(regions, id);
-          api
-            .region(id)
-            .then((r) => r.centroid)
-            .catch(() => (bounds ? centerOf(bounds) : null))
-            .then((centroid) => {
-              // Skip when the user picked another region while the request was out.
-              if (!disposed && centroid && useAppStore.getState().selectedRegionId === id) flyToRegion(map, centroid, { bounds, padding: chromePadding() });
-            });
+          flyToSelected(s.selectedRegionId);
         } else {
           flyToProvince(map);
         }
@@ -357,6 +373,7 @@ export function MapView({ token, regions, plants, onIntroStart, onIntroEnd, onRe
       clearInterval(lightTimer);
       stopAutoRain?.();
       unsubscribe();
+      setRegionFlyer(map, null);
       abortIntro();
       stopIdleOrbit();
       try {

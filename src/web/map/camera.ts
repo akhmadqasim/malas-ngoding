@@ -70,9 +70,37 @@ export function abortIntro(): void {
   finishIntro?.(false);
 }
 
+/** Room between a framed place and the open chat panel, in px. */
+export const CHAT_GAP_PX = 24;
+
+/**
+ * Px from the right edge of the window to the open chat panel's left edge, plus `gap`; 0 when the chat is
+ * closed or covers most of the width (phones), where no padding could keep a place clear of it.
+ */
+export function chatInsetRight(gap = CHAT_GAP_PX): number {
+  if (typeof document === "undefined") return 0;
+  const chat = document.querySelector(".chat")?.getBoundingClientRect();
+  const w = window.innerWidth;
+  return chat && chat.width > 0 && chat.width < w / 2 ? w - chat.left + gap : 0;
+}
+
+/**
+ * The overview camera. With the chat open the province frames left of it: the right padding reaches past
+ * the chat, and the zoom drops by as much as the free strip narrows, so the whole province still fits.
+ */
+export function provinceView(): typeof KALTIM_VIEW {
+  const chat = chatInsetRight();
+  const { left, right } = KALTIM_VIEW.padding;
+  if (chat <= right || typeof window === "undefined") return KALTIM_VIEW;
+  const full = window.innerWidth - left - right;
+  const strip = window.innerWidth - left - chat;
+  if (full <= 0 || strip <= 0) return KALTIM_VIEW;
+  return { ...KALTIM_VIEW, zoom: KALTIM_VIEW.zoom + Math.log2(strip / full), padding: { ...KALTIM_VIEW.padding, right: chat } };
+}
+
 /** Flies back to the whole province (the overview), at its resting bearing, where the idle sway belongs. */
 export function flyToProvince(map: MapboxMap): void {
-  map.flyTo({ ...KALTIM_VIEW, duration: prefersReducedMotion() ? 0 : FLY_MS, curve: 1.2, essential: true });
+  map.flyTo({ ...provinceView(), duration: prefersReducedMotion() ? 0 : FLY_MS, curve: 1.2, essential: true });
 }
 
 export interface FlyOptions {
@@ -114,6 +142,20 @@ export function onNextRegionFlight(map: MapboxMap, fn: () => void): () => void {
   };
   waiters.add(once);
   return () => void waiters.delete(once);
+}
+
+/** MapView's flight to a region (its box, the measured chrome padding), per map. */
+const regionFlyers = new WeakMap<MapboxMap, (id: string) => void>();
+
+/** MapView registers how it flies to a region, so the chat can fly to the open region the same way. */
+export function setRegionFlyer(map: MapboxMap, fly: ((id: string) => void) | null): void {
+  if (fly) regionFlyers.set(map, fly);
+  else regionFlyers.delete(map);
+}
+
+/** MapView's region flight for this map, if it has registered one. */
+export function regionFlyer(map: MapboxMap): ((id: string) => void) | undefined {
+  return regionFlyers.get(map);
 }
 
 /** Smooth camera move centred on a region. */

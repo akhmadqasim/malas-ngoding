@@ -331,15 +331,17 @@ async function swayReturnsToItsArc(page: Page) {
 
 /**
  * A selected region is framed beside the chrome: no part of its outline sits under the sheet, the dock
- * cards or the map tools (fix round 1, Important 5).
+ * cards or the map tools (fix round 1, Important 5), nor under any `extra` panel (the open chat card).
+ * With `id` "*" every region's outline is checked (the province view).
  */
-async function regionClearOfChrome(page: Page, id: string) {
-  const covered = await page.evaluate(async (id) => {
+async function regionClearOfChrome(page: Page, id: string, extra: string[] = []) {
+  const covered = await page.evaluate(async ([id, selectors]) => {
     const map = (window as MapWindow).__malasMap!;
     const fc = (await (await fetch("/api/regions")).json()) as { features: { properties: { id: string }; geometry: { type: string; coordinates: unknown } }[] };
-    const g = fc.features.find((f) => f.properties.id === id)!.geometry;
-    const polys = (g.type === "Polygon" ? [g.coordinates] : g.coordinates) as number[][][][];
-    const rects = [".sheet", ".legend", ".controls", ".map-tools"].flatMap((sel) => {
+    const polys = fc.features
+      .filter((f) => id === "*" || f.properties.id === id)
+      .flatMap(({ geometry: g }) => (g.type === "Polygon" ? [g.coordinates] : g.coordinates) as number[][][][]);
+    const rects = selectors.flatMap((sel) => {
       const r = document.querySelector(sel)?.getBoundingClientRect();
       return r ? [{ sel, r }] : [];
     });
@@ -353,8 +355,10 @@ async function regionClearOfChrome(page: Page, id: string) {
         if (under) hits.push(under.sel);
       }
     return { total, hits: hits.length, where: [...new Set(hits)].join(", ") };
-  }, id);
-  check(covered.hits === 0, `the selected ${id} is framed clear of the sheet, dock and tools (${covered.hits} of ${covered.total} outline points covered${covered.where ? ` by ${covered.where}` : ""})`);
+  }, [id, [".sheet", ".legend", ".controls", ".map-tools", ...extra]] as const);
+  const what = id === "*" ? "the whole province" : `the selected ${id}`;
+  const by = ["the sheet", "dock and tools", ...(extra.length ? ["the chat"] : [])].join(", ");
+  check(covered.hits === 0, `${what} is framed clear of ${by} (${covered.hits} of ${covered.total} outline points covered${covered.where ? ` by ${covered.where}` : ""})`);
 }
 
 /** The hover preview as the map and the panels show it: lifted and faded columns, list row, needle, tooltip. */
@@ -1793,6 +1797,8 @@ async function chatChecks(page: Page) {
   check(await page.getByRole("button", { name: "Semua wilayah" }).isVisible(), "fly_to_region selects the region (the region detail opens)");
   check((await page.getByRole("radio", { name: "Listrik" }).getAttribute("aria-checked")) === "true", "set_metric switches the columns to kWh");
   await page.waitForTimeout(2200);
+  await waitForMapIdle(page, 12_000);
+  await regionClearOfChrome(page, "samarinda", [".chat__card"]);
   await shot(page, "9-chat-answer");
   const answerOverlaps = await chatOverlaps();
   check(answerOverlaps.length === 0, `with an answer, the chat panel covers no dock card and not the map tools (${answerOverlaps.join(", ") || "none"})`);
@@ -1857,6 +1863,25 @@ async function chatChecks(page: Page) {
   await page.unroute("**/api/chat");
   await page.getByRole("button", { name: "Tutup panel gedung" }).click().catch(() => {});
 
+  // Region and province flights frame what they show clear of the open chat (final review, Important 3):
+  // Berau lies on the east coast, under the chat column; "semua wilayah" puts the east of the province there.
+  const askAndSettle = async (question: string, action: { name: string; input: Record<string, unknown> }) => {
+    await page.route("**/api/chat", reply(sse([["action", action], ["text", { delta: "Sudah saya tampilkan di peta." }], ["done", {}]])));
+    const before = await panel.locator(".chat-msg--ai").count();
+    await panel.getByRole("textbox", { name: "Pertanyaan untuk asisten AI" }).fill(question);
+    await page.keyboard.press("Enter");
+    await page.waitForFunction((n) => document.querySelectorAll(".chat-msg--ai").length > n, before, { timeout: 5000 }).catch(() => {});
+    await page.waitForTimeout(2600); // the region detail loads, then the 2 s flight
+    await waitForMapIdle(page, 12_000);
+    await page.unroute("**/api/chat");
+  };
+  await askAndSettle("Tunjukkan Berau", { name: "fly_to_region", input: { region: "berau" } });
+  await regionClearOfChrome(page, "berau", [".chat__card"]);
+  await shot(page, "9-chat-region");
+  await askAndSettle("Bandingkan emisi semua wilayah", { name: "show_all_regions", input: {} });
+  await regionClearOfChrome(page, "*", [".chat__card"]);
+  await shot(page, "9-chat-province");
+
   await panel.getByRole("textbox", { name: "Pertanyaan untuk asisten AI" }).fill("Draf yang belum dikirim");
   await page.keyboard.press("Escape");
   await panel.waitFor({ state: "detached", timeout: 3000 }).catch(() => {});
@@ -1870,6 +1895,9 @@ async function chatChecks(page: Page) {
 
   // Leave the province view as the next checks expect it.
   await page.getByRole("radio", { name: "Emisi CO2" }).click();
-  await page.getByRole("button", { name: "Semua wilayah" }).click();
+  const allRegions = page.getByRole("button", { name: "Semua wilayah" });
+  if (await allRegions.isVisible()) await allRegions.click();
+  await page.evaluate((view) => (window as MapWindow).__malasMap!.jumpTo(view), KALTIM_VIEW);
+  await waitForMapIdle(page, 12_000);
   await page.evaluate(() => localStorage.removeItem("malas-ngoding.chat"));
 }
