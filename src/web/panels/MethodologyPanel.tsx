@@ -3,7 +3,7 @@ import { type ReactNode, useCallback, useEffect, useId, useState } from "react";
 import buildingTypes from "../../../data/seed/building-types.json";
 import equivalents from "../../../data/seed/equivalents.json";
 import regionSeed from "../../../data/seed/regions.json";
-import { fmtCompact, fmtNumber } from "../../shared/format.ts";
+import { fmtNumber } from "../../shared/format.ts";
 import type { BuildingType, Equivalent, FuelType, GridMix } from "../../shared/types.ts";
 import { ApiError, api } from "../api.ts";
 import { chem } from "../components/Chem.tsx";
@@ -293,7 +293,7 @@ export function MethodologyContent({ grid }: { grid: GridMix }) {
                 Berau
                 <span className="methodology__cell-note num">{millions(PLN_2024.branches.berau)}</span>
               </th>
-              <td>Berau, dan Malinau di Kalimantan Utara</td>
+              <td>Berau dan Malinau (Kalimantan Utara)</td>
               <td>
                 Berau mendapat {share(split.berau.share)}: <span className="num">{fmtNumber(split.berau.customers)}</span>{" "}
                 pelanggan Berau dibanding <span className="num">{fmtNumber(SPLIT.malinauCustomers)}</span> pelanggan Malinau yang
@@ -332,7 +332,7 @@ export function MethodologyContent({ grid }: { grid: GridMix }) {
           </div>
         </dl>
         <p>
-          Per kWh terjual angkanya lebih tinggi karena sekitar {fmtNumber(lostPct, 1)}% listrik yang dibangkitkan habis untuk
+          Per kWh terjual angkanya lebih tinggi karena sekitar {fmtNumber(lostPct, 1)}% listrik yang dibangkitkan tidak sampai terjual, sebagian besar untuk
           pemakaian sendiri pembangkit dan susut jaringan (BPS 2024: dibangkitkan {millions(PLN_2024.producedKwh)}, terjual{" "}
           {millions(PLN_2024.soldKwh)}).
         </p>

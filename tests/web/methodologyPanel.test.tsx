@@ -65,7 +65,7 @@ describe("the grid factor", () => {
     expect(text).toContain("data 2019");
     expect(text).toContain("0,87 kg CO2/kWh dibangkitkan, perkiraan");
     expect(text).toContain("Sekitar 0,94 per kWh terjual");
-    expect(text).toContain("sekitar 7,4% listrik yang dibangkitkan habis");
+    expect(text).toContain("sekitar 7,4% listrik yang dibangkitkan tidak sampai terjual");
     expect(text).toContain("simulasi panel surya dan penghematan listrik");
     expect(text).toContain("total emisi di peta cenderung tinggi");
     // 1.14 / 0.9406 is 21% higher.
