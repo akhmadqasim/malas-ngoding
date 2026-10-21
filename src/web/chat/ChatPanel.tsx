@@ -66,6 +66,8 @@ export function ChatPanel() {
   const clearance = useDockClearance(panel, open, besideBuilding);
   const chat = useChat();
   const launcher = useRef<HTMLButtonElement>(null);
+  // Kept here, not in the card: closing the panel (Escape) must not throw away a half-written question.
+  const [draft, setDraft] = useState("");
 
   const close = () => {
     useAppStore.getState().setChatOpen(false);
@@ -91,7 +93,7 @@ export function ChatPanel() {
               if (e.key === "Escape") close();
             }}
           >
-            <ChatCard chat={chat} onClose={close} />
+            <ChatCard chat={chat} onClose={close} draft={draft} setDraft={setDraft} />
           </motion.section>
         )}
       </AnimatePresence>
@@ -106,8 +108,9 @@ export function ChatPanel() {
           <Button
             ref={launcher}
             isIconOnly
-            variant={open ? "outline" : "primary"}
-            aria-label={open ? "Tutup asisten AI" : "Tanya asisten AI"}
+            // The accent marks state only: filled while the panel is open, outlined otherwise.
+            variant={open ? "primary" : "outline"}
+            aria-label="Asisten AI"
             aria-expanded={open}
             aria-controls={open ? PANEL_ID : undefined}
             className="chat-launch__button"
@@ -122,8 +125,17 @@ export function ChatPanel() {
   );
 }
 
-function ChatCard({ chat, onClose }: { chat: UseChat; onClose: () => void }) {
-  const [draft, setDraft] = useState("");
+function ChatCard({
+  chat,
+  onClose,
+  draft,
+  setDraft,
+}: {
+  chat: UseChat;
+  onClose: () => void;
+  draft: string;
+  setDraft: (text: string) => void;
+}) {
   const input = useRef<HTMLTextAreaElement>(null);
   const log = useRef<HTMLDivElement>(null);
   const pinned = useRef(true);
@@ -131,12 +143,14 @@ function ChatCard({ chat, onClose }: { chat: UseChat; onClose: () => void }) {
 
   useEffect(() => input.current?.focus(), []);
 
-  // Follow the answer as it streams, unless the reader scrolled up to read something earlier.
-  const lastText = chat.messages.at(-1)?.text;
+  // Follow the answer as it streams, unless the reader scrolled up to read something earlier. Everything
+  // that can grow the last answer counts: its text, its action buttons, an error or a stop.
+  const last = chat.messages.at(-1);
+  const growth = [chat.messages.length, last?.text, last?.status, last?.actions.length, last?.outcomes?.join(), last?.error].join("|");
   useLayoutEffect(() => {
     const el = log.current;
     if (el && pinned.current) el.scrollTop = el.scrollHeight;
-  }, [chat.messages.length, lastText]);
+  }, [growth]);
 
   const submit = (text = draft) => {
     if (!text.trim() || chat.busy || off) return;
@@ -173,7 +187,7 @@ function ChatCard({ chat, onClose }: { chat: UseChat; onClose: () => void }) {
           <CircleExclamation aria-hidden className="chat__notice-icon" />
           <div>
             <p className="chat__notice-title">Asisten AI belum aktif</p>
-            <p>Kunci API Anthropic (ANTHROPIC_API_KEY) belum diatur di server. Peta dan semua panel tetap bisa dipakai.</p>
+            <p>Kunci API Anthropic belum diatur di server. Peta dan semua panel tetap bisa dipakai.</p>
           </div>
         </div>
       )}
@@ -276,7 +290,8 @@ function IconTool({
 }
 
 function Answer({ message: m, chat }: { message: ChatMessage; chat: UseChat }) {
-  const chips = actionChips(m.actions);
+  const chips = actionChips(m.actions, m.outcomes);
+  const allFailed = chips.length > 0 && chips.every((c) => c.failed);
   const text = chips.length > 0 && m.text.trim() === ACTIONS_ONLY_TEXT ? "" : m.text;
   const waiting = m.status === "streaming" && text === "";
   return (
@@ -288,14 +303,23 @@ function Answer({ message: m, chat }: { message: ChatMessage; chat: UseChat }) {
         </div>
       )}
       {chips.length > 0 && (
-        <div className="chat-msg__actions" role="group" aria-label="Sudah saya tampilkan di peta">
+        <div className="chat-msg__actions" role="group" aria-label={allFailed ? "Belum bisa ditampilkan di peta" : "Sudah saya tampilkan di peta"}>
           <p className="chat-msg__actions-label">
             <MapPin aria-hidden />
-            Sudah saya tampilkan di peta
+            {allFailed ? "Belum bisa ditampilkan di peta" : "Sudah saya tampilkan di peta"}
           </p>
           <div className="chat-msg__chips">
-            {chips.map(({ label, action }) => (
-              <Button key={label} size="sm" variant="outline" className="chat-chip" aria-label={`Tampilkan lagi: ${label}`} onPress={() => chat.replay(action)}>
+            {chips.map(({ label, index, failed }) => (
+              <Button
+                key={label}
+                size="sm"
+                variant="outline"
+                className="chat-chip"
+                data-failed={failed ? "" : undefined}
+                aria-label={failed ? `Coba lagi: ${label}` : `Tampilkan lagi: ${label}`}
+                onPress={() => chat.replay(m.id, index)}
+              >
+                {failed && <CircleExclamation aria-hidden />}
                 {label}
               </Button>
             ))}
@@ -304,7 +328,10 @@ function Answer({ message: m, chat }: { message: ChatMessage; chat: UseChat }) {
       )}
       {m.status === "error" && (
         <div className="chat-msg__problem" role="alert">
-          <p>{m.error}</p>
+          <p className="chat-msg__problem-text">
+            <CircleExclamation aria-hidden />
+            {m.error}
+          </p>
           <Button size="sm" variant="outline" onPress={() => chat.retry(m.id)} isDisabled={chat.busy}>
             Coba lagi
           </Button>
