@@ -1,7 +1,8 @@
-import mapboxgl, { type ExpressionSpecification, type GeoJSONSource, type GeoJSONSourceSpecification, type Map as MapboxMap } from "mapbox-gl";
+import mapboxgl, { type ExpressionSpecification, type GeoJSONSourceSpecification, type Map as MapboxMap } from "mapbox-gl";
 import type { PlantCollection, PlantProperties } from "../api.ts";
 import { token } from "../theme.ts";
 import { FUEL_LABELS, FUELS, fuelKey, fuelsPresent, plantIconExpression } from "./fuels.ts";
+import { FADE_ZOOMS, type GroupNode, markerOpacity, plantGroups, visibility as markerShown } from "./plantGroups.ts";
 import type { FuelType } from "../../shared/types.ts";
 import { fmtNumber } from "../../shared/format.ts";
 
@@ -10,16 +11,8 @@ const SOURCE = "plants";
 export const PLANT_LAYER = "plants";
 /** Plants close enough on screen to overlap, drawn as one marker with their count. */
 export const PLANT_CLUSTER_LAYER = "plant-clusters";
-const CLUSTER_IMAGE = "plant-cluster";
 const INTERACTIONS = ["plants-enter", "plants-click", "plants-leave", "plant-clusters-enter", "plant-clusters-click", "plant-clusters-leave"] as const;
 
-/**
- * Markers closer than this (screen px) merge into one cluster marker, so the coast near Balikpapan and the
- * Tanjung Batu sites never pile up into a blot. Closer in they split again.
- */
-export const CLUSTER_RADIUS_PX = 18;
-/** From this zoom every plant has its own marker. */
-export const CLUSTER_MAX_ZOOM = 13;
 
 const STATUS_LABEL: Record<string, string> = {
   operating: "Beroperasi",
@@ -109,14 +102,38 @@ export function plantIconSize(): ExpressionSpecification {
 }
 
 /**
- * `icon-size` of a cluster marker: by the summed capacity of its plants (the source adds it up), like a
- * single plant of that size, but never too small to hold its count.
+ * `icon-size` of a group marker: by the summed capacity of its plants, like a single plant of that size,
+ * but never too small to hold its count.
  */
 export function clusterIconSize(): ExpressionSpecification {
   return ["interpolate", ["linear"], ["zoom"], 5, ["max", 0.8, byCapacity(0.7)], 10, ["max", 0.8, byCapacity(1.3)]];
 }
 
 let popup: mapboxgl.Popup | null = null;
+let groups: GroupNode<PlantProperties>[] = [];
+
+const largest = (plants: PlantProperties[]) => plants.reduce((a, b) => (b.capacityMw > a.capacityMw ? b : a));
+
+/** Every marker as a point: plants with their own properties, groups with their count and summed MW. */
+function groupCollection(nodes: GroupNode<PlantProperties>[]) {
+  return {
+    type: "FeatureCollection" as const,
+    features: nodes.map((n) => ({
+      type: "Feature" as const,
+      id: n.id,
+      geometry: { type: "Point" as const, coordinates: [n.lng, n.lat] },
+      properties: {
+        ...(n.kind === "plant" ? n.members[0] : { fuel: largest(n.members).fuel }),
+        node: n.id,
+        kind: n.kind,
+        count: n.members.length,
+        capacityMw: n.capacityMw,
+        appear: n.appear,
+        split: n.split,
+      },
+    })),
+  };
+}
 
 /**
  * Power plants as dots coloured by fuel and sized by MW, with a tooltip on hover or tap. Plants that would
@@ -127,21 +144,20 @@ let popup: mapboxgl.Popup | null = null;
 export function addPlants(map: MapboxMap, fc: PlantCollection, visible = true, opts: { below?: string } = {}): void {
   removePlants(map);
 
-  map.addSource(SOURCE, {
-    type: "geojson",
-    data: fc as unknown as GeoJSONSourceSpecification["data"],
-    cluster: true,
-    clusterRadius: CLUSTER_RADIUS_PX,
-    clusterMaxZoom: CLUSTER_MAX_ZOOM,
-    // A cluster carries the capacity of all its plants, so it is sized like one plant of that capacity.
-    clusterProperties: { capacityMw: ["+", ["get", "capacityMw"]] },
-  });
+  // Plants that would overlap on screen form groups that part smoothly as the map zooms in (plantGroups.ts).
+  groups = plantGroups(
+    fc.features.map((f) => ({
+      lng: f.geometry.coordinates[0]!,
+      lat: f.geometry.coordinates[1]!,
+      capacityMw: f.properties.capacityMw,
+      props: f.properties,
+    })),
+  );
+  map.addSource(SOURCE, { type: "geojson", data: groupCollection(groups) as unknown as GeoJSONSourceSpecification["data"] });
   const present = fuelsPresent(fc);
   const paper = token("--color-paper");
   const ink = token("--color-ink");
   for (const fuel of present) map.addImage(`plant-${fuel}`, dotImage({ fill: token(`--color-fuel-${fuel}`), paper, ink }), { pixelRatio: 2 });
-  // A cluster is ink with a paper edge: no fuel of its own, the count says it is several.
-  map.addImage(CLUSTER_IMAGE, dotImage({ fill: ink, paper, ink }), { pixelRatio: 2 });
 
   const below = opts.below && map.getLayer(opts.below) ? opts.below : undefined;
   const visibility = visible ? "visible" : "none";
@@ -151,7 +167,7 @@ export function addPlants(map: MapboxMap, fc: PlantCollection, visible = true, o
       type: "symbol",
       source: SOURCE,
       slot: "top",
-      filter: ["!", ["has", "point_count"]],
+      filter: ["==", ["get", "kind"], "plant"],
       layout: {
         "icon-image": plantIconExpression(present),
         "icon-size": plantIconSize(),
@@ -163,8 +179,9 @@ export function addPlants(map: MapboxMap, fc: PlantCollection, visible = true, o
         visibility,
       },
       paint: {
-        // Planned and unverified sites are drawn fainter than operating ones; the tooltip says which.
-        "icon-opacity": ["match", ["get", "status"], "operating", 1, 0.6],
+        // Fades in where its group parts, never pops. One style for every plant; the tooltip names the
+        // status of planned and unverified sites.
+        "icon-opacity": markerOpacity(),
         "icon-emissive-strength": 1,
         // A symbol layer, unlike a circle layer, can ignore depth: the dots stay visible in front of the
         // region columns.
@@ -180,13 +197,14 @@ export function addPlants(map: MapboxMap, fc: PlantCollection, visible = true, o
       type: "symbol",
       source: SOURCE,
       slot: "top",
-      filter: ["has", "point_count"],
+      filter: ["==", ["get", "kind"], "group"],
       layout: {
-        "icon-image": CLUSTER_IMAGE,
+        // The same dot as a single plant, in the fuel of its largest plant, with the count on it.
+        "icon-image": plantIconExpression(present),
         "icon-size": clusterIconSize(),
         "icon-allow-overlap": true,
         "icon-ignore-placement": true,
-        "text-field": ["to-string", ["get", "point_count"]],
+        "text-field": ["to-string", ["get", "count"]],
         "text-font": ["DIN Pro Medium", "Arial Unicode MS Bold"],
         "text-size": 11,
         "text-allow-overlap": true,
@@ -194,7 +212,11 @@ export function addPlants(map: MapboxMap, fc: PlantCollection, visible = true, o
         visibility,
       },
       paint: {
+        "icon-opacity": markerOpacity(),
+        "text-opacity": markerOpacity(),
         "text-color": paper,
+        "text-halo-color": ink,
+        "text-halo-width": 1.2,
         "icon-emissive-strength": 1,
         "text-emissive-strength": 1,
         "icon-occlusion-opacity": 1,
@@ -206,25 +228,22 @@ export function addPlants(map: MapboxMap, fc: PlantCollection, visible = true, o
 
   popup = new mapboxgl.Popup({ closeButton: false, closeOnClick: false, offset: 12, className: "map-popup", maxWidth: "280px" });
   const at = (e: mapboxgl.InteractionEvent) => (e.feature?.geometry.type === "Point" ? (e.feature.geometry.coordinates as [number, number]) : null);
+  /** The marker under the pointer, if it is actually shown at this zoom (a faded-out one is not). */
+  const shown = (e: mapboxgl.InteractionEvent) => {
+    const node = groups.find((g) => g.id === Number(e.feature?.properties?.node));
+    return node && markerShown(node, map.getZoom()) >= 0.5 ? node : undefined;
+  };
   const showPlant = (e: mapboxgl.InteractionEvent) => {
-    const lngLat = at(e);
-    if (!lngLat || !e.feature) return;
+    const node = shown(e);
+    if (!node) return false;
     map.getCanvas().style.cursor = "pointer";
-    popup!.setLngLat(lngLat).setHTML(plantPopupHtml(e.feature.properties as unknown as PlantProperties)).addTo(map);
+    popup!.setLngLat([node.lng, node.lat]).setHTML(plantPopupHtml(node.members[0]!)).addTo(map);
   };
   const showCluster = (e: mapboxgl.InteractionEvent) => {
-    const lngLat = at(e);
-    const id = e.feature?.properties?.cluster_id as number | undefined;
-    const count = e.feature?.properties?.point_count as number | undefined;
-    if (!lngLat || id === undefined || !count) return;
+    const node = shown(e);
+    if (!node) return false;
     map.getCanvas().style.cursor = "pointer";
-    (map.getSource(SOURCE) as GeoJSONSource | undefined)?.getClusterLeaves(id, count, 0, (err, leaves) => {
-      if (err || !leaves || !popup) return;
-      popup
-        .setLngLat(lngLat)
-        .setHTML(plantClusterHtml(leaves.map((f) => f.properties as unknown as PlantProperties)))
-        .addTo(map);
-    });
+    popup!.setLngLat([node.lng, node.lat]).setHTML(plantClusterHtml(node.members)).addTo(map);
   };
   const hide = () => {
     map.getCanvas().style.cursor = "";
@@ -236,19 +255,15 @@ export function addPlants(map: MapboxMap, fc: PlantCollection, visible = true, o
   map.addInteraction("plants-click", { type: "click", target: { layerId: PLANT_LAYER }, handler: showPlant });
   map.addInteraction("plants-leave", { type: "mouseleave", target: { layerId: PLANT_LAYER }, handler: hide });
   map.addInteraction("plant-clusters-enter", { type: "mouseenter", target: { layerId: PLANT_CLUSTER_LAYER }, handler: showCluster });
-  // A click zooms in until the plants of the cluster part.
+  // A click zooms in until the plants of the group have parted.
   map.addInteraction("plant-clusters-click", {
     type: "click",
     target: { layerId: PLANT_CLUSTER_LAYER },
     handler: (e) => {
-      const lngLat = at(e);
-      const id = e.feature?.properties?.cluster_id as number | undefined;
-      if (!lngLat || id === undefined) return;
-      (map.getSource(SOURCE) as GeoJSONSource | undefined)?.getClusterExpansionZoom(id, (err, zoom) => {
-        if (err || zoom == null) return;
-        popup?.remove();
-        map.easeTo({ center: lngLat, zoom: Math.max(zoom, map.getZoom() + 1), duration: 900, essential: true });
-      });
+      const node = shown(e);
+      if (!node) return false;
+      popup?.remove();
+      map.easeTo({ center: [node.lng, node.lat], zoom: Math.max(node.split + FADE_ZOOMS, map.getZoom() + 1), duration: 900, essential: true });
     },
   });
   map.addInteraction("plant-clusters-leave", { type: "mouseleave", target: { layerId: PLANT_CLUSTER_LAYER }, handler: hide });
@@ -267,5 +282,5 @@ export function removePlants(map: MapboxMap): void {
   for (const id of INTERACTIONS) map.removeInteraction(id);
   for (const id of [PLANT_CLUSTER_LAYER, PLANT_LAYER]) if (map.getLayer(id)) map.removeLayer(id);
   if (map.getSource(SOURCE)) map.removeSource(SOURCE);
-  for (const id of [...(FUELS as readonly FuelType[]).map((f) => `plant-${f}`), CLUSTER_IMAGE]) if (map.hasImage(id)) map.removeImage(id);
+  for (const fuel of FUELS as readonly FuelType[]) if (map.hasImage(`plant-${fuel}`)) map.removeImage(`plant-${fuel}`);
 }

@@ -72,7 +72,7 @@ describe("plant markers never cost a region name", () => {
   test("only the marker images of the fuels present are added, and all of them are removed", () => {
     const { map, images } = fakeMap();
     addPlants(map, plants, true);
-    expect([...images.keys()].sort()).toEqual(["plant-batubara", "plant-cluster", "plant-gas"]);
+    expect([...images.keys()].sort()).toEqual(["plant-batubara", "plant-gas"]);
     removePlants(map);
     expect(images.size).toBe(0);
   });

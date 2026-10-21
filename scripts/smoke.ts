@@ -22,7 +22,7 @@ import { join } from "node:path";
 import type { ConsoleMessage, Page } from "playwright";
 import { launchBrowser } from "./chromium.ts";
 import { KALTIM_VIEW, SWAY_DEG } from "../src/web/map/camera.ts";
-import { lightPresetFor } from "../src/web/map/effects.ts";
+import { basemapLight, lightPresetFor } from "../src/web/map/effects.ts";
 import { GLOBE_LABEL_ZOOM, LANDED_LABEL_ZOOM } from "../src/web/map/regionLabels.ts";
 
 const BASE_URL = Bun.env.BASE_URL ?? "http://localhost:3000";
@@ -551,11 +551,15 @@ try {
     const map = (window as MapWindow).__malasMap!;
     type Marker = { geometry: { coordinates: [number, number] }; properties: Record<string, unknown> };
     const at = (f: Marker) => map.project(f.geometry.coordinates);
-    const one = map.queryRenderedFeatures({ layers: ["plants"] })[0] as unknown as Marker | undefined;
-    const many = map.queryRenderedFeatures({ layers: ["plant-clusters"] })[0] as unknown as Marker | undefined;
+    // Markers fade in and out by zoom (plantGroups.ts); only one fully shown at this zoom counts.
+    const z = map.getZoom();
+    const full = (f: Marker) => Number(f.properties.appear) + 0.5 <= z && z <= Number(f.properties.split) - 0.5;
+    const pick = (layer: string) => (map.queryRenderedFeatures({ layers: [layer] }) as unknown as Marker[]).find(full);
+    const one = pick("plants");
+    const many = pick("plant-clusters");
     return {
       one: one && { ...at(one), name: String(one.properties.name) },
-      many: many && { ...at(many), count: Number(many.properties.point_count) },
+      many: many && { ...at(many), count: Number(many.properties.count) },
     };
   });
   if (markers.one) {
@@ -646,12 +650,12 @@ try {
   check(night.preset === "night" && night.theme === "faded", `Malam: night light on the navy basemap (${night.preset}, ${night.theme})`);
   await shot(page, "7-rain-malam");
   const day = await lightTo("Siang");
-  check(day.preset === "day" && day.theme === "monochrome", `Siang: day light on the neutral basemap (${day.preset}, ${day.theme})`);
+  check(day.preset === "day" && day.theme === "faded", `Siang: day light on the muted basemap (${day.preset}, ${day.theme})`);
   check(day.haze && !night.haze, "Siang: the rain falls through a haze inside the map; Malam: no haze");
   check(day.rainColor !== night.rainColor, "Siang and Malam use their own drop colour");
   await shot(page, "7-rain-siang");
   const auto = await lightTo("Otomatis");
-  check(auto.preset === lightPresetFor(new Date()), `Otomatis follows WITA time (${auto.preset})`);
+  check(auto.preset === basemapLight(lightPresetFor(new Date())), `Otomatis follows WITA time (${lightPresetFor(new Date())}, basemap light ${auto.preset})`);
   await flipSwitch(page, "Hujan");
   await page.waitForTimeout(300);
   check(!(await mapState(page)).haze, "switching the rain off clears the haze");
