@@ -101,19 +101,61 @@ export function flyToRegion(map: MapboxMap, centroid: [number, number], opts: Fl
 }
 
 const IDLE_MS = 20_000;
-const DEG_PER_SECOND = 2.2;
 /** The orbit is an overview effect. From city zoom up it would keep the GPU streaming new tiles. */
 export const ORBIT_MAX_ZOOM = 11;
 
 /** Whether the idle orbit may turn the camera at this zoom. */
 export const canOrbit = (zoom: number) => zoom < ORBIT_MAX_ZOOM;
 
+// --- The idle orbit is a sway ----------------------------------------------------------------------
+// A slow pendulum around the bearing the camera rests at, not a full turn: the province stays readable
+// while a presenter talks, and the region names only have to hold over this arc (smoke-checked).
+
+/** How far the sway swings either side of the resting bearing. */
+export const SWAY_DEG = 12;
+/** One swing there and back. At its fastest, through the middle, it turns about 2.1 degrees a second. */
+export const SWAY_PERIOD_MS = 36_000;
+/** A sway starts from rest and reaches full speed over this time, so it never starts with a jolt. */
+const SWAY_EASE_MS = 4000;
+
+export interface SwayState {
+  /** The resting bearing it swings around. */
+  center: number;
+  /** Where in the swing it is, in radians. */
+  phase: number;
+  /** The bearing it last set. */
+  bearing: number;
+  /** Time since this run of the sway started, in ms. */
+  elapsed: number;
+}
+
+/** a - b in degrees, wrapped to [-180, 180). */
+const angleDiff = (a: number, b: number) => ((((a - b) % 360) + 540) % 360) - 180;
+
+/**
+ * Where a sway starts once the page has been idle long enough: carrying on around the same resting
+ * bearing if nothing turned the camera since the last sway stopped, or else around the current bearing.
+ */
+export function swayFrom(previous: SwayState | null, bearing: number): SwayState {
+  if (previous && Math.abs(angleDiff(bearing, previous.bearing)) < 0.01) return { ...previous, elapsed: 0 };
+  return { center: bearing, phase: 0, bearing, elapsed: 0 };
+}
+
+/** The sway `dt` ms later: a sine around the resting bearing, easing in from rest. */
+export function swayStep(s: SwayState, dt: number): SwayState {
+  const elapsed = s.elapsed + dt;
+  const x = Math.min(1, elapsed / SWAY_EASE_MS);
+  const speed = x * x * (3 - 2 * x);
+  const phase = s.phase + ((2 * Math.PI * dt) / SWAY_PERIOD_MS) * speed;
+  return { center: s.center, phase, bearing: s.center + SWAY_DEG * Math.sin(phase), elapsed };
+}
+
 let orbit: { stop: () => void } | null = null;
 
 /**
- * After 20 s without input, slowly turns the camera around the view centre, at the overview only
- * (below zoom 11). Any input stops the turn and restarts the 20 s wait. Call `stopIdleOrbit()` to
- * switch the behaviour off.
+ * After 20 s without input, sways the camera slowly around its resting bearing (see SWAY_DEG), at the
+ * overview only (below zoom 11). Any input stops it where it is and restarts the 20 s wait. Call
+ * `stopIdleOrbit()` to switch the behaviour off.
  */
 export function startIdleOrbit(map: MapboxMap): void {
   stopIdleOrbit();
@@ -125,21 +167,34 @@ export function startIdleOrbit(map: MapboxMap): void {
   let timer: ReturnType<typeof setTimeout> | undefined;
   let frame = 0;
   let last = 0;
+  let sway: SwayState | null = null;
+  /** The sway has to (re)start from wherever the camera is once it stands still. */
+  let fresh = true;
 
-  const spin = (now: number) => {
+  const swing = (now: number) => {
     // A camera move took the view to city zoom: stop until the next input re-arms the wait.
     if (!canOrbit(map.getZoom())) {
       frame = 0;
       last = 0;
       return;
     }
-    // Never fight a camera animation (fly to region, intro): wait for it to finish.
-    if (!map.isEasing()) {
+    if (map.isEasing()) {
+      // Never fight a camera animation (fly to region, intro); start from wherever it lands.
+      fresh = true;
+    } else {
+      if (fresh || !sway) {
+        sway = swayFrom(sway, map.getBearing());
+        fresh = false;
+        last = 0;
+      }
       const dt = last ? Math.min(now - last, 64) : 16;
-      map.setBearing(map.getBearing() + (DEG_PER_SECOND * dt) / 1000);
+      sway = swayStep(sway, dt);
+      map.setBearing(sway.bearing);
+      // Remember the bearing as Mapbox holds it (wrapped), so the next start can tell nothing turned it.
+      sway.bearing = map.getBearing();
     }
     last = now;
-    frame = requestAnimationFrame(spin);
+    frame = requestAnimationFrame(swing);
   };
   const arm = () => {
     cancelAnimationFrame(frame);
@@ -147,7 +202,9 @@ export function startIdleOrbit(map: MapboxMap): void {
     last = 0;
     clearTimeout(timer);
     timer = setTimeout(() => {
-      if (canOrbit(map.getZoom())) frame = requestAnimationFrame(spin);
+      if (!canOrbit(map.getZoom())) return;
+      fresh = true;
+      frame = requestAnimationFrame(swing);
     }, IDLE_MS);
   };
 

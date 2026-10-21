@@ -13,6 +13,12 @@ export const REGION_LABEL_LAYER = "region-labels";
 const SOURCE = "region-labels";
 
 /**
+ * Below this zoom (the globe, and the first half of the intro flight) the basemap names the geography:
+ * Malaysia, Brunei, Jakarta, Makassar, Laut Sulu. From here the region columns and their names are the map
+ * (the intro crosses it at about 2.4 s, before the columns rise at 4.3 s).
+ */
+export const GLOBE_LABEL_ZOOM = 5.5;
+/**
  * Basemap place names come back from this zoom, and the region labels hand over at the same zoom: the
  * columns are gone by then. Behind a column, even a short fading one, Standard draws them ghosted.
  */
@@ -22,23 +28,28 @@ export const ROAD_LABEL_ZOOM = 11;
 
 /** Basemap label switches for a zoom (Standard config `showPlaceLabels` and `showRoadLabels`). */
 export function basemapLabelConfig(zoom: number): { showPlaceLabels: boolean; showRoadLabels: boolean } {
-  return { showPlaceLabels: zoom >= PLACE_LABEL_ZOOM, showRoadLabels: zoom >= ROAD_LABEL_ZOOM };
+  return {
+    showPlaceLabels: zoom < GLOBE_LABEL_ZOOM || zoom >= PLACE_LABEL_ZOOM,
+    showRoadLabels: zoom >= ROAD_LABEL_ZOOM,
+  };
 }
 
 type Anchor = "center" | "left" | "right" | "top" | "bottom";
 
 /**
- * Hand-placed labels for the crowded coast, checked by render at 1280 to 1920 px wide in day and night
- * light. Mapbox cannot move them on its own: `text-variable-anchor` switches off the lift onto the
- * columns (labels fall back to the ground and overlap), so each label has one fixed anchor.
+ * Hand-placed labels for the crowded coast. All ten hold, without touching each other, over the whole
+ * idle sway at 1280 to 1920 px wide (`bun run smoke` sweeps it). Mapbox cannot move them on its own:
+ * `text-variable-anchor` switches off the lift onto the columns in GL JS 3.33 (its render path drops
+ * `symbol-z-offset`), so each label has one fixed anchor. Every `at` point lies inside its region
+ * (tests/web/labelPlacement.test.ts).
  */
 export const LABEL_PLACEMENT: Partial<Record<string, { at?: [number, number]; anchor?: Anchor; offset?: [number, number] }>> = {
   // Its widest part lies in the cluster by the coast; the inland part has room.
   "kutai-kartanegara": { at: [116.3, 0.25] },
   "kutai-timur": { at: [117.6, 1.1] },
-  // Left of its column top, clear of the Sangatta plant.
+  // Left of its column top, away from the big Sangatta plant marker behind it.
   samarinda: { anchor: "right", offset: [-0.6, 0] },
-  // Over the sea, clear of the AlamTri plant just south.
+  // Over the sea, beside the AlamTri plant marker just south.
   bontang: { anchor: "left", offset: [1, 0] },
   "penajam-paser-utara": { at: [116.45, -1.4] },
 };
@@ -68,7 +79,10 @@ export interface LabelProperties {
   name: string;
   /** Resting height of the region's column at the province view, in metres. */
   lift: number;
-  /** Placement order: cities first (small, so they have the fewest free spots), then by value. */
+  /**
+   * Placement order by the metric shown, largest first (0). Should two names ever collide, the smaller
+   * region's name yields, with Mapbox's fade; Samarinda, Kutai Kartanegara, Balikpapan and Kutai Timur never do.
+   */
   rank: number;
 }
 interface LabelCollection {
@@ -80,9 +94,7 @@ interface LabelCollection {
 export function labelFeatures(fc: RegionCollection, metric: Metric): LabelCollection {
   const regions = fc.features.map((f) => f.properties);
   const t = intensities(regions, metric);
-  const ranked = [...regions].sort(
-    (a, b) => Number(b.kind === "kota") - Number(a.kind === "kota") || metricValue(b, metric) - metricValue(a, metric),
-  );
+  const ranked = [...regions].sort((a, b) => metricValue(b, metric) - metricValue(a, metric));
   const rank = new Map(ranked.map((r, i) => [r.id, i]));
   return {
     type: "FeatureCollection",
@@ -110,10 +122,11 @@ export function labelLift(): ExpressionSpecification {
 
 /**
  * Full or nothing by zoom, never in between: the camera of a selected region rests anywhere from zoom 7.5
- * to 10.5, and a fade band there left a ghosted name.
+ * to 10.5, and a fade band there left a ghosted name. Shown only while the columns are the map: below
+ * GLOBE_LABEL_ZOOM the basemap names the geography, from PLACE_LABEL_ZOOM the place names are back.
  */
 export function labelOpacity(): ExpressionSpecification {
-  return ["step", ["zoom"], 1, PLACE_LABEL_ZOOM, 0];
+  return ["step", ["zoom"], 0, GLOBE_LABEL_ZOOM, 1, PLACE_LABEL_ZOOM, 0];
 }
 
 /** Adds the labels, hidden. `setRegionLabelsShown` reveals them once the columns stand still. */

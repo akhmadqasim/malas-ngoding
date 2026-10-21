@@ -137,7 +137,8 @@ export function MapView({ token, regions, plants, onIntroStart, onIntroEnd, onRe
             show3dLandmarks: false,
             showPointOfInterestLabels: false,
             showTransitLabels: false,
-            // Our own region labels name the province view; basemap names return closer in.
+            // Basemap names on the globe, our own region labels at the province view, basemap names again
+            // closer in (basemapLabelConfig).
             ...basemapLabelConfig(GLOBE_VIEW.zoom),
           },
         },
@@ -175,8 +176,9 @@ export function MapView({ token, regions, plants, onIntroStart, onIntroEnd, onRe
     };
     map.on("zoom", updateOvercast);
 
-    // Basemap labels follow the zoom: place names give way to the region labels at the province view,
-    // road names wait for city zoom. The config only changes when the view crosses a threshold.
+    // Basemap labels follow the zoom: place names name the globe, give way to the region labels while the
+    // columns stand and return at city zoom; road names wait for city zoom. The config only changes when
+    // the view crosses a threshold, and that includes the middle of a flight (the intro crosses zoom 5.5).
     let basemapLabels = basemapLabelConfig(GLOBE_VIEW.zoom);
     const updateBasemapLabels = () => {
       const next = basemapLabelConfig(map.getZoom());
@@ -185,7 +187,7 @@ export function MapView({ token, regions, plants, onIntroStart, onIntroEnd, onRe
       }
       basemapLabels = next;
     };
-    map.on("zoomend", updateBasemapLabels);
+    map.on("zoom", updateBasemapLabels);
 
     // The basemap's own fog, captured before the rain haze ever replaces it, so it can be put back.
     let baseFog: FogSpecification | null | undefined;
@@ -228,7 +230,7 @@ export function MapView({ token, regions, plants, onIntroStart, onIntroEnd, onRe
         },
         presetTone(preset),
       );
-      // Plant markers go under the region labels; their invisible hit boxes above keep labels clear.
+      // Plant markers go under the region names: a name may sit over a marker, and a marker never costs a name.
       addPlants(map, plants, now.layers.plants, { below: REGION_LABEL_LAYER });
       setRegionsVisible(map, now.layers.regions);
       setRainEffect(map, now.rain === "on", presetTone(preset), baseFog ?? null);

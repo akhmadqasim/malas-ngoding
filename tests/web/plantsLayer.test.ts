@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import type { Map as MapboxMap } from "mapbox-gl";
 import type { PlantCollection } from "../../src/web/api.ts";
-import { addPlants, PLANT_HIT_LAYER, PLANT_LAYER, PULSE_IDLE_MS, pulseWantsFrame, removePlants } from "../../src/web/map/plantsLayer.ts";
+import { addPlants, PLANT_LAYER, PULSE_IDLE_MS, pulseWantsFrame, removePlants } from "../../src/web/map/plantsLayer.ts";
 import { clearTokenCache } from "../../src/web/theme.ts";
 
 describe("plant pulse repaints only while a marker is drawn", () => {
@@ -66,29 +66,22 @@ afterEach(() => {
   clearTokenCache();
 });
 
-describe("plant markers keep the region labels clear", () => {
-  test("the drawn markers go under the region labels; an invisible copy above them keeps labels off the markers", () => {
+describe("plant markers never cost a region name", () => {
+  test("the markers are drawn under the region names and never push a name away", () => {
     const { map, order, specs } = fakeMap(["regions-extrusion", "region-labels"]);
     addPlants(map, plants, true, { below: "region-labels" });
-    expect(order).toEqual(["regions-extrusion", PLANT_LAYER, "region-labels", PLANT_HIT_LAYER]);
-    // Drawn markers never push other symbols away (their pulse ring is large)...
+    // A name may sit over a marker (its ink halo keeps it legible); the marker stays visible around it.
+    expect(order).toEqual(["regions-extrusion", PLANT_LAYER, "region-labels"]);
     expect(specs.get(PLANT_LAYER)?.layout?.["icon-ignore-placement"]).toBe(true);
-    // ...the hit layer does, with a box the size of the marker itself, and is never seen.
-    const hit = specs.get(PLANT_HIT_LAYER)!;
-    expect(hit.layout?.["icon-ignore-placement"]).toBe(false);
-    expect(hit.layout?.["icon-allow-overlap"]).toBe(true);
-    expect(hit.paint?.["icon-opacity"]).toBe(0);
-    expect(hit.layout?.["icon-size"]).toEqual(specs.get(PLANT_LAYER)?.layout?.["icon-size"]);
+    expect(specs.get(PLANT_LAYER)?.layout?.["icon-allow-overlap"]).toBe(true);
     removePlants(map);
     expect(order).toEqual(["regions-extrusion", "region-labels"]);
   });
 
-  test("the hit box is the marker's core and ring, not its pulse", () => {
+  test("only the marker images of the fuels present are added, and all of them are removed", () => {
     const { map, images } = fakeMap();
     addPlants(map, plants, true);
-    const hit = images.get("plant-hit")!;
-    const marker = images.get("plant-batubara")!;
-    expect(hit.width).toBeLessThan(marker.width / 2);
+    expect([...images.keys()].sort()).toEqual(["plant-batubara", "plant-gas"]);
     removePlants(map);
     expect(images.size).toBe(0);
   });

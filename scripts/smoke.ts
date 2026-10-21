@@ -1,10 +1,11 @@
 /**
  * Browser smoke check of the running app. Start `bun dev` first, then run `bun run smoke`.
  *
- * It opens the app in Chromium, lets the intro play, checks the regions, plants, layout, the hover
- * preview, click, metric switch, the rain reveal and overcast tint at building zoom, the Cahaya light
- * switch and the "Coba lagi" failure path, and exits non-zero on any failed check, console error or
- * console warning (known Mapbox warnings are listed, not counted).
+ * It opens the app in Chromium, lets the intro play (basemap names on the globe), checks the regions,
+ * plants, layout, the region names across the whole idle sway (CO2 and kWh), the hover preview, click,
+ * metric switch, picking from the list and coming back (mouse and keyboard), the rain reveal and overcast
+ * tint at building zoom, the Cahaya light switch and the "Coba lagi" failure path, and exits non-zero on
+ * any failed check, console error or console warning (known Mapbox warnings are listed, not counted).
  *
  * Options (env):
  * - BASE_URL (default http://localhost:3000)
@@ -17,7 +18,9 @@ import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import type { ConsoleMessage, Page } from "playwright";
 import { launchBrowser } from "./chromium.ts";
+import { KALTIM_VIEW, SWAY_DEG } from "../src/web/map/camera.ts";
 import { lightPresetFor } from "../src/web/map/effects.ts";
+import { GLOBE_LABEL_ZOOM } from "../src/web/map/regionLabels.ts";
 
 const BASE_URL = Bun.env.BASE_URL ?? "http://localhost:3000";
 const SCREENS = "docs/technical/screens";
@@ -95,6 +98,147 @@ const waitForMapIdle = (page: Page, capMs = 30_000) =>
     capMs,
   );
 
+interface Box {
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+}
+const intersects = (a: Box, b: Box) => a.x1 < b.x2 && b.x1 < a.x2 && a.y1 < b.y2 && b.y1 < a.y2;
+
+/**
+ * The screen box of every symbol Mapbox placed (its collision index: the very boxes it keeps apart), with
+ * the region each one names, and the boxes of the two panels. These are Mapbox internals, so a version
+ * that moves them fails the check loudly instead of passing it silently.
+ */
+const labelLayout = (page: Page) =>
+  page.evaluate(() => {
+    const map = (window as MapWindow).__malasMap!;
+    type Grid = { boxKeys: unknown[]; bboxes: ArrayLike<number> };
+    const internals = map as unknown as { style?: { placement?: { collisionIndex?: { grid?: Grid } } } };
+    const grid = internals.style?.placement?.collisionIndex?.grid;
+    if (!grid) return null;
+    // The grid reaches 100 px past each edge of the viewport (CollisionIndex viewportPadding).
+    const PAD = 100;
+    const boxes = Array.from({ length: grid.boxKeys.length }, (_, i) => {
+      const [x1, y1, x2, y2] = [0, 1, 2, 3].map((k) => grid.bboxes[4 * i + k]! - PAD) as [number, number, number, number];
+      const named = map.queryRenderedFeatures([(x1 + x2) / 2, (y1 + y2) / 2], { layers: ["region-labels"] });
+      const ids = [...new Set(named.map((f) => (f as unknown as { properties?: { id?: string } }).properties?.id))];
+      return { x1, y1, x2, y2, id: ids.length === 1 ? (ids[0] ?? null) : null };
+    });
+    const rect = (sel: string) => {
+      const r = document.querySelector(sel)!.getBoundingClientRect();
+      return { x1: r.left, y1: r.top, x2: r.right, y2: r.bottom };
+    };
+    return { boxes, panels: [rect(".sheet"), rect(".legend")] };
+  });
+
+/** The four largest regions: their names must never yield (controller ruling, fix round 4). */
+const MAJOR_NAMES = ["samarinda", "kutai-kartanegara", "balikpapan", "kutai-timur"];
+
+/**
+ * Turns the province view through the whole idle sway, and 2 degrees past each end, one degree at a time,
+ * and checks the region names at every bearing: the four largest always shown, no name touching another
+ * or hiding under a panel, and no name flickering (a name that has to yield fades out once and back once).
+ */
+async function swaySweep(page: Page, label: string, regionIds: string[]) {
+  const rest = KALTIM_VIEW.bearing;
+  const bearings = Array.from({ length: 2 * (SWAY_DEG + 2) + 1 }, (_, i) => rest - SWAY_DEG - 2 + i);
+  const placed: string[][] = [];
+  const missing: string[] = [];
+  const touching: string[] = [];
+  const hidden: string[] = [];
+  for (const bearing of bearings) {
+    await page.keyboard.press("Shift"); // an input, so the real sway does not start during the sweep
+    await page.evaluate(
+      async (view) => {
+        const map = (window as MapWindow).__malasMap!;
+        map.jumpTo(view);
+        const start = performance.now();
+        while (!map.areTilesLoaded() && performance.now() - start < 5000) await new Promise((r) => setTimeout(r, 50));
+      },
+      { ...KALTIM_VIEW, bearing },
+    );
+    await page.waitForTimeout(650); // Mapbox places symbols again at most every 300 ms
+    const layout = await labelLayout(page);
+    if (!layout) {
+      check(false, `${label}: the Mapbox collision index is readable`);
+      return;
+    }
+    const ids = layout.boxes.flatMap((b) => (b.id ? [b.id] : []));
+    placed.push(ids);
+    for (const id of MAJOR_NAMES) if (!ids.includes(id)) missing.push(`${id} at ${bearing}°`);
+    layout.boxes.forEach((a, i) =>
+      layout.boxes.slice(i + 1).forEach((b) => {
+        if (intersects(a, b)) touching.push(`${a.id ?? "?"}/${b.id ?? "?"} at ${bearing}°`);
+      }),
+    );
+    for (const b of layout.boxes) if (layout.panels.some((p) => intersects(b, p))) hidden.push(`${b.id ?? "?"} at ${bearing}°`);
+  }
+  const flicker = regionIds.filter((id) => {
+    const shown = placed.map((ids) => ids.includes(id));
+    const flips = shown.flatMap((s, i) => (i > 0 && s !== shown[i - 1] ? [i] : []));
+    return flips.length > 2 || flips.some((f, k) => k > 0 && f - flips[k - 1]! < 3);
+  });
+  const span = `${bearings[0]}° to ${bearings.at(-1)}°`;
+  const fewest = Math.min(...placed.map((ids) => ids.length));
+  check(missing.length === 0, `${label}: the four largest regions keep their names from ${span} (${missing.join(", ") || `fewest names at any bearing: ${fewest} of ${regionIds.length}`})`);
+  check(touching.length === 0, `${label}: no name touches another (${touching.join(", ") || "none"})`);
+  check(hidden.length === 0, `${label}: no name hides under a panel (${hidden.join(", ") || "none"})`);
+  check(flicker.length === 0, `${label}: no name flickers on and off during the sway (${flicker.join(", ") || "none"})`);
+}
+
+/** The hover preview as the map and the panels show it: lifted and faded columns, list row, needle, tooltip. */
+const previewState = (page: Page, regionIds: string[]) =>
+  page.evaluate((ids) => {
+    const map = (window as MapWindow).__malasMap!;
+    const states = ids.map((id) => ({ id, ...(map.getFeatureState({ source: "regions", id }) as { hover?: boolean; fade?: number }) }));
+    return {
+      lifted: states.filter((s) => s.hover).map((s) => s.id),
+      faded: states.filter((s) => (s.fade ?? 0) > 0.01).length,
+      activeRow: document.querySelector(".ranking__row[data-active] .ranking__name")?.textContent ?? null,
+      needle: document.querySelector(".meter__name")?.textContent ?? null,
+      tooltip: document.querySelector(".map-tooltip") !== null,
+    };
+  }, regionIds);
+
+/**
+ * Points at a region in the list (pointer or keyboard focus), picks it, then goes back with "Semua
+ * wilayah" the same way. The preview must show while pointing and be gone after coming back.
+ */
+async function pickFromList(page: Page, how: "mouse" | "keyboard", region: { id: string; name: string }, regionIds: string[]) {
+  const row = page.locator(".ranking__row", { has: page.locator(".ranking__name", { hasText: new RegExp(`^${region.name}$`) }) });
+  if (how === "mouse") {
+    await row.hover();
+  } else {
+    await page.mouse.move(VIEW_W - 120, 90); // off the regions, so only the keyboard points
+    await row.focus();
+  }
+  await page.waitForTimeout(500);
+  const pointing = await previewState(page, regionIds);
+  check(
+    pointing.lifted.join() === region.id && pointing.faded === regionIds.length - 1 && pointing.needle === region.name && !pointing.tooltip,
+    `${how}: pointing at ${region.name} in the list lifts it, fades the others and swings the needle, with no tooltip`,
+  );
+  if (how === "mouse") await row.click();
+  else await page.keyboard.press("Enter");
+  const back = page.getByRole("button", { name: "Semua wilayah" });
+  await back.waitFor({ timeout: 5000 });
+  await page.waitForTimeout(2600);
+  if (how === "mouse") {
+    await back.click();
+  } else {
+    await back.focus();
+    await page.keyboard.press("Enter");
+  }
+  await page.waitForTimeout(1500); // the columns rise again and their colour comes back
+  const after = await previewState(page, regionIds);
+  check(
+    after.lifted.length === 0 && after.faded === 0 && after.activeRow === null && after.needle === null,
+    `${how}: after picking ${region.name} from the list and going back, no preview is left (lifted ${after.lifted.join() || "none"}, faded ${after.faded}, row ${after.activeRow ?? "none"}, needle ${after.needle ?? "none"})`,
+  );
+}
+
 const failures: string[] = [];
 const consoleProblems: string[] = [];
 /** The last check that ran, so a console problem says roughly where it happened. */
@@ -130,7 +274,17 @@ try {
 
   await page.getByRole("button", { name: "Lewati intro" }).waitFor({ timeout: 30_000 });
   check(true, "intro flight starts");
-  await page.waitForTimeout(3000);
+  const globe = await page.evaluate(() => {
+    const map = (window as MapWindow).__malasMap!;
+    return { zoom: map.getZoom(), placeLabels: map.getConfigProperty("basemap", "showPlaceLabels") as boolean };
+  });
+  check(
+    globe.placeLabels === globe.zoom < GLOBE_LABEL_ZOOM,
+    `the globe names its geography until the columns take over at zoom ${GLOBE_LABEL_ZOOM} (zoom ${globe.zoom.toFixed(1)}, place names ${globe.placeLabels ? "on" : "off"})`,
+  );
+  await page.waitForTimeout(800);
+  await shot(page, "1-intro-globe");
+  await page.waitForTimeout(2200);
   await shot(page, "1-intro");
 
   await page.locator(".ui-layer").waitFor({ timeout: 40_000 });
@@ -185,6 +339,23 @@ try {
   await shot(page, "2-overview");
   await screen(page, "map.png");
 
+  // The idle sway: the region names must hold over every bearing it reaches, for both metrics. The pointer
+  // rests on the sheet's title, so no hover preview runs meanwhile.
+  const regionList = ((await (await fetch(new URL("/api/regions", BASE_URL))).json()) as { features: { properties: { id: string; name: string } }[] }).features.map(
+    (f) => f.properties,
+  );
+  const regionIds = regionList.map((r) => r.id);
+  await page.mouse.move(sheet.left + 30, sheet.top + 20);
+  await swaySweep(page, "sway, CO2", regionIds);
+  await shot(page, "2-sway-end");
+  await page.getByRole("radio", { name: "Listrik" }).click();
+  await page.waitForTimeout(2200); // the columns sink and rise; the names follow
+  await swaySweep(page, "sway, kWh", regionIds);
+  await page.getByRole("radio", { name: "Emisi CO2" }).click();
+  await page.keyboard.press("Shift");
+  await page.evaluate((view) => (window as MapWindow).__malasMap!.jumpTo(view), KALTIM_VIEW);
+  await page.waitForTimeout(2200);
+
   // Hover and click Paser through the map, not the panel. It is the southernmost region, so no other
   // column stands in front of it, and it has no power plant marker on top.
   const point = await page.evaluate(() => {
@@ -197,7 +368,10 @@ try {
   check(await page.locator(".map-tooltip").isVisible(), "hovering a region shows its tooltip");
   check((await page.locator(".meter__name").textContent()) === "Paser", "the legend needle reads the hovered region");
   const hover = await mapState(page);
-  check(hover.paser.hover === true && hover.samarinda.recede === true && hover.paser.recede === false, "hover lifts the region and the others recede");
+  check(
+    hover.paser.hover === true && Number(hover.samarinda.fade) > 0.5 && !hover.paser.fade,
+    `hover lifts the region and the others fade back (Samarinda fade ${Number(hover.samarinda.fade ?? 0).toFixed(2)})`,
+  );
   await shot(page, "3-hover");
   await page.mouse.click(point.x, point.y - 20);
   await page.getByRole("button", { name: "Semua wilayah" }).waitFor({ timeout: 5000 });
@@ -212,11 +386,21 @@ try {
   await shot(page, "5-kwh");
   await page.getByRole("radio", { name: "Emisi CO2" }).click();
   await page.getByRole("button", { name: "Semua wilayah" }).click();
-  await page.waitForTimeout(400);
-  check((await mapState(page)).samarinda.recede !== true, "nothing recedes once the pointer has left the regions");
-  await page.waitForTimeout(2600);
+  await page.waitForTimeout(1500);
+  const backFromMap = await previewState(page, regionIds);
+  check(
+    backFromMap.lifted.length === 0 && backFromMap.faded === 0 && !backFromMap.tooltip,
+    `back from a region picked on the map: nothing stays lifted or faded (lifted ${backFromMap.lifted.join() || "none"}, faded ${backFromMap.faded})`,
+  );
+  await page.waitForTimeout(1100);
   await waitForMapIdle(page);
   await shot(page, "6-back");
+
+  // Picking from the list: the clicked row disappears with the list, so it never sees the pointer leave.
+  await pickFromList(page, "mouse", regionList.find((r) => r.id === "paser")!, regionIds);
+  await shot(page, "6-back-list-mouse");
+  await pickFromList(page, "keyboard", regionList.find((r) => r.id === "berau")!, regionIds);
+  await shot(page, "6-back-list-keyboard");
 
   // Rain: switched on at the province view it stays invisible (density 0) and the legend explains why.
   await page.getByRole("switch", { name: "Hujan" }).click();

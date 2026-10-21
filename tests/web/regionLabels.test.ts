@@ -3,6 +3,7 @@ import type { RegionCollection } from "../../src/web/api.ts";
 import {
   basemapLabelConfig,
   CLOSE_LABEL_ZOOM,
+  GLOBE_LABEL_ZOOM,
   LABEL_PLACEMENT,
   labelAnchor,
   labelFeatures,
@@ -62,9 +63,23 @@ describe("region label features", () => {
     expect(byId.get("mahakam-ulu")!.properties.lift).toBeLessThan(byId.get("bontang")!.properties.lift);
   });
 
-  test("cities are placed first, then the larger values", () => {
+  test("the larger the region's value, the earlier its name is placed, so the big names never yield", () => {
     const order = [...labels.features].sort((a, b) => a.properties.rank - b.properties.rank).map((f) => f.properties.id);
-    expect(order).toEqual(["samarinda", "bontang", "kutai-kartanegara", "mahakam-ulu"]);
+    expect(order).toEqual(["samarinda", "kutai-kartanegara", "bontang", "mahakam-ulu"]);
+  });
+
+  test("the ranking follows the metric shown", () => {
+    // A fixture where the two metrics disagree: Bontang uses more power but emits less.
+    const swapped: RegionCollection = {
+      ...fc,
+      features: fc.features.map((f) =>
+        f.properties.id === "bontang" ? { ...f, properties: { ...f.properties, kwhYear: 1.3e9, co2KgYear: 1 } } : f,
+      ),
+    };
+    const rank = (metric: "co2" | "kwh") =>
+      new Map(labelFeatures(swapped, metric).features.map((f) => [f.properties.id, f.properties.rank])).get("bontang");
+    expect(rank("kwh")).toBe(1);
+    expect(rank("co2")).toBe(3);
   });
 
   test("a region without a label point is left out instead of being drawn at 0,0", () => {
@@ -96,9 +111,10 @@ describe("label anchors", () => {
 });
 
 describe("label opacity", () => {
-  test("full or nothing, switched at the zoom where the place names return: never half-faded", () => {
+  test("full or nothing, only while the columns are the map: never half-faded", () => {
     // A selected region's camera can rest anywhere from zoom 7.5 to 10.5; a fade band there left a ghost.
-    expect(labelOpacity()).toEqual(["step", ["zoom"], 1, PLACE_LABEL_ZOOM, 0]);
+    // On the globe the basemap names the geography instead, and from city zoom the place names return.
+    expect(labelOpacity()).toEqual(["step", ["zoom"], 0, GLOBE_LABEL_ZOOM, 1, PLACE_LABEL_ZOOM, 0]);
   });
 });
 
@@ -111,7 +127,12 @@ describe("label lift follows the columns", () => {
 describe("basemap labels make room for the region labels", () => {
   test("no basemap place or road labels at the province view", () => {
     expect(basemapLabelConfig(6.6)).toEqual({ showPlaceLabels: false, showRoadLabels: false });
-    expect(basemapLabelConfig(2)).toEqual({ showPlaceLabels: false, showRoadLabels: false });
+    expect(basemapLabelConfig(GLOBE_LABEL_ZOOM)).toEqual({ showPlaceLabels: false, showRoadLabels: false });
+  });
+  test("the globe and the start of the intro name the geography (Malaysia, Sulawesi, Selat Makassar)", () => {
+    expect(GLOBE_LABEL_ZOOM).toBe(5.5);
+    expect(basemapLabelConfig(2)).toEqual({ showPlaceLabels: true, showRoadLabels: false });
+    expect(basemapLabelConfig(5.49)).toEqual({ showPlaceLabels: true, showRoadLabels: false });
   });
   test("place names come back closer in, road names at city zoom", () => {
     // Place names wait until the columns are gone (zoom 12): behind a fading column they look ghosted.
