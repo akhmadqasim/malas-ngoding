@@ -83,7 +83,7 @@ export async function simulateSolarAt(
     );
   }
   assumptions.push(
-    `CO2 yang dihindari memakai faktor ${costs.solarFactorKgPerKwh.toLocaleString("id-ID")} kg CO2 per kWh, faktor emisi untuk PLTS di sistem Mahakam (Kepmen ESDM 163.K/2021, data 2019).`,
+    `CO2 yang dihindari dihitung dari listrik yang dipakai sendiri (yang masuk jaringan tidak dihitung), dengan faktor ${costs.solarFactorKgPerKwh.toLocaleString("id-ID")} kg CO2 per kWh, faktor emisi untuk PLTS di sistem Mahakam (Kepmen ESDM 163.K/2021, data 2019).`,
   );
   if (climate.fallback) assumptions.push(climate.fallback);
   return {

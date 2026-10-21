@@ -81,6 +81,8 @@ describe("formulas and factor tables", () => {
     expect(text).toContain("0,78 adalah rasio kinerja");
     expect(text).toContain("luas atap × 0,6");
     expect(text).toContain("1,13 khusus untuk PLTS dan PLTB");
+    expect(text).toContain("CO2 yang dihindari dihitung dari listrik yang dipakai sendiri");
+    expect(text).toContain("dibulatkan turun (paling sedikit satu panel)");
     expect(text).toContain("3 m ke bawah");
   });
 

@@ -468,7 +468,7 @@ export function MethodologyContent({ grid }: { grid: GridMix }) {
         </p>
         <p>
           {chem(
-            `CO2 yang dihindari memakai faktor ${factor(SOLAR_MARGIN_KG_PER_KWH)} khusus untuk PLTS dan PLTB, dari Kepmen yang sama dengan ${factor(grid.factorKgPerKwh)} untuk jaringan; selisihnya sekitar ${fmtNumber((1 - SOLAR_MARGIN_KG_PER_KWH / grid.factorKgPerKwh) * 100)}%.`,
+            `CO2 yang dihindari dihitung dari listrik yang dipakai sendiri; listrik yang masuk jaringan tidak dihitung. Faktornya ${factor(SOLAR_MARGIN_KG_PER_KWH)} khusus untuk PLTS dan PLTB, dari Kepmen yang sama dengan ${factor(grid.factorKgPerKwh)} untuk jaringan; selisihnya sekitar ${fmtNumber((1 - SOLAR_MARGIN_KG_PER_KWH / grid.factorKgPerKwh) * 100)}%.`,
           )}{" "}
           Tarif PLN mengikuti golongan jenis gedung (misalnya R-1 untuk rumah, P-1 untuk kantor pemerintah, B-2 untuk ruko dan
           kantor). Harga panel, baterai, dan tarif PLN berasal dari berita dan blog vendor 2026 yang belum diverifikasi. Balik modal

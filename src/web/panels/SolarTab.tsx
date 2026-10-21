@@ -161,7 +161,7 @@ function SolarResultView({ result, demandKwh, stale }: { result: SolarSimulation
             >
               <AnimatedNumber value={result.paybackYears} format={oneDecimal} />
             </TabFact>
-            <TabFact label="CO2 dihindari" unit={`${co2Tonnes ? "ton" : "kg"} CO2 per tahun, perkiraan`}>
+            <TabFact label="CO2 dihindari" unit={`${co2Tonnes ? "ton" : "kg"} CO2 per tahun dari listrik yang dipakai sendiri, perkiraan`}>
               <AnimatedNumber value={co2Tonnes ? result.co2AvoidedKgYear / 1000 : result.co2AvoidedKgYear} format={co2Tonnes ? oneDecimal : whole} />
             </TabFact>
           </dl>

@@ -137,7 +137,7 @@ export const simulateSolar: ServerTool = {
         savingText: estimated(`${fmtRupiah(sim.savingRpYear)} per tahun`),
         paybackText: estimated(`${fmtNumber(sim.paybackYears, 1)} tahun`),
         paybackPanelText: estimated(`${fmtNumber(sim.paybackPanelYears, 1)} tahun`),
-        co2AvoidedText: estimated(`${fmtKg(sim.co2AvoidedKgYear)} CO2 per tahun`),
+        co2AvoidedText: estimated(`${fmtKg(sim.co2AvoidedKgYear)} CO2 per tahun, dari listrik yang dipakai sendiri`),
         peakSunHoursText: `${fmtNumber(sim.peakSunHours, 1)} jam matahari puncak per hari`,
         assumptions: sim.assumptions,
       },
