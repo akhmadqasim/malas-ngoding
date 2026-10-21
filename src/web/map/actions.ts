@@ -3,7 +3,7 @@ import { api } from "../api.ts";
 import { type MarkedPlace, showPlaces } from "../chat/placesLayer.ts";
 import type { ChatAction } from "../chat/sse.ts";
 import { type AppState, type LayerKey, type Metric, type PanelTab, type RainMode, useAppStore } from "../store.ts";
-import { BUILDING_ZOOM, buildingViewPadding, type Padding } from "./buildings.ts";
+import { BUILDING_ZOOM, buildingViewPadding, type Padding, revealBuilding } from "./buildings.ts";
 import { FLY_MS, flyToProvince, flyToRegion } from "./camera.ts";
 
 // Turns the map actions of the AI chat (server `action` events) into store and camera calls.
@@ -30,8 +30,9 @@ function panelsPadding(): Padding | undefined {
   const w = window.innerWidth;
   const chat = document.querySelector(".chat")?.getBoundingClientRect();
   if (chat && chat.width > 0 && chat.width < w / 2) pad.right = Math.max(pad.right, w - chat.left + PANEL_GAP);
-  // Never pad the view away entirely (narrow windows).
-  if (pad.left + pad.right > w * 0.8) [pad.left, pad.right] = [PANEL_GAP, PANEL_GAP];
+  // Never pad the view away entirely (narrow windows). With the sheet, the building panel and the chat open
+  // side by side a 1366 px window keeps a strip of about 230 px, enough for one building.
+  if (pad.left + pad.right > w * 0.9) [pad.left, pad.right] = [PANEL_GAP, PANEL_GAP];
   return pad;
 }
 
@@ -109,7 +110,15 @@ async function selectBuilding(target: ActionTarget, lngLat: [number, number]): P
   if (map) await afterRegionFlightStarts(map);
   await target.getState().selectBuildingAt(lngLat);
   const after = target.getState();
-  if (after.map && after.buildingStatus === "empty" && after.map.getZoom() < CITY_ZOOM) flyTo(after.map, target, lngLat, BUILDING_ZOOM);
+  if (!after.map) return;
+  if (after.buildingStatus === "empty" && after.map.getZoom() < CITY_ZOOM) {
+    flyTo(after.map, target, lngLat, BUILDING_ZOOM);
+    return;
+  }
+  // Lane buildings frames the building beside its panel; the chat panel sits there too, so slide the
+  // building out from under it when needed.
+  const padding = target.viewPadding();
+  if (padding && after.buildingStatus !== "idle") revealBuilding(after.map, after.selectedBuildingAt ?? lngLat, padding);
 }
 
 function placesOf(v: unknown): MarkedPlace[] {

@@ -26,6 +26,10 @@ function fakeMap() {
     getPitch: () => 55,
     getBearing: () => -14,
     getZoom: () => 6.55,
+    // A building drawn at x 900 of a 1366 x 768 canvas.
+    project: () => ({ x: 900, y: 300 }),
+    getCanvas: () => ({ clientWidth: 1366, clientHeight: 768 }),
+    easeTo: (o: Flight) => flights.push(o),
     cameraForBounds: () => undefined,
   };
   return { map: map as unknown as MapboxMap, flights, startMoving: map.startMoving };
@@ -143,6 +147,14 @@ describe("runAction", () => {
     useAppStore.setState({ selectBuildingAt: async () => useAppStore.setState({ buildingStatus: "empty" }) });
     expect(await runAction({ name: "select_building_at", input: { lng: 117.151, lat: -0.501 } }, target)).toBe(true);
     expect(flights[0]).toMatchObject({ center: [117.151, -0.501], zoom: 17.5, pitch: 60 });
+  });
+
+  test("a selected building under the chat panel slides out from under it", async () => {
+    useAppStore.setState({ selectBuildingAt: async (at) => useAppStore.setState({ buildingStatus: "ready", selectedBuildingAt: at }) });
+    const padding = { top: 24, bottom: 24, left: 360, right: 772 }; // the clear strip ends at x 594
+    await runAction({ name: "select_building_at", input: { lng: 117.151, lat: -0.501 } }, { ...target, viewPadding: () => padding });
+    expect(flights).toHaveLength(1);
+    expect(flights[0]).toMatchObject({ center: [117.151, -0.501], padding });
   });
 
   test("a building that was found leaves the camera to lane buildings", async () => {
