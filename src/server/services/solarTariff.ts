@@ -94,7 +94,7 @@ export function usePatternFor(type: BuildingType | undefined): UsePattern {
   const daysNote =
     openDays >= 365
       ? `${upper(who)} dianggap dipakai setiap hari, 365 hari setahun (perkiraan).`
-      : `${upper(who)} dipakai sekitar ${openDays} hari setahun (perkiraan); di hari lain gedung hanya memakai beban dasar sekitar ${fmtNumber(base * 100)}% dari hari biasa, jadi listrik panel hari itu sebagian besar masuk jaringan tanpa imbalan.`;
+      : `${upper(who)} dipakai sekitar ${openDays} hari setahun (perkiraan); di hari lain gedung hanya memakai beban dasar sekitar ${fmtNumber(base * 100)}% dari hari biasa, jadi listrik panel hari itu yang melebihi beban dasar masuk jaringan tanpa imbalan.`;
   return {
     share,
     openDays,
