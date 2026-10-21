@@ -55,6 +55,11 @@ export interface AppDeps {
   recommender: RecommendationWriter | null;
 }
 
+/** Bun's hot reload and browser console echo are for `bun dev` only; a production run turns them off. */
+export function bunDevelopment(nodeEnv: string | undefined): false | { hmr: true; console: true } {
+  return nodeEnv === "production" ? false : { hmr: true, console: true };
+}
+
 export function createServer(opts: { port: number; deps: AppDeps }): Server<undefined> {
   const { deps } = opts;
   return Bun.serve({
@@ -73,7 +78,7 @@ export function createServer(opts: { port: number; deps: AppDeps }): Server<unde
       "/api/*": () => error("Endpoint tidak ditemukan", 404),
       "/*": indexHtml,
     },
-    development: { hmr: true, console: true },
+    development: bunDevelopment(Bun.env.NODE_ENV),
   });
 }
 

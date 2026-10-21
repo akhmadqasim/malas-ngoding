@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import type { Server } from "bun";
-import { createServer } from "../../src/server/index.ts";
+import { bunDevelopment, createServer } from "../../src/server/index.ts";
 import { fakeDeps } from "./fakes.ts";
 
 let server: Server<undefined>;
@@ -33,5 +33,16 @@ describe("server shell", () => {
     const body = (await res.json()) as { error: string };
     expect(typeof body.error).toBe("string");
     expect(body.error.length).toBeGreaterThan(0);
+  });
+});
+
+describe("development flags", () => {
+  test("hmr and console are on outside production", () => {
+    expect(bunDevelopment(undefined)).toEqual({ hmr: true, console: true });
+    expect(bunDevelopment("development")).toEqual({ hmr: true, console: true });
+  });
+
+  test("hmr and console are off when NODE_ENV is production", () => {
+    expect(bunDevelopment("production")).toBe(false);
   });
 });

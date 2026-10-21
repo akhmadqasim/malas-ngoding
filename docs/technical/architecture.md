@@ -360,14 +360,14 @@ Harga panel, baterai, dan tarif berasal dari berita dan blog vendor 2026 yang be
 | `bun run setup` | Menunggu database siap, lalu migrasi, seed, dan pemanasan cache. Aman diulang. |
 | `bun run migrate`, `bun run seed`, `bun run warm` | Tiap langkah setup secara terpisah (`warm` diverifikasi ulang di T11b) |
 | `bun dev` | Server dengan hot reload di `http://localhost:3000` |
-| `bun start` | Server tanpa hot reload |
+| `bun start` | Server mode produksi (`NODE_ENV=production`): tanpa hot reload dan tanpa log konsol peramban |
 | `bun test` | Seluruh tes |
 | `bun run typecheck` | Pemeriksaan tipe TypeScript |
 | `bun run smoke` | Pemeriksaan peramban otomatis (server harus sudah jalan) |
 | `bun run contrast` | Mengukur kontras warna kolom dari hasil render |
 | `bun scripts/build-boundaries.ts` | Membangun ulang `data/seed/regions.geojson` dari geoBoundaries |
 
-Database memakai port 5433 di komputer Anda supaya tidak bentrok dengan PostgreSQL lain yang biasanya memakai 5432. Data tersimpan di volume Docker `malas_ngoding_pg`.
+Database memakai port 5433 di komputer Anda supaya tidak bentrok dengan PostgreSQL lain yang biasanya memakai 5432. Port itu hanya terbuka di alamat lokal (`127.0.0.1`), jadi komputer lain di jaringan tidak bisa menjangkaunya. Data tersimpan di volume Docker `malas_ngoding_pg`.
 
 ### Image Docker aplikasi
 
