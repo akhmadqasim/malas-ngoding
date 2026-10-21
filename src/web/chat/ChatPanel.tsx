@@ -57,7 +57,7 @@ function useDockClearance(panel: RefObject<HTMLElement | null>, open: boolean, b
 export function ChatPanel() {
   const open = useAppStore((s) => s.chatOpen);
   // The building panel owns the right edge: next to it the chat moves one column left.
-  const besideBuilding = useAppStore((s) => s.selectedBuilding !== null);
+  const besideBuilding = useAppStore((s) => s.buildingStatus !== "idle");
   const panel = useRef<HTMLElement>(null);
   // Where the dock's cards reach under the panel, it ends above them.
   const clearance = useDockClearance(panel, open, besideBuilding);

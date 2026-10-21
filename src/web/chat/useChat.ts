@@ -9,18 +9,15 @@ import { type ChatAction, type ChatRequest, type StreamEvent, streamChat } from 
 // The chat panel's state: the conversation (kept in localStorage with its session id), sending a question
 // with what the map shows, streaming the answer in, running its map actions, stopping and starting over.
 
-/** Lane buildings' store field: where the selected building is, [lng, lat]. */
-type BuildingPoint = { selectedBuildingAt?: [number, number] | null };
-
 /** What the map shows as the question is sent: the app state the server puts in front of the question. */
-export function chatContext(state: AppState & BuildingPoint): ChatRequest["context"] {
+export function chatContext(state: AppState): ChatRequest["context"] {
   const map = state.map;
   const center = map?.getCenter().wrap();
   const zoom = map?.getZoom() ?? KALTIM_VIEW.zoom;
   return {
     selectedRegionId: state.selectedRegionId,
     selectedBuilding: state.selectedBuilding,
-    selectedBuildingAt: state.selectedBuilding ? (state.selectedBuildingAt ?? null) : null,
+    selectedBuildingAt: state.selectedBuilding ? state.selectedBuildingAt : null,
     view: { center: center ? [center.lng, center.lat] : KALTIM_VIEW.center, zoom: Math.min(24, Math.max(0, zoom)) },
   };
 }

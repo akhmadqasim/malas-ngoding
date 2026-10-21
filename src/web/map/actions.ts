@@ -7,12 +7,9 @@ import { FLY_MS, flyToProvince, flyToRegion } from "./camera.ts";
 
 // Turns the map actions of the AI chat (server `action` events) into store and camera calls.
 
-/** Lane buildings' contract: select the building at a point, fly there and open its panel. */
-type BuildingSelection = { selectBuildingAt?: (lngLat: [number, number]) => Promise<void> };
-
 /** Where actions land. Tests pass their own; the app uses the store, the map in it and the API. */
 export interface ActionTarget {
-  getState: () => AppState & BuildingSelection;
+  getState: () => AppState;
   /** A region's centre, to fly to the region that is already selected. */
   regionCentroid: (id: string) => Promise<[number, number] | null>;
   /** Marks found places on the map; a click on one selects the building there. */
@@ -30,9 +27,6 @@ export const appTarget: ActionTarget = {
   showPlaces,
   reducedMotion: () => typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches,
 };
-
-/** The zoom at which single buildings fill the view (camera for a building without lane buildings). */
-export const BUILDING_ZOOM = 17.5;
 
 const LAYERS: readonly LayerKey[] = ["regions", "plants", "buildings"];
 const METRICS: readonly Metric[] = ["co2", "kwh"];
@@ -58,8 +52,8 @@ function flyTo(map: MapboxMap, target: ActionTarget, center: [number, number], z
   });
 }
 
-/** When this chat last selected a region; MapView starts that flight once the region's centre has loaded. */
-let regionAskedAt = 0;
+/** When the chat last selected a region on a map; MapView starts that flight once the region's centre has loaded. */
+const regionAskedAt = new WeakMap<MapboxMap, number>();
 /** How long a region flight may take to start after the selection. */
 export const REGION_FLIGHT_WAIT_MS = 1000;
 
@@ -69,26 +63,24 @@ export const REGION_FLIGHT_WAIT_MS = 1000;
  * centre arrives a moment later.
  */
 function afterRegionFlightStarts(map: MapboxMap): Promise<void> {
-  if (Date.now() - regionAskedAt > REGION_FLIGHT_WAIT_MS || map.isMoving?.()) return Promise.resolve();
+  const since = Date.now() - (regionAskedAt.get(map) ?? 0);
+  if (since > REGION_FLIGHT_WAIT_MS || map.isMoving()) return Promise.resolve();
   return new Promise((resolve) => {
     const done = () => {
       clearTimeout(timer);
       map.off("movestart", done);
       resolve();
     };
-    const timer = setTimeout(done, REGION_FLIGHT_WAIT_MS - (Date.now() - regionAskedAt));
+    const timer = setTimeout(done, REGION_FLIGHT_WAIT_MS - since);
     map.once("movestart", done);
   });
 }
 
-/** Selects the building at a point through lane buildings, or at least flies there until that lands. */
+/** Selects the building at a point as a click would: the camera flies there and the building panel opens. */
 async function selectBuilding(target: ActionTarget, lngLat: [number, number]): Promise<void> {
-  const state = target.getState();
-  if (typeof state.selectBuildingAt === "function") {
-    await state.selectBuildingAt(lngLat);
-    return;
-  }
-  if (state.map) flyTo(state.map, target, lngLat, BUILDING_ZOOM);
+  const map = target.getState().map;
+  if (map) await afterRegionFlightStarts(map);
+  await target.getState().selectBuildingAt(lngLat);
 }
 
 function placesOf(v: unknown): MarkedPlace[] {
@@ -115,9 +107,9 @@ export async function runAction(action: ChatAction, target: ActionTarget = appTa
         const id = typeof input.region === "string" ? input.region : null;
         if (!id) return false;
         // A region is the province-level view: the building panel steps aside.
-        if (state.selectedBuilding) state.setSelectedBuilding(null);
+        if (state.buildingStatus !== "idle") state.closeBuilding();
         if (state.selectedRegionId !== id) {
-          regionAskedAt = Date.now();
+          if (state.map) regionAskedAt.set(state.map, Date.now());
           state.selectRegion(id); // MapView flies to a newly selected region.
           return true;
         }
@@ -128,7 +120,7 @@ export async function runAction(action: ChatAction, target: ActionTarget = appTa
         return true;
       }
       case "show_all_regions": {
-        if (state.selectedBuilding) state.setSelectedBuilding(null);
+        if (state.buildingStatus !== "idle") state.closeBuilding();
         if (state.selectedRegionId) {
           state.selectRegion(null); // MapView flies back to the province.
           return true;
@@ -147,7 +139,6 @@ export async function runAction(action: ChatAction, target: ActionTarget = appTa
       case "select_building_at": {
         const at = lngLatOf(input);
         if (!at) return false;
-        if (state.map) await afterRegionFlightStarts(state.map);
         await selectBuilding(target, at);
         return true;
       }

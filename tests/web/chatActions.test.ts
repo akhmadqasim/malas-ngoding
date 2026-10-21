@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, test } from "bun:test";
 import type { Map as MapboxMap } from "mapbox-gl";
 import { actionChips, actionLabel, regionName } from "../../src/web/chat/actionLabels.ts";
 import type { MarkedPlace } from "../../src/web/chat/placesLayer.ts";
-import { type ActionTarget, BUILDING_ZOOM, runAction } from "../../src/web/map/actions.ts";
+import { type ActionTarget, runAction } from "../../src/web/map/actions.ts";
 import { useAppStore } from "../../src/web/store.ts";
 import type { BuildingEstimate } from "../../src/shared/types.ts";
 
@@ -33,6 +33,7 @@ function fakeMap() {
 const BUILDING = { featureId: "b1", type: "sekolah" } as unknown as BuildingEstimate;
 
 let flights: Flight[];
+let picked: [number, number][];
 let startMoving: () => void;
 let marked: { places: MarkedPlace[]; pick: (lngLat: [number, number]) => void } | null;
 let centroids: string[];
@@ -48,13 +49,16 @@ beforeEach(() => {
     map: fake.map,
     selectedRegionId: null,
     selectedBuilding: null,
+    selectedBuildingAt: null,
+    buildingStatus: "idle",
     metric: "co2",
     layers: { regions: true, plants: true, buildings: true },
     rain: "auto",
     panelTab: "energi",
   });
-  // Lane buildings has not landed in this lane: no selectBuildingAt unless a test adds one.
-  useAppStore.setState({ selectBuildingAt: undefined } as never);
+  picked = [];
+  // The building lookup itself is lane buildings' (tests/web/buildingStore.test.ts); here it only records.
+  useAppStore.setState({ selectBuildingAt: async (at: [number, number]) => void picked.push(at) });
   target = {
     getState: () => useAppStore.getState(),
     regionCentroid: async (id) => {
@@ -72,10 +76,11 @@ const state = () => useAppStore.getState();
 
 describe("runAction", () => {
   test("fly_to_region selects the region (MapView flies) and closes the building panel", async () => {
-    useAppStore.setState({ selectedBuilding: BUILDING });
+    useAppStore.setState({ selectedBuilding: BUILDING, selectedBuildingAt: [117.1, -0.5], buildingStatus: "ready" });
     expect(await runAction({ name: "fly_to_region", input: { region: "samarinda" } }, target)).toBe(true);
     expect(state().selectedRegionId).toBe("samarinda");
     expect(state().selectedBuilding).toBeNull();
+    expect(state().buildingStatus).toBe("idle");
     expect(flights).toHaveLength(0);
   });
 
@@ -92,16 +97,18 @@ describe("runAction", () => {
     const picking = runAction({ name: "select_building_at", input: { lng: 117.1, lat: -0.5 } }, target).then(() => (landed = true));
     await Bun.sleep(20);
     expect(landed).toBe(false);
+    expect(picked).toEqual([]);
     startMoving();
     await picking;
-    expect(flights.at(-1)?.center).toEqual([117.1, -0.5]);
+    expect(picked).toEqual([[117.1, -0.5]]);
   });
 
   test("show_all_regions goes back to the province with nothing selected", async () => {
-    useAppStore.setState({ selectedRegionId: "samarinda", selectedBuilding: BUILDING });
+    useAppStore.setState({ selectedRegionId: "samarinda", selectedBuilding: BUILDING, buildingStatus: "ready" });
     expect(await runAction({ name: "show_all_regions", input: {} }, target)).toBe(true);
     expect(state().selectedRegionId).toBeNull();
     expect(state().selectedBuilding).toBeNull();
+    expect(state().buildingStatus).toBe("idle");
   });
 
   test("show_all_regions with nothing selected flies back to the overview", async () => {
@@ -119,17 +126,9 @@ describe("runAction", () => {
     expect(flights[0]?.duration).toBe(0);
   });
 
-  test("select_building_at calls lane buildings' selectBuildingAt when it exists", async () => {
-    const asked: [number, number][] = [];
-    useAppStore.setState({ selectBuildingAt: async (at: [number, number]) => void asked.push(at) } as never);
+  test("select_building_at selects the building through the store (it flies and opens the panel)", async () => {
     expect(await runAction({ name: "select_building_at", input: { lng: 117.151, lat: -0.501 } }, target)).toBe(true);
-    expect(asked).toEqual([[117.151, -0.501]]);
-    expect(flights).toHaveLength(0);
-  });
-
-  test("select_building_at without lane buildings still flies to the building", async () => {
-    expect(await runAction({ name: "select_building_at", input: { lng: 117.151, lat: -0.501 } }, target)).toBe(true);
-    expect(flights[0]).toMatchObject({ center: [117.151, -0.501], zoom: BUILDING_ZOOM, pitch: 60 });
+    expect(picked).toEqual([[117.151, -0.501]]);
   });
 
   test("a failing building lookup does not throw into the chat", async () => {
@@ -137,7 +136,7 @@ describe("runAction", () => {
       selectBuildingAt: async () => {
         throw new Error("estimate failed");
       },
-    } as never);
+    });
     expect(await runAction({ name: "select_building_at", input: { lng: 117.1, lat: -0.5 } }, target)).toBe(false);
   });
 
@@ -160,7 +159,8 @@ describe("runAction", () => {
     expect(await runAction({ name: "mark_places", input: { label: "sekolah", places } }, target)).toBe(true);
     expect(marked?.places).toEqual(places);
     marked?.pick([117.16, -0.49]);
-    expect(flights[0]).toMatchObject({ center: [117.16, -0.49], zoom: BUILDING_ZOOM });
+    await Bun.sleep(0);
+    expect(picked).toEqual([[117.16, -0.49]]);
   });
 
   test.each([
