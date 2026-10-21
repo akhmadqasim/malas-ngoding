@@ -152,7 +152,7 @@ Catatan riset lengkap, termasuk status verifikasi setiap angka, ada di [docs/res
 | [Global Energy Monitor (gem.wiki)](https://www.gem.wiki/) dan sumber berita dan perusahaan | Kapasitas, status, dan koordinat pembangkit | gem.wiki berlisensi CC BY-NC-SA, dan aplikasi ini non-komersial. 9 dari 13 koordinat adalah perkiraan tim dan ditandai `approx` |
 | Berita dan blog vendor 2026 (tarif PLN, harga panel dan baterai) | Asumsi biaya dan tarif di simulasi surya | Belum diverifikasi, dicatat sebagai asumsi dan diberi label "perkiraan" |
 
-Perangkat lunak pihak ketiga: Bun, React, HeroUI, Motion, Zustand, dan Tailwind CSS berlisensi MIT; TypeScript dan Playwright berlisensi Apache-2.0; font IBM Plex berlisensi SIL OFL 1.1; Mapbox GL JS v3 berlisensi Mapbox Terms of Service; PostgreSQL dan PostGIS berjalan sebagai layanan Docker terpisah dari image resmi `postgis/postgis`.
+Perangkat lunak pihak ketiga: Bun, React, HeroUI, Motion, Zustand, dan Tailwind CSS berlisensi MIT; TypeScript dan Playwright berlisensi Apache-2.0; ikon Gravity UI berlisensi MIT; Mapbox GL JS v3 berlisensi Mapbox Terms of Service; PostgreSQL dan PostGIS berjalan sebagai layanan Docker terpisah dari image resmi `postgis/postgis`.
 
 ## Metodologi singkat
 

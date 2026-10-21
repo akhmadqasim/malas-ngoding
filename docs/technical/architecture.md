@@ -70,7 +70,7 @@ Alur satu permintaan: peramban memanggil route, route memeriksa isi permintaan, 
 | Animasi | Motion (`motion/react`) | 14.4.0 | Transisi panel, angka berjalan, meter pada legenda |
 | State | Zustand | 5.0.15 | Wilayah terpilih, metrik, lapisan, cahaya, hujan |
 | Gaya | Tailwind CSS lewat `bun-plugin-tailwind` | 4.3.3 dan 0.1.2 | Semua nilai desain (warna, ukuran, gerak) ada di blok `@theme` pada `src/web/styles.css` |
-| Font | IBM Plex Sans Variable dan IBM Plex Serif (Fontsource) | 5.3.0 | Antarmuka dan angka (Sans), nama tempat (Serif) |
+| Font dan ikon | Font sistem bawaan HeroUI (SF, Segoe UI), ikon `@gravity-ui/icons` | 2.x | Semua teks antarmuka dan angka (tanpa font web); ikon alat peta dan tombol kembali |
 | AI | Anthropic Claude API, model `claude-sonnet-5-5` | belum ada di `package.json` saat draf ini (diverifikasi ulang di T11b) | Chat yang mengendalikan peta dan rekomendasi pemerintah |
 | Pengujian | `bun test`, Playwright (hanya untuk skrip smoke dan kontras) | Playwright 1.64.1 | Tes unit dan API, pemeriksaan peramban |
 | Kontainer | Docker dan Docker Compose | | Database lokal (`docker-compose.yml`) dan image aplikasi (`Dockerfile`) |

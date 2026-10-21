@@ -4,3 +4,5 @@
 - Component pages are `.mdx`, for example https://heroui.com/en/docs/react/components/switch.mdx. They list the props and the BEM classes (`.button`, `.button--ghost`, ...).
 - Theming goes through the token bridge in `src/web/atlas-theme.css`: raw values live only in the theme block of `src/web/styles.css`, the bridge maps them onto HeroUI's variables (`--surface`, `--accent`, `--border`, `--field-*`, ...) per `data-theme` on `<html>` (`atlas-night`, `atlas-day`). Never style a HeroUI component with raw values or Tailwind arbitrary values; set its variables or BEM classes in the bridge. `tests/web/tokens.test.ts` enforces it.
 - Visual rules: `docs/research/design/00-direction.md` (binding).
+- Icons: `@gravity-ui/icons` only (the set HeroUI's examples use), imported as React components (`import { Plus } from "@gravity-ui/icons"`). No hand-drawn SVGs, no other icon set.
+- Fonts: HeroUI's default system stack (`--font-sans`, `--font-mono`); no web fonts. Figures use tabular numerals (`.num`). Emphasis is weight 600 (Segoe UI has no 500). Map labels stay DIN Pro, the basemap face.
