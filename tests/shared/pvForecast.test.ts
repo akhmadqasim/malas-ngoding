@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { pvFromForecast, summariseDays } from "../../src/shared/pvForecast.ts";
+import { clearSkyDayKwh, clearSkyGhi, isRainyHour, nearestHourGapMs, pvFromForecast, summariseDays, witaMs } from "../../src/shared/pvForecast.ts";
 
 const h = (time: string, ghiWm2: number, precipMm = 0, weatherCode = 0) => ({ time, ghiWm2, cloudPct: 10, precipMm, weatherCode });
 
@@ -32,5 +32,39 @@ describe("summariseDays", () => {
     expect(days[0]!.maxPrecipMm).toBe(0.6);
     expect(days[1]!.rainy).toBe(false);
     expect(days[2]!.rainy).toBe(true);
+  });
+});
+
+describe("clear-sky irradiance (Haurwitz)", () => {
+  // 20 Mar 2026, the equinox. Solar noon at 117.15°E is about 04:19 UTC (12:19 WITA).
+  const noonUtc = Date.UTC(2026, 2, 20, 4, 19);
+  test("at the equator at equinox noon the sun is overhead: 1098 x e^-0.059 = about 1035 W/m2", () => {
+    expect(clearSkyGhi(noonUtc, 0, 117.15)).toBeCloseTo(1035, -1);
+  });
+  test("is 0 at night and lower in the morning than at noon", () => {
+    expect(clearSkyGhi(Date.UTC(2026, 2, 20, 16, 0), 0, 117.15)).toBe(0); // midnight WITA
+    const morning = clearSkyGhi(Date.UTC(2026, 2, 20, 0, 0), 0, 117.15); // 08:00 WITA
+    expect(morning).toBeGreaterThan(0);
+    expect(morning).toBeLessThan(clearSkyGhi(noonUtc, 0, 117.15));
+  });
+  test("a clear day in Samarinda gives about 7 kWh/m2, so 1 kWp makes about 5,7 kWh", () => {
+    const day = clearSkyDayKwh("2026-10-21", -0.5, 117.15, 1);
+    expect(day).toBeGreaterThan(5);
+    expect(day).toBeLessThan(6.5);
+    expect(clearSkyDayKwh("2026-10-21", -0.5, 117.15, 3)).toBeCloseTo(day * 3, 9);
+    expect(clearSkyDayKwh("2026-10-21", -0.5, 117.15, 0)).toBe(0);
+  });
+});
+
+describe("one rain rule and one clock", () => {
+  test("rain is 0,1 mm or more in the hour, or a rain weather code", () => {
+    expect(isRainyHour({ precipMm: 0.1, weatherCode: 0 })).toBe(true);
+    expect(isRainyHour({ precipMm: 0, weatherCode: 63 })).toBe(true);
+    expect(isRainyHour({ precipMm: 0.05, weatherCode: 3 })).toBe(false);
+  });
+  test("forecast times are WITA without an offset", () => {
+    expect(witaMs("2026-10-21T08:00")).toBe(Date.UTC(2026, 9, 21, 0, 0));
+    expect(nearestHourGapMs([{ time: "2026-10-21T08:00" }, { time: "2026-10-21T10:00" }], Date.UTC(2026, 9, 21, 1, 30))).toBe(30 * 60_000);
+    expect(nearestHourGapMs([], 0)).toBe(Number.POSITIVE_INFINITY);
   });
 });

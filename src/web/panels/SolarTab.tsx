@@ -1,6 +1,6 @@
-import { Button, Label, NumberField, Skeleton, Slider } from "@heroui/react";
+import { I18nProvider, Label, NumberField, Skeleton, Slider } from "@heroui/react";
 import { motion } from "motion/react";
-import { type KeyboardEvent, type PointerEvent, type ReactNode, type RefObject, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { type PointerEvent, useEffect, useRef, useState } from "react";
 import { fmtNumber, fmtRupiah } from "../../shared/format.ts";
 import { api, type SolarSimulation } from "../api.ts";
 import { AnimatedNumber } from "../components/AnimatedNumber.tsx";
@@ -10,6 +10,7 @@ import { DURATION, EASE_OUT } from "../motion.ts";
 import { useAppStore } from "../store.ts";
 import type { BuildingTabProps } from "./buildingTabs.ts";
 import { BACKUP, defaultSolarRequest, niceScale, ROOF_MAX_M2, ROOF_MIN_M2, tickText } from "./solarWeather.ts";
+import { TabFact, TabFailure, useChartCursor, useWidth } from "./tabParts.tsx";
 
 /** Wait this long after the last input change before asking the server again. */
 const INPUT_DEBOUNCE_MS = 150;
@@ -22,17 +23,24 @@ const MONTH_NAMES = ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Ju
 // Module-level formatters keep AnimatedNumber from restarting its count on every render.
 const whole = (n: number) => fmtNumber(n);
 const oneDecimal = (n: number) => fmtNumber(n, 1);
+const twoDecimals = (n: number) => fmtNumber(n, 2);
 const pct = (n: number) => `${fmtNumber(n)}%`;
 const rupiah = (n: number) => fmtRupiah(n);
 
 /**
  * The Surya tab: rooftop solar for the selected building. Roof area (prefilled with the footprint) and
- * battery backup hours drive POST /api/solar/simulate; the result shows how much of the building's need
- * the panels cover, what it costs and saves, and the sun over the year at this spot (NASA POWER).
+ * battery backup hours drive POST /api/solar/simulate with the building type (it picks the tariff and the
+ * daytime use); the result shows how much of the building's need the panels supply, what it costs and
+ * saves, and the sun over the year at this spot (NASA POWER).
  */
 export function SolarTab(props: BuildingTabProps) {
   // A new building starts from its own footprint; type or floor changes keep the roof the user set.
-  return <SolarSimulator key={props.building.featureId} {...props} />;
+  // id-ID makes the fields and the slider read "1.200" and "4 jam", also for screen readers.
+  return (
+    <I18nProvider locale="id-ID">
+      <SolarSimulator key={props.building.featureId} {...props} />
+    </I18nProvider>
+  );
 }
 
 function SolarSimulator({ building, at }: BuildingTabProps) {
@@ -44,15 +52,14 @@ function SolarSimulator({ building, at }: BuildingTabProps) {
   const [attempt, setAttempt] = useState(0);
   const setSolarSizing = useAppStore((s) => s.setSolarSizing);
   const [lng, lat] = at;
-  const kwhYear = building.kwhYear;
-  const featureId = building.featureId;
+  const { kwhYear, featureId, type: buildingType } = building;
 
   useEffect(() => {
     let live = true;
     const timer = setTimeout(
       () => {
         api
-          .simulateSolar({ lat, lng, roofAreaM2: roof, kwhYear, backupHours: backup })
+          .simulateSolar({ lat, lng, roofAreaM2: roof, kwhYear, backupHours: backup, buildingType })
           .then((r) => {
             if (!live) return;
             setResult(r);
@@ -71,7 +78,7 @@ function SolarSimulator({ building, at }: BuildingTabProps) {
       clearTimeout(timer);
     };
     // `result` only picks the delay; a new result must not ask again, so it is not a dependency.
-  }, [lat, lng, roof, kwhYear, backup, featureId, attempt, setSolarSizing]);
+  }, [lat, lng, roof, kwhYear, backup, buildingType, featureId, attempt, setSolarSizing]);
 
   return (
     <div className="sw-tab sw-solar">
@@ -101,10 +108,11 @@ function SolarSimulator({ building, at }: BuildingTabProps) {
           minValue={BACKUP.min}
           maxValue={BACKUP.max}
           step={BACKUP.step}
+          formatOptions={{ style: "unit", unit: "hour", unitDisplay: "long" }}
           onChange={(v) => setBackup(Array.isArray(v) ? (v[0] ?? BACKUP.initial) : v)}
         >
           <Label>Cadangan baterai</Label>
-          <Slider.Output>{({ state }) => `${state.values[0]} jam`}</Slider.Output>
+          <Slider.Output />
           <Slider.Track>
             <Slider.Fill />
             <Slider.Thumb />
@@ -129,16 +137,16 @@ function SolarResultView({ result, demandKwh, stale }: { result: SolarSimulation
     <div className="sw-solar__result" data-stale={stale ? "" : undefined}>
       {stale && <p className="sw-tab__warn">Angka terakhir masih ditampilkan: {stale}</p>}
       {result.kWp === 0 ? (
-        <p className="sw-tab__empty">Atap ini terlalu kecil untuk dipasang panel surya. Coba perbesar luas atapnya.</p>
+        <p className="sw-tab__empty">Atap ini terlalu kecil untuk dipasang satu panel surya. Coba perbesar luas atapnya.</p>
       ) : (
         <>
           <Coverage pctValue={result.coveragePct} />
-          <Versus produced={result.kwhYear} needed={demandKwh} />
+          <Versus produced={result.kwhYear} used={result.selfUseKwh} needed={demandKwh} />
           <dl className="sw-facts">
-            <TabFact label="Kapasitas panel" unit={`${fmtNumber(result.panels)} panel ${PANEL_WP} Wp`}>
-              <AnimatedNumber value={result.kWp} format={oneDecimal} /> kWp
+            <TabFact label="Kapasitas panel" unit={`${fmtNumber(result.panels)} panel ${PANEL_WP} Wp, perkiraan`}>
+              <AnimatedNumber value={result.kWp} format={twoDecimals} /> kWp
             </TabFact>
-            <TabFact label="Baterai" unit="kWh, perkiraan">
+            <TabFact label="Baterai" unit="kWh untuk cadangan, perkiraan">
               <AnimatedNumber value={result.batteryKwh} format={oneDecimal} />
             </TabFact>
             <TabFact label="Biaya pasang" unit="panel dan baterai, perkiraan">
@@ -147,7 +155,10 @@ function SolarResultView({ result, demandKwh, stale }: { result: SolarSimulation
             <TabFact label="Hemat listrik" unit="per tahun, perkiraan">
               <AnimatedNumber value={result.savingRpYear} format={rupiah} />
             </TabFact>
-            <TabFact label="Balik modal" unit="tahun, perkiraan">
+            <TabFact
+              label="Balik modal"
+              unit={result.batteryKwh > 0 ? `tahun; ${fmtNumber(result.paybackPanelYears, 1)} tahun tanpa baterai, perkiraan` : "tahun, perkiraan"}
+            >
               <AnimatedNumber value={result.paybackYears} format={oneDecimal} />
             </TabFact>
             <TabFact label="CO2 dihindari" unit={`${co2Tonnes ? "ton" : "kg"} CO2 per tahun, perkiraan`}>
@@ -160,16 +171,16 @@ function SolarResultView({ result, demandKwh, stale }: { result: SolarSimulation
       <footer className="sw-tab__foot">
         {result.assumptions.map((a) => (
           <p key={a} className="sw-tab__note">
-            {a}
+            {chem(a)}
           </p>
         ))}
-        <p className="sw-tab__source">Sumber: radiasi matahari NASA POWER (rata-rata jangka panjang), tarif dan harga panel 2026.</p>
+        <p className="sw-tab__source">Sumber: radiasi matahari NASA POWER (rata-rata jangka panjang), tarif PLN Oktober 2026, harga panel 2026.</p>
       </footer>
     </div>
   );
 }
 
-/** The share of the building's need the panels cover: a ring and the number beside it. */
+/** The share of the building's yearly need the panels supply as it is used: a ring and the number beside it. */
 function Coverage({ pctValue }: { pctValue: number }) {
   const R = 26;
   const C = 2 * Math.PI * R;
@@ -194,42 +205,76 @@ function Coverage({ pctValue }: { pctValue: number }) {
           <AnimatedNumber value={pctValue} format={pct} />
         </p>
         <p className="sw-cover__label">
-          kebutuhan listrik gedung tertutup panel surya, <Estimate />
+          kebutuhan listrik gedung dipasok langsung oleh panel; sisanya tetap dari PLN, <Estimate />
         </p>
       </div>
     </div>
   );
 }
 
-/** Yearly production against the building's yearly need, on one scale. */
-function Versus({ produced, needed }: { produced: number; needed: number }) {
+/**
+ * Yearly production against the building's yearly need, on one scale. The production bar is split into
+ * what the building uses and what goes to the grid, which earns nothing (Permen ESDM 2/2024).
+ */
+function Versus({ produced, used, needed }: { produced: number; used: number; needed: number }) {
   const top = Math.max(produced, needed, 1);
-  const rows = [
-    { key: "solar", label: "Produksi panel", value: produced },
-    { key: "demand", label: "Kebutuhan gedung", value: needed },
-  ] as const;
+  const exported = Math.max(0, produced - used);
   return (
     <div className="sw-versus" role="group" aria-label="Produksi panel dibanding kebutuhan gedung per tahun">
-      {rows.map((r) => (
-        <div key={r.key} className="sw-versus__row">
-          <p className="sw-versus__label">
-            <span className="sw-versus__key" data-series={r.key} aria-hidden />
-            {r.label}
-            <span className="sw-versus__value">
-              <AnimatedNumber value={r.value} format={whole} /> kWh/tahun
-            </span>
-          </p>
-          <div className="sw-versus__track" aria-hidden>
+      <div className="sw-versus__row">
+        <p className="sw-versus__label">
+          <span className="sw-versus__key" data-series="solar" aria-hidden />
+          Produksi panel
+          <span className="sw-versus__value">
+            <AnimatedNumber value={produced} format={whole} /> kWh/tahun
+          </span>
+        </p>
+        <div className="sw-versus__track" aria-hidden>
+          <motion.div
+            className="sw-versus__bar"
+            data-series="solar"
+            initial={{ scaleX: 0 }}
+            animate={{ scaleX: used / top }}
+            transition={{ duration: DURATION.bar, ease: EASE_OUT }}
+          />
+          {exported > 0 && (
             <motion.div
-              className="sw-versus__bar"
-              data-series={r.key}
+              className="sw-versus__bar sw-versus__bar--export"
+              data-series="solar"
+              style={{ left: `${(used / top) * 100}%` }}
               initial={{ scaleX: 0 }}
-              animate={{ scaleX: r.value / top }}
-              transition={{ duration: DURATION.bar, ease: EASE_OUT }}
+              animate={{ scaleX: exported / top }}
+              transition={{ duration: DURATION.bar, ease: EASE_OUT, delay: 0.1 }}
             />
-          </div>
+          )}
         </div>
-      ))}
+        <p className="sw-versus__split">
+          terpakai di gedung <span className="num">{fmtNumber(used)}</span> kWh
+          {exported > 0 && (
+            <>
+              , ke jaringan tanpa imbalan <span className="num">{fmtNumber(exported)}</span> kWh
+            </>
+          )}
+        </p>
+      </div>
+      <div className="sw-versus__row">
+        <p className="sw-versus__label">
+          <span className="sw-versus__key" data-series="demand" aria-hidden />
+          Kebutuhan gedung
+          <span className="sw-versus__value">
+            <AnimatedNumber value={needed} format={whole} /> kWh/tahun
+          </span>
+        </p>
+        <div className="sw-versus__track" aria-hidden>
+          <motion.div
+            className="sw-versus__bar"
+            data-series="demand"
+            initial={{ scaleX: 0 }}
+            animate={{ scaleX: needed / top }}
+            transition={{ duration: DURATION.bar, ease: EASE_OUT }}
+          />
+        </div>
+      </div>
       <p className="sw-versus__unit">
         kWh per tahun, <Estimate />
       </p>
@@ -241,7 +286,7 @@ function Versus({ produced, needed }: { produced: number; needed: number }) {
 function SunChart({ pshByMonth, pshYear }: { pshByMonth: number[]; pshYear: number }) {
   const box = useRef<HTMLDivElement>(null);
   const width = useWidth(box);
-  const [active, setActive] = useState<number | null>(null);
+  const cursor = useChartCursor(12, { wrap: true });
   const scale = niceScale(Math.max(...pshByMonth, 0));
   const H = 96;
   const AXIS = 28;
@@ -250,20 +295,13 @@ function SunChart({ pshByMonth, pshYear }: { pshByMonth: number[]; pshYear: numb
   const slot = plotW / 12;
   const barW = Math.min(14, slot * 0.6);
   const y = (v: number) => H - BOTTOM - (Math.max(0, v) / scale.max) * (H - BOTTOM - 6);
-  const reading =
-    active === null
-      ? `Rata-rata setahun ${fmtNumber(pshYear, 1)} jam per hari`
-      : `${MONTH_NAMES[active]}: ${fmtNumber(pshByMonth[active] ?? 0, 1)} jam per hari`;
+  const monthText = (i: number) => `${MONTH_NAMES[i]}: ${fmtNumber(pshByMonth[i] ?? 0, 1)} jam per hari`;
+  const { active } = cursor;
+  const reading = active === null ? `Rata-rata setahun ${fmtNumber(pshYear, 1)} jam per hari` : monthText(active);
 
   const pick = (e: PointerEvent<SVGSVGElement>) => {
     const x = e.clientX - e.currentTarget.getBoundingClientRect().left - AXIS;
-    setActive(x < 0 ? null : Math.min(11, Math.max(0, Math.floor(x / slot))));
-  };
-  const keys = (e: KeyboardEvent<SVGSVGElement>) => {
-    if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
-    e.preventDefault();
-    const step = e.key === "ArrowRight" ? 1 : -1;
-    setActive((i) => (i === null ? (step > 0 ? 0 : 11) : (i + step + 12) % 12));
+    cursor.point(x < 0 ? null : Math.min(11, Math.max(0, Math.floor(x / slot))));
   };
 
   return (
@@ -271,8 +309,9 @@ function SunChart({ pshByMonth, pshYear }: { pshByMonth: number[]; pshYear: numb
       <h3 className="sw-chart__title" id="sun-chart-title">
         Jam matahari puncak per bulan
       </h3>
-      <p className="sw-chart__reading num" aria-live="polite">
-        {reading}
+      <p className="sw-chart__reading num">{reading}</p>
+      <p className="sw-sr-only" aria-live="polite">
+        {cursor.keyboard !== null ? monthText(cursor.keyboard) : ""}
       </p>
       <div ref={box} className="sw-chart__box">
         {width > 0 && (
@@ -280,16 +319,17 @@ function SunChart({ pshByMonth, pshYear }: { pshByMonth: number[]; pshYear: numb
             className="sw-chart__svg"
             width={width}
             height={H}
-            role="img"
-            aria-label={`Jam matahari puncak per bulan, ${pshByMonth.map((v, i) => `${MONTHS[i]} ${fmtNumber(v, 1)}`).join(", ")} jam per hari`}
+            role="group"
+            aria-roledescription="grafik"
+            aria-label={`Jam matahari puncak per bulan, rata-rata setahun ${fmtNumber(pshYear, 1)} jam per hari. Panah kiri dan kanan membaca tiap bulan.`}
             tabIndex={0}
             onPointerMove={pick}
-            onPointerLeave={() => setActive(null)}
-            onKeyDown={keys}
-            onBlur={() => setActive(null)}
+            onPointerLeave={() => cursor.point(null)}
+            onKeyDown={cursor.onKeyDown}
+            onBlur={cursor.clear}
           >
             {scale.ticks.map((t) => (
-              <g key={t}>
+              <g key={t} aria-hidden>
                 <line className="sw-chart__grid" x1={AXIS} x2={width} y1={y(t)} y2={y(t)} />
                 <text className="sw-chart__tick" x={AXIS - 6} y={y(t)} dy="0.32em" textAnchor="end">
                   {tickText(t)}
@@ -299,7 +339,7 @@ function SunChart({ pshByMonth, pshYear }: { pshByMonth: number[]; pshYear: numb
             {pshByMonth.map((v, i) => {
               const x = AXIS + slot * i + (slot - barW) / 2;
               return (
-                <g key={MONTHS[i]}>
+                <g key={MONTHS[i]} aria-hidden>
                   <motion.rect
                     className="sw-chart__bar"
                     data-active={active === i ? "" : undefined}
@@ -324,33 +364,6 @@ function SunChart({ pshByMonth, pshYear }: { pshByMonth: number[]; pshYear: numb
   );
 }
 
-/** One label and value of a tab, the same build as the region facts. */
-export function TabFact({ label, unit, children }: { label: string; unit: string; children: ReactNode }) {
-  return (
-    <div className="sw-fact">
-      <dt className="sw-fact__label">{chem(label)}</dt>
-      <dd className="sw-fact__value">
-        <span className="sw-fact__number">{children}</span>
-        <span className="sw-fact__unit">{chem(unit)}</span>
-      </dd>
-    </div>
-  );
-}
-
-/** What failed, in one sentence, and the way to try again (00-direction section 8). */
-export function TabFailure({ message, what, onRetry }: { message: string; what: string; onRetry: () => void }) {
-  return (
-    <div className="sw-tab__failure" role="alert">
-      <p className="sw-tab__failure-text">
-        {what} belum bisa dimuat. {message}
-      </p>
-      <Button variant="outline" size="sm" onPress={onRetry}>
-        Coba lagi
-      </Button>
-    </div>
-  );
-}
-
 function SolarSkeleton() {
   return (
     <div className="sw-tab__skeleton" aria-busy="true" aria-label="Memuat simulasi surya">
@@ -366,18 +379,4 @@ function SolarSkeleton() {
       <Skeleton animationType="none" className="sw-skeleton-block" />
     </div>
   );
-}
-
-/** The width of an element, kept up to date (charts draw at real pixels, not a scaled viewBox). */
-export function useWidth(ref: RefObject<HTMLElement | null>): number {
-  const [width, setWidth] = useState(0);
-  useLayoutEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    setWidth(el.clientWidth);
-    const ro = new ResizeObserver(() => setWidth(el.clientWidth));
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, [ref]);
-  return width;
 }

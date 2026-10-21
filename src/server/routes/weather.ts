@@ -1,12 +1,9 @@
-import { type ForecastHour, isRainCode, pvFromForecast, summariseDays } from "../../shared/pvForecast.ts";
+import { type ForecastHour, isRainyHour, pvFromForecast, summariseDays, witaMs } from "../../shared/pvForecast.ts";
 import type { PvHour } from "../../shared/types.ts";
 import type { AppDeps } from "../index.ts";
 import { type RouteTable, error, json, safe } from "../http.ts";
 import { cachedForecast } from "../services/cache.ts";
 
-/** Open-Meteo times are Asia/Makassar (fixed UTC+8, no daylight saving) without an offset. */
-const WITA_OFFSET = "+08:00";
-const RAIN_MM = 0.1;
 
 export interface CurrentConditions {
   raining: boolean;
@@ -20,7 +17,7 @@ export function currentConditions(hours: ForecastHour[], nowMs: number): Current
   let best: ForecastHour | undefined;
   let bestGap = Infinity;
   for (const h of hours) {
-    const gap = Math.abs(Date.parse(`${h.time}:00${WITA_OFFSET}`) - nowMs);
+    const gap = Math.abs(witaMs(h.time) - nowMs);
     if (gap < bestGap) {
       best = h;
       bestGap = gap;
@@ -28,7 +25,7 @@ export function currentConditions(hours: ForecastHour[], nowMs: number): Current
   }
   if (!best) return { raining: false, cloudPct: 0, precipMm: 0, isDay: false };
   return {
-    raining: best.precipMm >= RAIN_MM || isRainCode(best.weatherCode),
+    raining: isRainyHour(best),
     cloudPct: best.cloudPct,
     precipMm: best.precipMm,
     isDay: best.ghiWm2 > 0,

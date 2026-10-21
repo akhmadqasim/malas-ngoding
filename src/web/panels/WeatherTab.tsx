@@ -1,15 +1,17 @@
 import { Skeleton } from "@heroui/react";
 import { Clouds, Droplet, Sun } from "@gravity-ui/icons";
 import { motion } from "motion/react";
-import { type KeyboardEvent, type PointerEvent, useEffect, useMemo, useRef, useState } from "react";
+import { type PointerEvent, useEffect, useMemo, useRef, useState } from "react";
 import { fmtNumber } from "../../shared/format.ts";
+import { isRainyHour } from "../../shared/pvForecast.ts";
 import type { PvHour } from "../../shared/types.ts";
 import { api, type WeatherResponse } from "../api.ts";
 import { Estimate } from "../components/Estimate.tsx";
+import { forecastIsCurrent } from "../map/autoRain.ts";
 import { DURATION, EASE_OUT } from "../motion.ts";
 import { useAppStore } from "../store.ts";
 import type { BuildingTabProps } from "./buildingTabs.ts";
-import { TabFailure, useWidth } from "./SolarTab.tsx";
+import { TabFailure, useChartCursor, useWidth } from "./tabParts.tsx";
 import {
   type DayRow,
   dayLabel,
@@ -17,7 +19,6 @@ import {
   defaultSolarRequest,
   forecastWindow,
   hourLabel,
-  isRainyHour,
   niceScale,
   rainSpans,
   type Sky,
@@ -27,6 +28,9 @@ import {
 
 /** Panel size used when the building has no simulated size (simulation failed, or the roof is too small). */
 const SAMPLE_KWP = 1;
+
+/** Below this drop a day reads "hampir sama dengan langit cerah". */
+const NEAR_CLEAR_PCT = 5;
 
 const SKY_TEXT: Record<Sky, string> = { cerah: "Cerah", berawan: "Berawan", hujan: "Hujan" };
 const SKY_ICON = { cerah: Sun, berawan: Clouds, hujan: Droplet } as const;
@@ -94,31 +98,36 @@ function WeatherForecast({ building, at }: BuildingTabProps) {
 
   if (failure && !weather) return <TabFailure what="Prakiraan cuaca" message={failure} onRetry={() => setAttempt((n) => n + 1)} />;
   if (!weather || !sizing) return <WeatherSkeleton />;
-  return <Forecast weather={weather} sizing={sizing} />;
+  return <Forecast weather={weather} sizing={sizing} at={at} />;
 }
 
-function Forecast({ weather, sizing }: { weather: WeatherResponse; sizing: Sizing }) {
+function Forecast({ weather, sizing, at }: { weather: WeatherResponse; sizing: Sizing; at: [number, number] }) {
   // The forecast is read against the clock once per answer, so the chart does not shift while you look.
   const now = useMemo(() => Date.now(), [weather]);
   const hours = useMemo(() => forecastWindow(weather.hours, now), [weather, now]);
-  const rows = useMemo(() => dayRows(weather.days, weather.hours, now), [weather, now]);
+  const rows = useMemo(() => dayRows(weather.days, weather.hours, now, { lng: at[0], lat: at[1], kWp: sizing.kWp }), [weather, now, at, sizing.kWp]);
   const { current } = weather;
   const sky: Sky = current.raining ? "hujan" : current.cloudPct >= 60 ? "berawan" : "cerah";
   const SkyIcon = SKY_ICON[sky];
+  // An old forecast (Open-Meteo down) says nothing about now; the stale note below says why the line is gone.
+  const aboutNow = forecastIsCurrent(weather, now);
 
   return (
     <div className="sw-tab sw-weather">
-      <p className="sw-weather__now">
-        <SkyIcon className="sw-weather__icon" aria-hidden />
-        <span>
-          Sekarang <strong className="sw-weather__sky">{SKY_TEXT[sky].toLowerCase()}</strong>, awan <span className="num">{fmtNumber(current.cloudPct)}%</span>
-          {current.precipMm > 0 && (
-            <>
-              , hujan <span className="num">{fmtNumber(current.precipMm, 1)} mm</span>
-            </>
-          )}
-        </span>
-      </p>
+      {aboutNow && (
+        <p className="sw-weather__now">
+          <SkyIcon className="sw-weather__icon" aria-hidden />
+          <span>
+            Sekarang <strong className="sw-weather__sky">{SKY_TEXT[sky].toLowerCase()}</strong>, awan{" "}
+            <span className="num">{fmtNumber(current.cloudPct)}%</span>
+            {current.precipMm > 0 && (
+              <>
+                , hujan <span className="num">{fmtNumber(current.precipMm, 1)} mm</span>
+              </>
+            )}
+          </span>
+        </p>
+      )}
       {weather.stale && (
         <p className="sw-tab__warn">Open-Meteo sedang tidak bisa dihubungi, jadi ini prakiraan terakhir yang tersimpan.</p>
       )}
@@ -127,7 +136,7 @@ function Forecast({ weather, sizing }: { weather: WeatherResponse; sizing: Sizin
       <footer className="sw-tab__foot">
         <p className="sw-tab__note">
           Produksi = kapasitas panel × radiasi matahari × 0,78 (rugi panas, kabel, inverter). Awan dan hujan menurunkan radiasi, jadi
-          produksinya ikut turun.
+          produksinya ikut turun. Langit cerah dihitung dari posisi matahari di titik ini (model Haurwitz).
         </p>
         <p className="sw-tab__source">Sumber: prakiraan cuaca Open-Meteo per jam, diperbarui tiap jam.</p>
       </footer>
@@ -139,7 +148,8 @@ function Forecast({ weather, sizing }: { weather: WeatherResponse; sizing: Sizin
 function HourlyChart({ hours, sizing, now }: { hours: PvHour[]; sizing: Sizing; now: number }) {
   const box = useRef<HTMLDivElement>(null);
   const width = useWidth(box);
-  const [active, setActive] = useState<number | null>(null);
+  const cursor = useChartCursor(hours.length);
+  const { active } = cursor;
   const today = witaDate(now);
   const total = hours.reduce((s, h) => s + h.pvKwh, 0);
   const scale = niceScale(Math.max(0, ...hours.map((h) => h.pvKwh)));
@@ -168,30 +178,28 @@ function HourlyChart({ hours, sizing, now }: { hours: PvHour[]; sizing: Sizing; 
     return out;
   }, [hours]);
 
+  const hourText = (h: PvHour) =>
+    `${dayLabel(h.time.slice(0, 10), today)} ${hourLabel(h.time)}: ${fmtNumber(h.pvKwh, 2)} kWh${isRainyHour(h) ? `, hujan ${fmtNumber(h.precipMm, 1)} mm` : `, awan ${fmtNumber(h.cloudPct)}%`}`;
   const at = active === null ? null : hours[active];
-  const reading = at
-    ? `${dayLabel(at.time.slice(0, 10), today)} ${hourLabel(at.time)}: ${fmtNumber(at.pvKwh, 2)} kWh${isRainyHour(at) ? `, hujan ${fmtNumber(at.precipMm, 1)} mm` : `, awan ${fmtNumber(at.cloudPct)}%`}`
-    : `${n} jam ke depan: ${fmtNumber(total, 1)} kWh`;
+  const reading = at ? hourText(at) : `${n} jam ke depan: ${fmtNumber(total, 1)} kWh`;
+  const spoken = cursor.keyboard === null ? undefined : hours[cursor.keyboard];
 
   const pick = (e: PointerEvent<SVGSVGElement>) => {
     const px = e.clientX - e.currentTarget.getBoundingClientRect().left;
-    if (n < 2 || px < AXIS - half) return setActive(null);
-    setActive(Math.min(n - 1, Math.max(0, Math.round(((px - AXIS) / plotW) * (n - 1)))));
-  };
-  const keys = (e: KeyboardEvent<SVGSVGElement>) => {
-    if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
-    e.preventDefault();
-    const step = e.key === "ArrowRight" ? 1 : -1;
-    setActive((i) => (i === null ? (step > 0 ? 0 : n - 1) : Math.min(n - 1, Math.max(0, i + step))));
+    if (n < 2 || px < AXIS - half) return cursor.point(null);
+    cursor.point(Math.min(n - 1, Math.max(0, Math.round(((px - AXIS) / plotW) * (n - 1)))));
   };
 
   return (
     <section className="sw-chart" aria-labelledby="pv-chart-title">
       <h3 className="sw-chart__title" id="pv-chart-title">
-        Produksi per jam, panel {fmtNumber(sizing.kWp, 1)} kWp
+        Produksi per jam, panel {fmtNumber(sizing.kWp, 2)} kWp
       </h3>
-      <p className="sw-chart__reading num" aria-live="polite">
+      <p className="sw-chart__reading num">
         {reading}, <Estimate />
+      </p>
+      <p className="sw-sr-only" aria-live="polite">
+        {spoken ? `${hourText(spoken)}, perkiraan` : ""}
       </p>
       <div ref={box} className="sw-chart__box">
         {width > 0 && n > 0 && (
@@ -199,14 +207,16 @@ function HourlyChart({ hours, sizing, now }: { hours: PvHour[]; sizing: Sizing; 
             className="sw-chart__svg"
             width={width}
             height={H}
-            role="img"
-            aria-label={`Produksi panel per jam untuk ${n} jam ke depan, total ${fmtNumber(total, 1)} kWh; ${spans.length ? `${spans.reduce((s, [a, b]) => s + b - a + 1, 0)} jam hujan` : "tanpa hujan"}`}
+            role="group"
+            aria-roledescription="grafik"
+            aria-label={`Produksi panel per jam untuk ${n} jam ke depan, total ${fmtNumber(total, 1)} kWh; ${spans.length ? `${spans.reduce((s, [a, b]) => s + b - a + 1, 0)} jam hujan` : "tanpa hujan"}. Panah kiri dan kanan membaca tiap jam.`}
             tabIndex={0}
             onPointerMove={pick}
-            onPointerLeave={() => setActive(null)}
-            onKeyDown={keys}
-            onBlur={() => setActive(null)}
+            onPointerLeave={() => cursor.point(null)}
+            onKeyDown={cursor.onKeyDown}
+            onBlur={cursor.clear}
           >
+            <g aria-hidden>
             <defs>
               <clipPath id="pv-reveal">
                 <motion.rect
@@ -258,6 +268,7 @@ function HourlyChart({ hours, sizing, now }: { hours: PvHour[]; sizing: Sizing; 
                 <circle cx={x(active)} cy={y(at.pvKwh)} r={4} />
               </g>
             )}
+            </g>
           </svg>
         )}
       </div>
@@ -298,7 +309,13 @@ function DayList({ rows }: { rows: DayRow[] }) {
               </span>
               {r.dropPct !== null && (
                 <span className="sw-days__drop">
-                  produksi turun <span className="num">{r.dropPct}%</span> karena {r.sky === "hujan" ? "hujan" : "awan"}
+                  {r.dropPct >= NEAR_CLEAR_PCT ? (
+                    <>
+                      produksi turun <span className="num">{r.dropPct}%</span> karena {r.cause}
+                    </>
+                  ) : (
+                    "hampir sama dengan langit cerah"
+                  )}
                 </span>
               )}
             </li>
@@ -306,7 +323,7 @@ function DayList({ rows }: { rows: DayRow[] }) {
         })}
       </ol>
       <p className="sw-chart__unit">
-        Turunnya dibanding hari dengan produksi tertinggi dalam prakiraan, <Estimate />
+        Turunnya dibanding langit cerah di titik ini, untuk panel yang sama, <Estimate />
       </p>
     </section>
   );

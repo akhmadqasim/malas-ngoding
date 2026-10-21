@@ -1,5 +1,5 @@
 import { fmtNumber } from "../../shared/format.ts";
-import { isRainCode, type summariseDays } from "../../shared/pvForecast.ts";
+import { clearSkyDayKwh, clearSkyGhi, isRainyHour, type summariseDays, witaMs } from "../../shared/pvForecast.ts";
 import type { BuildingEstimate, PvHour } from "../../shared/types.ts";
 import type { SolarRequest } from "../api.ts";
 
@@ -15,8 +15,6 @@ export const ROOF_MAX_M2 = 50_000;
 export const BACKUP = { min: 0, max: 12, step: 1, initial: 4 } as const;
 /** The hourly chart covers this many hours from now. */
 export const WINDOW_HOURS = 72;
-/** Rain from this much per hour, the same threshold the server uses for "raining now". */
-const RAIN_MM = 0.1;
 /** A dry day whose daylight hours average this much cloud reads "berawan". */
 const CLOUDY_PCT = 60;
 
@@ -30,11 +28,8 @@ export function roofFromBuilding(b: Pick<BuildingEstimate, "floorAreaM2" | "floo
 
 /** The simulation the Surya tab starts with (roof = footprint, 4 h backup); the Cuaca tab sizes its panels by it too. */
 export function defaultSolarRequest(b: BuildingEstimate, at: [number, number]): SolarRequest {
-  return { lng: at[0], lat: at[1], roofAreaM2: roofFromBuilding(b), kwhYear: b.kwhYear, backupHours: BACKUP.initial };
+  return { lng: at[0], lat: at[1], roofAreaM2: roofFromBuilding(b), kwhYear: b.kwhYear, backupHours: BACKUP.initial, buildingType: b.type };
 }
-
-/** Forecast times are WITA (UTC+8, no daylight saving) without an offset. */
-export const witaMs = (time: string) => Date.parse(`${time}:00+08:00`);
 
 /** The WITA calendar date of an instant, as `YYYY-MM-DD`. */
 export function witaDate(ms: number): string {
@@ -49,10 +44,6 @@ export function forecastWindow(hours: PvHour[], nowMs: number, span = WINDOW_HOU
   const hourStart = nowMs - (nowMs % 3600_000);
   const from = hours.findIndex((h) => witaMs(h.time) >= hourStart);
   return from < 0 ? hours.slice(0, span) : hours.slice(from, from + span);
-}
-
-export function isRainyHour(h: Pick<PvHour, "precipMm" | "weatherCode">): boolean {
-  return h.precipMm >= RAIN_MM || isRainCode(h.weatherCode);
 }
 
 /** Runs of consecutive rain hours, as inclusive [first, last] indexes, for the chart's rain bands. */
@@ -84,47 +75,61 @@ export function hourLabel(time: string): string {
 }
 
 export type Sky = "cerah" | "berawan" | "hujan";
+/** What the drop is put down to: rain that mattered, a little daylight rain, or cloud alone. */
+export type DropCause = "hujan" | "awan dan hujan" | "awan";
 
 export interface DayRow {
   date: string;
   label: string;
   pvKwh: number;
+  /** What the same panels would make under a clear sky here on that date. */
+  clearKwh: number;
   sky: Sky;
-  maxPrecipMm: number;
-  /** How much less this day makes than the best day of the forecast, in whole %, or null. */
+  cause: DropCause;
+  /** 1 - output / clear sky, in whole %, never below 0; null without panels. */
   dropPct: number | null;
 }
 
 type Day = ReturnType<typeof summariseDays>[number];
 
-/** A day's drop is worth a line from this much. */
-const MIN_DROP_PCT = 5;
+/** Daylight rain that counts as a rainy day: this many rain hours, or this much rain. */
+const RAIN_DAY_HOURS = 2;
+const RAIN_DAY_MM = 1;
+
+/** Where the panels are and how big they are, for the clear-sky reference. */
+export interface PanelSite {
+  lat: number;
+  lng: number;
+  kWp: number;
+}
 
 /**
- * One row per forecast day from today: label, output, sky and, for a day of rain or heavy cloud, how
- * much less the panels make than on the best day of the forecast ("produksi turun X% karena hujan").
- * The sky is read in daylight, while the panels work: rain at night costs nothing. In the rainy season
- * nearly every day has a shower, so the reference is the best day of the forecast, not a dry one.
+ * One row per forecast day from today: label, output, sky, and how far the day falls below what the same
+ * panels make under a clear sky at this spot ("produksi turun X% karena ..."). Rain and cloud are read in
+ * daylight only (rain at night costs no output); a day is "hujan" from 2 daylight rain hours or 1 mm.
  */
-export function dayRows(days: Day[], hours: PvHour[], nowMs: number): DayRow[] {
+export function dayRows(days: Day[], hours: PvHour[], nowMs: number, site: PanelSite): DayRow[] {
   const today = witaDate(nowMs);
-  const ahead = days.filter((d) => d.date >= today);
-  const best = Math.max(0, ...ahead.map((d) => d.pvKwh));
-  return ahead.map((d) => {
-    const light = hours.filter((h) => h.time.startsWith(d.date) && h.ghiWm2 > 0);
-    const cloud = light.length ? light.reduce((s, h) => s + h.cloudPct, 0) / light.length : 0;
-    const wet = light.length ? light.some(isRainyHour) : d.rainy;
-    const sky: Sky = wet ? "hujan" : cloud >= CLOUDY_PCT ? "berawan" : "cerah";
-    const drop = best > 0 ? Math.round(((best - d.pvKwh) / best) * 100) : 0;
-    return {
-      date: d.date,
-      label: dayLabel(d.date, today),
-      pvKwh: d.pvKwh,
-      sky,
-      maxPrecipMm: d.maxPrecipMm,
-      dropPct: sky !== "cerah" && drop >= MIN_DROP_PCT ? drop : null,
-    };
-  });
+  return days
+    .filter((d) => d.date >= today)
+    .map((d) => {
+      // Daylight: the sun is up during the hour before the label (Open-Meteo hours are means of that hour).
+      const light = hours.filter((h) => h.time.startsWith(d.date) && clearSkyGhi(witaMs(h.time) - 30 * 60_000, site.lat, site.lng) > 0);
+      const rainHours = light.filter(isRainyHour);
+      const rainMm = rainHours.reduce((s, h) => s + h.precipMm, 0);
+      const cloud = light.length ? light.reduce((s, h) => s + h.cloudPct, 0) / light.length : 0;
+      const wet = light.length ? rainHours.length >= RAIN_DAY_HOURS || rainMm >= RAIN_DAY_MM : d.rainy;
+      const clearKwh = clearSkyDayKwh(d.date, site.lat, site.lng, site.kWp);
+      return {
+        date: d.date,
+        label: dayLabel(d.date, today),
+        pvKwh: d.pvKwh,
+        clearKwh,
+        sky: wet ? "hujan" : cloud >= CLOUDY_PCT ? "berawan" : "cerah",
+        cause: wet ? "hujan" : rainHours.length > 0 ? "awan dan hujan" : "awan",
+        dropPct: clearKwh > 0 ? Math.max(0, Math.round((1 - d.pvKwh / clearKwh) * 100)) : null,
+      };
+    });
 }
 
 /** A clean axis top at or above `value`, with three ticks (0, middle, top). */

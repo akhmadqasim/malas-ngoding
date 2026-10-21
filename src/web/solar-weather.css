@@ -8,6 +8,8 @@
 .sw-tab {
   --sw-solar: var(--color-fuel-surya);
   --sw-demand: var(--color-kwh-3);
+  /* Rain bands and their legend key: one step stronger on ink, where a faint band disappears. */
+  --sw-rain-opacity: 0.26;
   display: grid;
   gap: --spacing(5);
   min-width: 0;
@@ -15,6 +17,7 @@
 [data-theme="atlas-day"] .sw-tab {
   --sw-solar: var(--color-solar-day);
   --sw-demand: var(--color-kwh-day-3);
+  --sw-rain-opacity: 0.16;
 }
 .sw-tab p,
 .sw-tab h3,
@@ -171,6 +174,7 @@
   border-radius: var(--radius-xs);
 }
 .sw-versus__track {
+  position: relative;
   margin-top: --spacing(1.5);
   height: --spacing(1.5);
   border-radius: var(--radius-xs);
@@ -178,9 +182,20 @@
   overflow: hidden;
 }
 .sw-versus__bar {
-  height: 100%;
-  border-radius: var(--radius-xs);
+  position: absolute;
+  inset-block: 0;
+  left: 0;
+  width: 100%;
   transform-origin: left center;
+}
+/* Power sent to the grid for nothing: the same colour, stepped back. */
+.sw-versus__bar--export {
+  opacity: 0.35;
+}
+.sw-versus__split {
+  margin-top: --spacing(1);
+  font-size: var(--text-xs);
+  color: var(--muted);
 }
 .sw-tab [data-series="solar"] {
   background: var(--sw-solar);
@@ -294,7 +309,7 @@
 }
 .sw-chart__rain {
   fill: var(--muted);
-  fill-opacity: 0.16;
+  fill-opacity: var(--sw-rain-opacity);
 }
 .sw-chart__cursor line {
   stroke: var(--foreground);
@@ -342,7 +357,17 @@
   height: --spacing(3);
   border-radius: var(--radius-xs);
   background: var(--muted);
-  opacity: 0.3;
+  opacity: var(--sw-rain-opacity);
+}
+
+/* Read by screen readers only: the chart value moved to with the arrow keys. */
+.sw-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 
 /* ---------- Weather ---------- */

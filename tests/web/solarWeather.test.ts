@@ -1,11 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import type { BuildingEstimate, PvHour } from "../../src/shared/types.ts";
+import { clearSkyDayKwh, isRainyHour } from "../../src/shared/pvForecast.ts";
 import {
   dayLabel,
   dayRows,
   forecastWindow,
   hourLabel,
-  isRainyHour,
   niceScale,
   rainSpans,
   roofFromBuilding,
@@ -75,63 +75,63 @@ describe("rain hours", () => {
 });
 
 describe("daily rows", () => {
+  const PANEL = { lat: -0.5, lng: 117.15, kWp: 1 };
+  const clear = (date: string) => clearSkyDayKwh(date, PANEL.lat, PANEL.lng, PANEL.kWp);
+
   test("labels: Hari ini, Besok, then weekday and date", () => {
     expect(witaDate(NOW)).toBe("2026-10-21");
     expect(dayLabel("2026-10-21", "2026-10-21")).toBe("Hari ini");
     expect(dayLabel("2026-10-22", "2026-10-21")).toBe("Besok");
     expect(dayLabel("2026-10-23", "2026-10-21")).toBe("Jum 23");
   });
-  test("a day of rain says how much less the panels make than the best day", () => {
-    // 22 Oct rains all afternoon: its output drops from 11 x 0.4 to 7 x 0.4 + 4 x 0.1.
-    const hours = forecast(3, (date, hr) => (date === "2026-10-22" && hr >= 14 ? { precipMm: 3, weatherCode: 63, pvKwh: hr <= 17 ? 0.1 : 0, cloudPct: 100 } : {}));
+  test("every day, the best one too, says how far it falls below a clear sky at this spot", () => {
     const days = [
-      { date: "2026-10-21", pvKwh: 4.4, rainy: false, maxPrecipMm: 0 },
-      { date: "2026-10-22", pvKwh: 3.2, rainy: true, maxPrecipMm: 3 },
-      { date: "2026-10-23", pvKwh: 4.4, rainy: false, maxPrecipMm: 0 },
+      { date: "2026-10-21", pvKwh: clear("2026-10-21") * 0.9, rainy: false, maxPrecipMm: 0 },
+      { date: "2026-10-22", pvKwh: clear("2026-10-22") * 0.5, rainy: true, maxPrecipMm: 3 },
     ];
-    const rows = dayRows(days, hours, NOW);
-    expect(rows.map((r) => r.label)).toEqual(["Hari ini", "Besok", "Jum 23"]);
-    expect(rows.map((r) => r.sky)).toEqual(["cerah", "hujan", "cerah"]);
-    expect(rows[1]!.dropPct).toBe(27); // (4,4 - 3,2) / 4,4
-    expect(rows[0]!.dropPct).toBeNull();
+    const rows = dayRows(days, [], NOW, PANEL);
+    expect(rows.map((r) => r.dropPct)).toEqual([10, 50]);
+    expect(rows[0]!.clearKwh).toBeCloseTo(clear("2026-10-21"), 9);
   });
-  test("rain only at night is not a rainy day for the panels", () => {
-    const hours = forecast(1, (_, hr) => (hr === 2 ? { precipMm: 5, weatherCode: 63 } : {}));
-    const rows = dayRows([{ date: "2026-10-21", pvKwh: 4.4, rainy: true, maxPrecipMm: 5 }], hours, NOW);
-    expect(rows[0]!.sky).toBe("cerah");
+  test("a day that matches the clear sky shows no drop, and output above it is not a negative drop", () => {
+    const days = [
+      { date: "2026-10-21", pvKwh: clear("2026-10-21") * 0.97, rainy: false, maxPrecipMm: 0 },
+      { date: "2026-10-22", pvKwh: clear("2026-10-22") * 1.05, rainy: false, maxPrecipMm: 0 },
+    ];
+    expect(dayRows(days, [], NOW, PANEL).map((r) => r.dropPct)).toEqual([3, 0]);
+  });
+  test("rain counts in daylight only, and only from 2 rain hours or 1 mm: then the day reads hujan", () => {
+    // 22 Oct: three afternoon hours of 0,5 mm. 23 Oct: one daylight hour of 0,3 mm. 24 Oct: rain at night only.
+    const hours = forecast(4, (date, hr) => {
+      if (date === "2026-10-22" && hr >= 14 && hr <= 16) return { precipMm: 0.5, weatherCode: 61, cloudPct: 100 };
+      if (date === "2026-10-23" && hr === 10) return { precipMm: 0.3, weatherCode: 61 };
+      if (date === "2026-10-24" && hr === 2) return { precipMm: 8, weatherCode: 65 };
+      return {};
+    });
+    const days = ["2026-10-21", "2026-10-22", "2026-10-23", "2026-10-24"].map((date) => ({ date, pvKwh: clear(date) * 0.6, rainy: true, maxPrecipMm: 1 }));
+    const rows = dayRows(days, hours, NOW, PANEL);
+    expect(rows.map((r) => r.sky)).toEqual(["cerah", "hujan", "cerah", "cerah"]);
+    expect(rows.map((r) => r.cause)).toEqual(["awan", "hujan", "awan dan hujan", "awan"]);
+  });
+  test("1 mm of daylight rain in a single hour is enough for hujan", () => {
+    const hours = forecast(1, (_, hr) => (hr === 11 ? { precipMm: 1.2, weatherCode: 63 } : {}));
+    const rows = dayRows([{ date: "2026-10-21", pvKwh: 2, rainy: true, maxPrecipMm: 1.2 }], hours, NOW, PANEL);
+    expect(rows[0]!.sky).toBe("hujan");
+  });
+  test("a cloudy dry day reads berawan", () => {
+    const hours = forecast(1, () => ({ cloudPct: 85 }));
+    expect(dayRows([{ date: "2026-10-21", pvKwh: 3, rainy: false, maxPrecipMm: 0 }], hours, NOW, PANEL)[0]!.sky).toBe("berawan");
   });
   test("days before today (a stale forecast) are left out", () => {
     const days = [
       { date: "2026-10-20", pvKwh: 4, rainy: false, maxPrecipMm: 0 },
       { date: "2026-10-21", pvKwh: 4, rainy: false, maxPrecipMm: 0 },
     ];
-    expect(dayRows(days, [], NOW).map((r) => r.date)).toEqual(["2026-10-21"]);
+    expect(dayRows(days, [], NOW, PANEL).map((r) => r.date)).toEqual(["2026-10-21"]);
   });
-  test("in the rainy season the best day is the reference, even when it rained too", () => {
-    const days = [
-      { date: "2026-10-21", pvKwh: 2, rainy: true, maxPrecipMm: 5 },
-      { date: "2026-10-22", pvKwh: 3, rainy: true, maxPrecipMm: 5 },
-    ];
-    expect(dayRows(days, [], NOW).map((r) => r.dropPct)).toEqual([33, null]);
-  });
-  test("a cloudy dry day reads berawan and shows its drop; a clear day never does", () => {
-    const hours = forecast(2, (date) => (date === "2026-10-21" ? { cloudPct: 85 } : {}));
-    const days = [
-      { date: "2026-10-21", pvKwh: 3, rainy: false, maxPrecipMm: 0 },
-      { date: "2026-10-22", pvKwh: 4, rainy: false, maxPrecipMm: 0 },
-    ];
-    const rows = dayRows(days, hours, NOW);
-    expect(rows.map((r) => r.sky)).toEqual(["berawan", "cerah"]);
-    expect(rows[0]!.dropPct).toBe(25);
-    const clear = dayRows([days[0]!, days[1]!], forecast(2), NOW);
-    expect(clear[0]!.dropPct).toBeNull();
-  });
-  test("a drop under 5% is not worth a line", () => {
-    const days = [
-      { date: "2026-10-21", pvKwh: 3.9, rainy: true, maxPrecipMm: 1 },
-      { date: "2026-10-22", pvKwh: 4, rainy: false, maxPrecipMm: 0 },
-    ];
-    expect(dayRows(days, [], NOW)[0]!.dropPct).toBeNull();
+  test("with no panels there is no clear-sky reference", () => {
+    const rows = dayRows([{ date: "2026-10-21", pvKwh: 0, rainy: false, maxPrecipMm: 0 }], [], NOW, { ...PANEL, kWp: 0 });
+    expect(rows[0]!.dropPct).toBeNull();
   });
 });
 
