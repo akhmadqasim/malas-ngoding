@@ -1,3 +1,4 @@
+import { ChevronLeft } from "@gravity-ui/icons";
 import { Button, Card } from "@heroui/react";
 import { AnimatePresence, motion } from "motion/react";
 import { type ReactNode, type RefObject, useEffect, useMemo, useRef } from "react";
@@ -205,9 +206,7 @@ function RegionDetail({
   return (
     <div className="sheet__body">
       <Button variant="ghost" size="sm" className="back" onPress={onBack}>
-        <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden>
-          <path d="M10 3 5 8l5 5" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
+        <ChevronLeft aria-hidden />
         Semua wilayah
       </Button>
       <h2 className="place">{region.name}</h2>

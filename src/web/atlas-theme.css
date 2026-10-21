@@ -140,7 +140,7 @@
 .button {
   border-radius: var(--radius-sm);
   font-size: var(--text-sm);
-  font-weight: var(--font-weight-medium);
+  font-weight: var(--font-weight-regular);
 }
 /* The one primary button per view: filled accent. */
 .button--primary {
@@ -176,7 +176,7 @@
   padding: --spacing(1.5) --spacing(3);
   border-radius: var(--radius-xs);
   font-size: var(--text-sm);
-  font-weight: var(--font-weight-medium);
+  font-weight: var(--font-weight-regular);
   --toggle-button-bg: transparent;
   --toggle-button-bg-hover: transparent;
   --toggle-button-bg-pressed: transparent;
@@ -199,7 +199,7 @@
 .switch__content {
   gap: --spacing(2);
   font-size: var(--text-sm);
-  font-weight: var(--font-weight-medium);
+  font-weight: var(--font-weight-regular);
   color: var(--foreground);
 }
 .switch:not([data-selected="true"]) .switch__content {

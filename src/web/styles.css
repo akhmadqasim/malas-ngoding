@@ -70,15 +70,16 @@
   --color-outline-light: #1c222c;
 
   /* Power plants by fuel. */
-  /* Mid-tone hues away from the amber and teal ramps, so a dot reads on either column, by day and by
-     night (coal was a charcoal that read as a hole in the map). */
-  --color-fuel-batubara: #c4456a;
-  --color-fuel-gas: #8a63d2;
-  --color-fuel-diesel: #9c7a5b;
-  --color-fuel-surya: #f2c94c;
-  --color-fuel-air: #3a9ad9;
-  --color-fuel-biomassa: #6aa84f;
-  --color-fuel-lainnya: #8b95a1;
+  /* The fuel colours of the design direction: coal charcoal (a slate light enough not to read as a hole),
+     gas orange, diesel rust, solar yellow, hydro river blue, biomass leaf green, other lilac. The thin
+     paper and ink edge of every dot carries its contrast on any ground. */
+  --color-fuel-batubara: #6b727c;
+  --color-fuel-gas: #e58a3e;
+  --color-fuel-diesel: #a86a3d;
+  --color-fuel-surya: #f2d45c;
+  --color-fuel-air: #4fa3d9;
+  --color-fuel-biomassa: #79a94f;
+  --color-fuel-lainnya: #a78bc9;
 
   /* Rain (Mapbox setRain): bright streaks in every light, the slate haze that the daytime streaks show
      against (map fog), and the overcast tint that dims the whole scene while it rains. */
@@ -89,12 +90,13 @@
   --color-rain-vignette: #283040;
   --color-overcast: #3c4757;
 
-  --font-sans: "IBM Plex Sans Variable", "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
-  --font-serif: "IBM Plex Serif", ui-serif, Georgia, serif;
+  /* Type: HeroUI's own system stack (--font-sans and --font-mono come from Tailwind/HeroUI): SF on macOS,
+     Segoe UI on Windows. Segoe UI has no 500, so emphasis uses 600. */
   --font-weight-regular: 400;
-  --font-weight-medium: 500;
+  --font-weight-medium: 600;
   --font-weight-semibold: 600;
-  --font-stretch-readout: 85%;
+  /* The 2 of CO2, set small below the baseline (system fonts have no shared small-figure feature). */
+  --text-sub: 0.72em;
 
   --text-2xs: 0.6875rem;
   --text-2xs--line-height: 1rem;
@@ -186,9 +188,12 @@
   font-variant-numeric: tabular-nums lining-nums;
 }
 
-/* The 2 of CO2: Plex's own small figure (the font has no subscript glyph). */
+/* The 2 of CO2 as a subscript that does not stretch the line. */
 .sub {
-  font-feature-settings: "dnom";
+  position: relative;
+  top: 0.22em;
+  font-size: var(--text-sub);
+  line-height: 0;
 }
 
 /* "perkiraan": the quiet estimate mark after a unit. */
@@ -313,14 +318,13 @@
   color: var(--faint);
 }
 
-/* Place names: the serif, once per view. */
+/* Place names: the largest type of a view, semibold, set tight. */
 .place {
   margin: 0;
-  font-family: var(--font-serif);
   font-size: var(--text-2xl);
   line-height: var(--text-2xl--line-height);
-  font-weight: var(--font-weight-medium);
-  letter-spacing: var(--tracking-tight);
+  font-weight: var(--font-weight-semibold);
+  letter-spacing: var(--tracking-display);
 }
 .place__meta {
   margin: --spacing(0.5) 0 0;
@@ -343,9 +347,9 @@
   margin-top: --spacing(1);
   font-size: var(--text-readout);
   line-height: var(--text-readout--line-height);
-  font-weight: var(--font-weight-medium);
-  font-stretch: var(--font-stretch-readout);
-  letter-spacing: var(--tracking-tight);
+  font-weight: var(--font-weight-semibold);
+  letter-spacing: var(--tracking-display);
+  font-variant-numeric: tabular-nums lining-nums;
 }
 .readout__unit {
   margin-top: --spacing(1.5);
@@ -398,7 +402,7 @@
 }
 .ranking__name {
   font-size: var(--text-base);
-  font-weight: var(--font-weight-medium);
+  font-weight: var(--font-weight-semibold);
 }
 .ranking__value {
   font-size: var(--text-sm);
@@ -887,7 +891,6 @@
   font-size: var(--text-lg);
   line-height: var(--text-lg--line-height);
   font-weight: var(--font-weight-medium);
-  font-stretch: var(--font-stretch-readout);
   color: var(--foreground);
 }
 /* The plants of a cluster: dot, name, capacity. */
@@ -952,10 +955,9 @@
 }
 .intro__title {
   margin: 0;
-  font-family: var(--font-serif);
   font-size: var(--text-display);
   line-height: var(--text-display--line-height);
-  font-weight: var(--font-weight-medium);
+  font-weight: var(--font-weight-semibold);
   letter-spacing: var(--tracking-display);
 }
 .intro__lede {
@@ -1087,12 +1089,15 @@
 
 /* Tablets: the dock takes the full bottom edge; the sheet stops above it. */
 @media (max-width: 1100px) {
+  /* The dock starts at the left edge here, so it sits above the Mapbox wordmark and attribution line. */
   .dock-slot {
     left: var(--layout-inset);
     right: var(--layout-reserve-right);
+    bottom: var(--layout-clear-bottom);
   }
+  /* The two dock cards stack here (about 300 px), so the sheet stops well above them. */
   .sheet-slot {
-    bottom: calc(var(--layout-inset) + --spacing(64));
+    bottom: calc(var(--layout-clear-bottom) + --spacing(80));
   }
 }
 
@@ -1110,6 +1115,20 @@
   .legend,
   .controls {
     width: 100%;
+  }
+  /* The map tools turn into a row just under the sheet, clear of the dock at the bottom. */
+  .tools-slot {
+    top: calc(var(--layout-inset) + 46vh + --spacing(2));
+    bottom: auto;
+  }
+  .map-tools {
+    grid-auto-flow: column;
+    align-items: center;
+  }
+  .map-tools .map-tools__rule {
+    width: 1px;
+    height: --spacing(5);
+    margin: 0 --spacing(0.5);
   }
   .intro {
     padding: 0 --spacing(6) --spacing(16);

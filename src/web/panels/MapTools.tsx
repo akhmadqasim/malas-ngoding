@@ -1,3 +1,4 @@
+import { CircleInfo, Compass, House, Minus, Plus } from "@gravity-ui/icons";
 import { Button, Popover, Separator, Toolbar, Tooltip } from "@heroui/react";
 import type { Map as MapboxMap } from "mapbox-gl";
 import { type ReactNode, useEffect, useState } from "react";
@@ -31,8 +32,6 @@ function Tool({ label, onPress, children }: { label: string; onPress: () => void
   );
 }
 
-const icon = { width: 16, height: 16, viewBox: "0 0 16 16", fill: "none", stroke: "currentColor", strokeWidth: 1.5, "aria-hidden": true } as const;
-
 /**
  * Our own map tools, in place of Mapbox's controls: zoom in and out, back to north, back to the whole
  * province, and where the map comes from. A vertical toolbar (arrow keys move between tools); every tool has
@@ -52,38 +51,24 @@ export function MapTools() {
   return (
     <Toolbar aria-label="Alat peta" orientation="vertical" className="map-tools">
       <Tool label="Perbesar" onPress={() => map?.zoomIn()}>
-        <svg {...icon}>
-          <path d="M8 3.5v9M3.5 8h9" strokeLinecap="round" />
-        </svg>
+        <Plus aria-hidden />
       </Tool>
       <Tool label="Perkecil" onPress={() => map?.zoomOut()}>
-        <svg {...icon}>
-          <path d="M3.5 8h9" strokeLinecap="round" />
-        </svg>
+        <Minus aria-hidden />
       </Tool>
       <Separator className="map-tools__rule" />
       <Tool label="Hadapkan ke utara" onPress={() => map?.resetNorth()}>
-        {/* A compass needle that points to north on the map: the dark half is north. */}
-        <svg {...icon} style={{ transform: `rotate(${-bearing}deg)` }}>
-          <path d="M8 2 10.4 8H5.6Z" fill="currentColor" stroke="none" />
-          <path d="M5.6 8h4.8L8 14Z" strokeLinejoin="round" strokeWidth={1.2} />
-        </svg>
+        {/* Gravity's compass needle points north-east; turned back 45° it points to north on the map. */}
+        <Compass aria-hidden style={{ transform: `rotate(${-bearing - 45}deg)` }} />
       </Tool>
       <Tool label="Kembali ke seluruh Kalimantan Timur" onPress={backToProvince}>
-        <svg {...icon}>
-          <path d="M2.5 6V2.5H6M10 2.5h3.5V6M13.5 10v3.5H10M6 13.5H2.5V10" strokeLinecap="round" strokeLinejoin="round" />
-          <circle cx="8" cy="8" r="1.5" fill="currentColor" stroke="none" />
-        </svg>
+        <House aria-hidden />
       </Tool>
       <Separator className="map-tools__rule" />
       <Popover>
         <Tooltip>
           <Button isIconOnly size="sm" variant="ghost" aria-label="Tentang peta ini" className="map-tool">
-            <svg {...icon}>
-              <circle cx="8" cy="8" r="6" />
-              <path d="M8 7.25v4" strokeLinecap="round" />
-              <circle cx="8" cy="5" r="0.9" fill="currentColor" stroke="none" />
-            </svg>
+            <CircleInfo aria-hidden />
           </Button>
           <Tooltip.Content placement="left">Tentang peta ini</Tooltip.Content>
         </Tooltip>
