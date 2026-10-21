@@ -1,11 +1,10 @@
 import { fmtNumber } from "../../shared/format.ts";
-import { simulateSolar } from "../../shared/solar.ts";
 import type { BuildingType, SolarResult } from "../../shared/types.ts";
 import costs from "../../../data/seed/solar-costs.json";
 import type { AppDeps } from "../index.ts";
 import { type RouteTable, error, json, safe } from "../http.ts";
 import { cachedClimatology } from "../services/cache.ts";
-import { chooseTariff, isBuildingType, usePatternFor } from "../services/solarTariff.ts";
+import { isBuildingType, simulateBuildingSolar } from "../services/solarTariff.ts";
 
 const MAX_ROOF_M2 = 50_000;
 const MAX_BACKUP_HOURS = 72;
@@ -65,20 +64,12 @@ export async function simulateSolarAt(
   { lat, lng, roofAreaM2, kwhYear, backupHours, buildingType }: SolarRequestInput,
 ): Promise<SolarSimulation> {
   const climate = await cachedClimatology(deps, lat, lng);
-  const tariff = chooseTariff(buildingType, kwhYear);
-  const use = usePatternFor(buildingType);
-  const result = simulateSolar({
+  const { result, tariff, use } = simulateBuildingSolar({
+    peakSunHours: climate.pshYear,
     roofAreaM2,
     kwhYear,
-    peakSunHours: climate.pshYear,
     backupHours,
-    tariffRpPerKwh: tariff.rpPerKwh,
-    costRpPerKwp: costs.costRpPerKwp,
-    batteryRpPerKwh: costs.batteryRpPerKwh,
-    gridFactorKgPerKwh: costs.solarFactorKgPerKwh,
-    daytimeShare: use.share,
-    openDaysPerYear: use.openDays,
-    closedDayLoadShare: use.closedDayLoadShare,
+    buildingType,
   });
   const assumptions = [
     tariff.note,

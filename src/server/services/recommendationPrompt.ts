@@ -140,8 +140,10 @@ export function describeRegionFacts(f: RegionFacts): string {
     lines.push(`- NASA POWER: rata-rata ${fmtNumber(climate.pshYear, 1)} jam puncak matahari per hari.`);
   }
   lines.push(
-    `- PLTS 1 kWp menghasilkan sekitar ${fmtNumber(solar.kwhPerKwpYear)} kWh per tahun (perkiraan). Bila menggantikan listrik dari jaringan PLN, 1 kWp itu menghindari sekitar ${fmtKg(solar.co2AvoidedKgPerKwpYear)} CO2 per tahun (perkiraan).`,
-    `- Biaya pasang sekitar ${fmtRupiah(solar.costRpPerKwp)} per kWp (perkiraan). Dengan tarif gedung pemerintah (golongan P1) Rp ${fmtNumber(solar.govTariffRpPerKwh, 2)} per kWh, 1 kWp menghemat sekitar ${fmtRupiah(solar.savingRpPerKwpYear)} per tahun dan balik modal sekitar ${dec(solar.paybackYears, 1)} tahun (perkiraan).`,
+    `- PLTS 1 kWp menghasilkan sekitar ${fmtNumber(solar.kwhPerKwpYear)} kWh per tahun (perkiraan).`,
+    `- Di kantor pemerintah, yang dipakai sekitar ${fmtNumber(solar.openDaysPerYear)} hari setahun dengan ${fmtNumber(solar.daytimeSharePct)}% pemakaian di siang hari (perkiraan), sekitar ${fmtNumber(solar.selfUsePct)}% listrik panel dipakai sendiri (perkiraan). Sisanya masuk jaringan PLN tanpa imbalan (Permen ESDM 2/2024), jadi tidak menghemat tagihan dan tidak dihitung sebagai CO2 yang dihindari.`,
+    `- Dari listrik yang dipakai sendiri itu, 1 kWp di kantor pemerintah menghindari sekitar ${fmtKg(solar.co2AvoidedKgPerKwpYear)} CO2 per tahun (perkiraan, faktor emisi PLTS ${dec(solar.solarFactorKgPerKwh)} kg CO2 per kWh).`,
+    `- Biaya pasang sekitar ${fmtRupiah(solar.costRpPerKwp)} per kWp (perkiraan). Dengan tarif gedung pemerintah (golongan P1) Rp ${fmtNumber(solar.govTariffRpPerKwh, 2)} per kWh, 1 kWp di kantor pemerintah menghemat sekitar ${fmtRupiah(solar.savingRpPerKwpYear)} per tahun dan balik modal sekitar ${dec(solar.paybackYears, 1)} tahun tanpa baterai (perkiraan).`,
   );
 
   lines.push("");
@@ -196,7 +198,7 @@ Keterangan data:
 - Pelanggan PLN dan rasio elektrifikasi berasal dari BPS (Provinsi Kalimantan Timur Dalam Angka 2025, data 2024).
 - Jumlah desa tanpa listrik PLN berasal dari pernyataan Gubernur Kalimantan Timur yang dikutip media (September 2026) dan belum terverifikasi. Jumlah per wilayah hanya ada untuk Kutai Barat dan Mahakam Ulu. Desa tanpa listrik PLN juga ada di Paser, Berau, Kutai Kartanegara, dan Kutai Timur, tetapi jumlahnya tidak tersedia.
 - Bauran listrik adalah perkiraan tahun 2024 dari kapasitas pembangkit (Dinas ESDM Kalimantan Timur) dikali faktor kapasitas, dan berlaku untuk seluruh jaringan Kalimantan Timur.
-- Jam puncak matahari berasal dari NASA POWER (rata-rata jangka panjang, kWh/m² per hari) di satu titik dalam wilayah. Hasil, biaya, dan balik modal PLTS dihitung dengan rumus aplikasi ini dan semuanya perkiraan.
+- Jam puncak matahari berasal dari NASA POWER (rata-rata jangka panjang, kWh/m² per hari) di satu titik dalam wilayah. Hasil, biaya, dan balik modal PLTS dihitung dengan rumus aplikasi ini, sama seperti tab Surya untuk gedung pemerintahan, dan semuanya perkiraan. Hanya listrik panel yang dipakai sendiri yang menghemat tagihan dan dihitung sebagai CO2 yang dihindari; angka per kWp sudah memperhitungkannya, jadi jangan menghitung ulang dari hasil per kWp.
 - Daftar pembangkit hanya memuat pembangkit utama hasil riset proyek ini, bukan daftar lengkap: PLTD dan pembangkit kecil tidak termasuk. Pembangkit dipetakan ke wilayah menurut titik lokasinya, dan sebagian titik masih perkiraan.`;
 
 export const RECOMMENDATION_TOOL: Anthropic.Tool = {

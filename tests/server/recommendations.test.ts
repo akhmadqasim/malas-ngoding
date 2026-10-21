@@ -7,13 +7,15 @@ import type { RegionPlant } from "../../src/server/db.ts";
 import type { Handler } from "../../src/server/http.ts";
 import { createServer } from "../../src/server/index.ts";
 import { recommendationRoutes } from "../../src/server/routes/recommendations.ts";
-import { describeRegionFacts, SYSTEM_PROMPT } from "../../src/server/services/recommendationPrompt.ts";
+import type { SolarSimulation } from "../../src/server/routes/solar.ts";
+import { dec, describeRegionFacts, SYSTEM_PROMPT } from "../../src/server/services/recommendationPrompt.ts";
 import { ruleBasedRecommendations } from "../../src/server/services/recommendationRules.ts";
 import {
   buildRegionFacts,
   createClaudeRecommender,
   GENERATION_BUDGET_MS,
   parseRecommendationItems,
+  REFERENCE_GOV_OFFICE,
   type RecommendationWriter,
   type RegionFacts,
 } from "../../src/server/services/recommendations.ts";
@@ -494,15 +496,45 @@ describe("buildRegionFacts", () => {
     expect(facts("samarinda").comparison.electrificationRank).toBe(1);
   });
 
-  test("sizes one kWp of rooftop PV from the peak sun hours, the grid factor and the government tariff", () => {
+  test("prices one kWp of rooftop PV on a government office from its self-use, as the Surya tab does", () => {
     const { solar } = facts("samarinda");
     const yieldKwh = 4.68 * 365 * 0.78;
     expect(solar.kwhPerKwpYear).toBeCloseTo(yieldKwh, 9);
-    expect(solar.co2AvoidedKgPerKwpYear).toBeCloseTo(yieldKwh * 1.14, 9);
     expect(solar.costRpPerKwp).toBe(15_000_000);
     expect(solar.govTariffRpPerKwh).toBe(1699.53);
-    expect(solar.savingRpPerKwpYear).toBeCloseTo(yieldKwh * 1699.53, 6);
-    expect(solar.paybackYears).toBeCloseTo(15_000_000 / (yieldKwh * 1699.53), 9);
+    expect(solar.solarFactorKgPerKwh).toBe(1.13);
+    expect(solar.openDaysPerYear).toBe(250);
+    expect(solar.daytimeSharePct).toBeCloseTo(85, 9);
+    // Open 250 days, 85% by day: about 72% of the output is used on site, the rest earns nothing.
+    expect(solar.selfUsePct).toBeGreaterThan(70);
+    expect(solar.selfUsePct).toBeLessThan(75);
+    const selfUseKwh = (yieldKwh * solar.selfUsePct) / 100;
+    expect(solar.savingRpPerKwpYear).toBeCloseTo(selfUseKwh * 1699.53, 3);
+    expect(solar.co2AvoidedKgPerKwpYear).toBeCloseTo(selfUseKwh * 1.13, 6);
+    expect(solar.paybackYears).toBeCloseTo(15_000_000 / solar.savingRpPerKwpYear, 9);
+    // Not the old "every kWh used" figure (6,6 years at this sun).
+    expect(solar.paybackYears).toBeGreaterThan(9);
+  });
+
+  test("the region card and the Surya tab give the same payback for the same government office", async () => {
+    const nasa = { pshByMonth: Array<number>(12).fill(4.6), pshYear: 4.6 };
+    const { server } = start({ nasa });
+    const res = await fetch(new URL("/api/solar/simulate", server.url), {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ lat: -0.5, lng: 117.15, ...REFERENCE_GOV_OFFICE }),
+    });
+    const tab = (await res.json()) as SolarSimulation;
+    const card = facts("samarinda", { climate: nasa }).solar;
+    expect(card.paybackYears).toBe(tab.paybackYears);
+    expect(card.paybackYears).toBe(tab.paybackPanelYears);
+    expect(card.savingRpPerKwpYear).toBeCloseTo(tab.savingRpYear / tab.kWp, 6);
+    expect(card.co2AvoidedKgPerKwpYear).toBeCloseTo(tab.co2AvoidedKgYear / tab.kWp, 6);
+    // The reviewer's case: about 9,3 years at 4,6 sun hours, and the card text says so.
+    expect(dec(card.paybackYears, 1)).toBe("9,3");
+    const pv = ruleBasedRecommendations(facts("samarinda", { climate: nasa })).find((i) => i.category === "energi_terbarukan");
+    expect(pv?.impact).toContain("balik modal sekitar 9,3 tahun tanpa baterai");
+    expect(describeRegionFacts(facts("samarinda", { climate: nasa }))).toContain("balik modal sekitar 9,3 tahun tanpa baterai");
   });
 
   test("leaves PPU, whose projected population includes IKN, out of the per-person average and ranks", () => {
@@ -553,6 +585,8 @@ describe("describeRegionFacts", () => {
     expect(text).toContain("tertinggi 5,1 (September)");
     expect(text).toContain("1.332 kWh per tahun (perkiraan)");
     expect(text).toContain("Rp 1.699,53 per kWh");
+    expect(text).toContain("% listrik panel dipakai sendiri (perkiraan)");
+    expect(text).toContain("faktor emisi PLTS 1,13 kg CO2 per kWh");
   });
 
   test("names a kota as Kota and gives the village count when it is known", () => {

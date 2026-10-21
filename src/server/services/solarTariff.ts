@@ -1,7 +1,8 @@
 import buildingTypes from "../../../data/seed/building-types.json";
 import costs from "../../../data/seed/solar-costs.json";
 import { fmtNumber } from "../../shared/format.ts";
-import type { BuildingType } from "../../shared/types.ts";
+import { simulateSolar } from "../../shared/solar.ts";
+import type { BuildingType, SolarResult } from "../../shared/types.ts";
 
 /*
  * Which PLN tariff and how much daytime use a rooftop simulation assumes, by building type. Values and
@@ -104,4 +105,41 @@ export function usePatternFor(type: BuildingType | undefined): UsePattern {
       daysNote,
     ],
   };
+}
+
+/** A rooftop simulation for a building type, with the tariff and use pattern it was priced with. */
+export interface BuildingSolar {
+  result: SolarResult;
+  tariff: TariffChoice;
+  use: UsePattern;
+}
+
+/**
+ * Rooftop PV for a building of a type at the given peak sun hours: its tariff, its daytime use and open days,
+ * the seed costs and the Kepmen emission factor for solar (1,13). The Surya tab (through the solar route),
+ * the chat and the region card all price PV here, so one building type gives one payback everywhere.
+ */
+export function simulateBuildingSolar(input: {
+  peakSunHours: number;
+  roofAreaM2: number;
+  kwhYear: number;
+  backupHours: number;
+  buildingType?: BuildingType;
+}): BuildingSolar {
+  const tariff = chooseTariff(input.buildingType, input.kwhYear);
+  const use = usePatternFor(input.buildingType);
+  const result = simulateSolar({
+    roofAreaM2: input.roofAreaM2,
+    kwhYear: input.kwhYear,
+    peakSunHours: input.peakSunHours,
+    backupHours: input.backupHours,
+    tariffRpPerKwh: tariff.rpPerKwh,
+    costRpPerKwp: costs.costRpPerKwp,
+    batteryRpPerKwh: costs.batteryRpPerKwh,
+    gridFactorKgPerKwh: costs.solarFactorKgPerKwh,
+    daytimeShare: use.share,
+    openDaysPerYear: use.openDays,
+    closedDayLoadShare: use.closedDayLoadShare,
+  });
+  return { result, tariff, use };
 }

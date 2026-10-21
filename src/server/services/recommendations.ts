@@ -14,6 +14,7 @@ import { cachedClimatology } from "./cache.ts";
 import type { Climatology } from "./nasaPower.ts";
 import { CATEGORIES, describeRegionFacts, RECOMMENDATION_TOOL, SYSTEM_PROMPT, TOOL_NAME } from "./recommendationPrompt.ts";
 import { ruleBasedRecommendations } from "./recommendationRules.ts";
+import { simulateBuildingSolar } from "./solarTariff.ts";
 
 const MODEL = "claude-sonnet-5-5";
 const MAX_TOKENS = 2048;
@@ -55,15 +56,52 @@ export interface RegionFacts {
   /** Peak sun hours at the region's label point. `fallback` is set when it is the seed assumption. */
   climate: Climatology & { fallback?: string };
   grid: GridMix;
-  /** One kWp of rooftop PV on a government building in this region. All estimates. */
+  /**
+   * Rooftop PV on the reference government office (`REFERENCE_GOV_OFFICE`) in this region, priced as the
+   * Surya tab prices a `pemerintahan` building: only the power used on site saves money and CO2. Per kWp
+   * figures are the office's totals over its kWp. No battery. All estimates.
+   */
   solar: {
+    /** Output of 1 kWp, used or not. */
     kwhPerKwpYear: number;
+    /** Share of the panel output the office uses itself, in %; the rest goes to the grid unpaid. */
+    selfUsePct: number;
+    /** Days a year a government office is open, and its daytime share of an open day's load in %. */
+    openDaysPerYear: number;
+    daytimeSharePct: number;
+    /** Self-use times the solar emission factor (`solarFactorKgPerKwh`). */
     co2AvoidedKgPerKwpYear: number;
+    solarFactorKgPerKwh: number;
     costRpPerKwp: number;
     /** Tariff P1, government buildings of 6,600 VA to 200 kVA. */
     govTariffRpPerKwh: number;
     savingRpPerKwpYear: number;
+    /** Without a battery: the Surya tab's "Tanpa baterai" payback for the same office. */
     paybackYears: number;
+  };
+}
+
+/**
+ * The government office the region card's PV figures stand for (asumsi): 100 MWh a year, so on tariff P1,
+ * with a roof large enough for the panels its daytime use needs, and no battery.
+ */
+export const REFERENCE_GOV_OFFICE = { kwhYear: 100_000, roofAreaM2: 2_000, backupHours: 0, buildingType: "pemerintahan" } as const;
+
+/** The `solar` facts for a region whose peak sun hours are `peakSunHours`. */
+export function regionSolarFacts(peakSunHours: number): RegionFacts["solar"] {
+  const { result, tariff, use } = simulateBuildingSolar({ peakSunHours, ...REFERENCE_GOV_OFFICE });
+  const perKwp = (n: number) => (result.kWp > 0 ? n / result.kWp : 0);
+  return {
+    kwhPerKwpYear: yieldPerKwpYear(peakSunHours),
+    selfUsePct: result.kwhYear > 0 ? (result.selfUseKwh / result.kwhYear) * 100 : 0,
+    openDaysPerYear: use.openDays,
+    daytimeSharePct: use.share * 100,
+    co2AvoidedKgPerKwpYear: perKwp(result.co2AvoidedKgYear),
+    solarFactorKgPerKwh: costs.solarFactorKgPerKwh,
+    costRpPerKwp: costs.costRpPerKwp,
+    govTariffRpPerKwh: tariff.rpPerKwh,
+    savingRpPerKwpYear: perKwp(result.savingRpYear),
+    paybackYears: result.paybackYears,
   };
 }
 
@@ -109,8 +147,6 @@ export function buildRegionFacts(input: {
         : own < kwhPerCapitaAll * (1 - SIMILAR_SHARE)
           ? "below"
           : "similar";
-  const kwhPerKwpYear = yieldPerKwpYear(climate.pshYear);
-  const savingRpPerKwpYear = kwhPerKwpYear * costs.tariffs.P1;
   return {
     region,
     comparison: {
@@ -130,14 +166,7 @@ export function buildRegionFacts(input: {
     plants,
     climate,
     grid,
-    solar: {
-      kwhPerKwpYear,
-      co2AvoidedKgPerKwpYear: kwhPerKwpYear * grid.factorKgPerKwh,
-      costRpPerKwp: costs.costRpPerKwp,
-      govTariffRpPerKwh: costs.tariffs.P1,
-      savingRpPerKwpYear,
-      paybackYears: savingRpPerKwpYear > 0 ? costs.costRpPerKwp / savingRpPerKwpYear : 0,
-    },
+    solar: regionSolarFacts(climate.pshYear),
   };
 }
 

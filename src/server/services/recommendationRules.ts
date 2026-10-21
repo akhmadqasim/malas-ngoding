@@ -53,7 +53,7 @@ export function ruleBasedRecommendations(f: RegionFacts): RecommendationItem[] {
     title: "Pasang PLTS atap di gedung milik pemerintah daerah",
     category: "energi_terbarukan",
     body: `Batu bara menyumbang ${dec(coal * 100, 0)}% listrik Kalimantan Timur (perkiraan bauran ${grid.year}), dengan faktor emisi ${dec(grid.factorKgPerKwh)} kg CO2 per kWh. Dengan ${psh}, setiap 1 kWp PLTS atap di ${place} menghasilkan sekitar ${fmtNumber(solar.kwhPerKwpYear)} kWh per tahun (perkiraan). Mulailah dari kantor pemerintah, sekolah negeri, dan puskesmas yang atapnya luas dan listriknya banyak dipakai pada siang hari.`,
-    impact: `Setiap 1 kWp menghindari sekitar ${fmtKg(solar.co2AvoidedKgPerKwpYear)} CO2 dan menghemat sekitar ${fmtRupiah(solar.savingRpPerKwpYear)} per tahun pada tarif P1 ${tariff} per kWh, dengan balik modal sekitar ${dec(solar.paybackYears, 1)} tahun (perkiraan, biaya pasang ${fmtRupiah(solar.costRpPerKwp)} per kWp).`,
+    impact: `Di kantor pemerintah, setiap 1 kWp menghindari sekitar ${fmtKg(solar.co2AvoidedKgPerKwpYear)} CO2 dan menghemat sekitar ${fmtRupiah(solar.savingRpPerKwpYear)} per tahun pada tarif P1 ${tariff} per kWh, dengan balik modal sekitar ${dec(solar.paybackYears, 1)} tahun tanpa baterai (perkiraan, biaya pasang ${fmtRupiah(solar.costRpPerKwp)} per kWp; dihitung dari sekitar ${fmtNumber(solar.selfUsePct)}% listrik panel yang dipakai sendiri).`,
     priority: coal >= COAL_HEAVY_SHARE ? (c.kwhSharePct >= LARGE_USER_PCT ? 1 : 2) : 3,
   });
 
