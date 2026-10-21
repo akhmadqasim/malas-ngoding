@@ -189,6 +189,25 @@ async function swaySweep(page: Page, label: string, regionIds: string[]) {
   check(flicker.length === 0, `${label}: no name flickers on and off during the sway (${flicker.join(", ") || "none"})`);
 }
 
+/**
+ * Flips the switch with this accessible name the way a user does: by clicking its visible label. HeroUI's
+ * switch is a visually hidden `role="switch"` input inside that label, so the role and name are still
+ * what the locator finds, and the check below confirms the state really changed.
+ */
+async function flipSwitch(page: Page, name: string) {
+  const input = page.getByRole("switch", { name });
+  const before = await input.isChecked();
+  await input.locator("xpath=ancestor::label[1]").click();
+  await page.waitForFunction(
+    ({ name, before }) => {
+      const el = [...document.querySelectorAll<HTMLInputElement>('[role="switch"]')].find((e) => e.closest("label")?.textContent?.trim() === name);
+      return el !== undefined && el.checked !== before;
+    },
+    { name, before },
+    { timeout: 2000 },
+  );
+}
+
 /** Samples the map bearing every frame for `ms`, or until `until` (a bearing test) holds; returns what it saw. */
 const watchBearing = (page: Page, ms: number, until?: { above: number }) =>
   page.evaluate(
@@ -265,7 +284,7 @@ const previewState = (page: Page, regionIds: string[]) =>
       lifted: states.filter((s) => s.hover).map((s) => s.id),
       faded: states.filter((s) => (s.fade ?? 0) > 0.01).length,
       activeRow: document.querySelector(".ranking__row[data-active] .ranking__name")?.textContent ?? null,
-      needle: document.querySelector(".meter__name")?.textContent ?? null,
+      needle: document.querySelector(".gauge__name")?.textContent ?? null,
       tooltip: document.querySelector(".map-tooltip") !== null,
     };
   }, regionIds);
@@ -459,7 +478,7 @@ try {
   await page.mouse.move(point.x, point.y - 20, { steps: 4 });
   await page.waitForTimeout(600);
   check(await page.locator(".map-tooltip").isVisible(), "hovering a region shows its tooltip");
-  check((await page.locator(".meter__name").textContent()) === "Paser", "the legend needle reads the hovered region");
+  check((await page.locator(".gauge__name").textContent()) === "Paser", "the legend needle reads the hovered region");
   const hover = await mapState(page);
   check(
     hover.paser.hover === true && Number(hover.samarinda.fade) > 0.5 && !hover.paser.fade,
@@ -475,7 +494,7 @@ try {
 
   await page.getByRole("radio", { name: "Listrik" }).click();
   await page.waitForTimeout(1800);
-  check((await page.locator(".meter__unit").textContent())?.startsWith("kWh per tahun") === true, "the legend follows the kWh metric");
+  check((await page.locator(".gauge__unit").textContent())?.startsWith("kWh per tahun") === true, "the legend follows the kWh metric");
   await shot(page, "5-kwh");
   await page.getByRole("radio", { name: "Emisi CO2" }).click();
   await page.getByRole("button", { name: "Semua wilayah" }).click();
@@ -496,7 +515,7 @@ try {
   await shot(page, "6-back-list-keyboard");
 
   // Rain: switched on at the province view it stays invisible (density 0) and the legend explains why.
-  await page.getByRole("switch", { name: "Hujan" }).click();
+  await flipSwitch(page, "Hujan");
   await page.waitForTimeout(400);
   check(await page.locator(".layer__hint").isVisible(), "the rain hint shows while the view is too far out");
   const rainAt = (zoom: number) =>
@@ -545,7 +564,7 @@ try {
   await shot(page, "7-rain-siang");
   const auto = await lightTo("Otomatis");
   check(auto.preset === lightPresetFor(new Date()), `Otomatis follows WITA time (${auto.preset})`);
-  await page.getByRole("switch", { name: "Hujan" }).click();
+  await flipSwitch(page, "Hujan");
   await page.waitForTimeout(300);
   check(!(await mapState(page)).haze, "switching the rain off clears the haze");
   // Close it so its idle orbit does not keep streaming city tiles in the background during the next check.

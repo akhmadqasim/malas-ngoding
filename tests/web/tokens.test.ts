@@ -6,6 +6,10 @@ import { join } from "node:path";
 
 const WEB = "src/web";
 const css = readFileSync(join(WEB, "styles.css"), "utf8");
+/** Every other stylesheet of the app (the HeroUI theme bridge, the fonts) holds no @theme block at all. */
+const otherCss = readdirSync(WEB)
+  .filter((f) => f.endsWith(".css") && f !== "styles.css")
+  .map((f) => readFileSync(join(WEB, f), "utf8"));
 
 /** Splits styles.css into the `@theme static { ... }` block and everything else. */
 function splitTheme(source: string): { theme: string; rest: string } {
@@ -19,7 +23,8 @@ function splitTheme(source: string): { theme: string; rest: string } {
   throw new Error("unclosed @theme block");
 }
 
-const { theme, rest } = splitTheme(css);
+const { theme, rest: stylesRest } = splitTheme(css);
+const rest = [stylesRest, ...otherCss].join("\n");
 const restLines = rest
   .replace(/\/\*[\s\S]*?\*\//g, (c) => c.replace(/[^\n]/g, " "))
   .split("\n")
@@ -34,7 +39,11 @@ function sourceFiles(dir: string): string[] {
   );
 }
 
-describe("styles.css uses tokens only", () => {
+describe("stylesheets use tokens only", () => {
+  test("the HeroUI theme bridge exists and holds no @theme block", () => {
+    expect(otherCss.some((c) => c.includes('[data-theme="atlas-night"]'))).toBe(true);
+    expect(otherCss.every((c) => !c.includes("@theme"))).toBe(true);
+  });
   test("there is a @theme static block with the colour, type and radius scales", () => {
     expect(theme).toContain("--color-ink");
     expect(theme).toContain("--text-base");
@@ -60,7 +69,7 @@ describe("styles.css uses tokens only", () => {
   });
   test("gradients only on the legend ramp and the intro scrim", () => {
     const gradientRules = [...rest.matchAll(/([^{}]+)\{[^{}]*gradient\(/g)].map((m) => m[1]!.trim());
-    expect(gradientRules.every((sel) => /meter__ramp|intro__scrim/.test(sel))).toBe(true);
+    expect(gradientRules.every((sel) => /gauge__ramp|intro__scrim/.test(sel))).toBe(true);
   });
 });
 

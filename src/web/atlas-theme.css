@@ -1,0 +1,214 @@
+/*
+ * HeroUI v3 theme bridge for "Atlas malam" (docs/research/design/00-direction.md, binding).
+ *
+ * HeroUI components read semantic CSS variables (--surface, --accent, --border, --field-*, ...). This file
+ * maps our design tokens (the raw values in the theme block of styles.css) onto them, so every HeroUI
+ * component looks like our chrome and not like HeroUI's defaults. Our own component classes read the
+ * same semantic variables, so a panel and a HeroUI button can never drift apart.
+ *
+ * Rules for this file:
+ * - Only var() references to tokens: no raw colours, sizes or durations (tests/web/tokens.test.ts).
+ * - The theme lives on <html data-theme="...">: HeroUI's calculated colours (--accent-hover and friends)
+ *   are computed on :root, so the theme must be set there. App.tsx switches it with the ground tone.
+ * - Component customizations sit unlayered at the end: they beat HeroUI's `@layer components` rules
+ *   without specificity games. Prefer setting a component's own variables (--button-bg, ...) over its
+ *   properties, so HeroUI's hover, pressed and selected rules keep working.
+ *
+ * Docs: https://heroui.com/react/llms.txt (component pages are .mdx, e.g.
+ * https://heroui.com/en/docs/react/components/switch.mdx).
+ */
+
+@layer theme {
+  /* Shared by both atlas themes. */
+  [data-theme="atlas-night"],
+  [data-theme="atlas-day"] {
+    /* HeroUI derives its radius scale from --radius; ours (xs, sm, md) is set in the theme block of styles.css and wins. */
+    --radius: calc(var(--radius-sm) * 2);
+    --field-radius: var(--radius-sm);
+    --field-border-width: 1px;
+    --ring-offset-width: 2px;
+    --disabled-opacity: 0.4;
+    --cursor-interactive: pointer;
+    /* Flat loading blocks, no shimmer (00-direction section 8). */
+    --skeleton-animation: none;
+    --tooltip-delay: var(--duration-tooltip);
+    --tooltip-close-delay: var(--duration-instant);
+    --scrollbar-width: thin;
+    --scrollbar-track: transparent;
+  }
+
+  /* Ink panels with paper type: dusk and night (a dark ground). */
+  [data-theme="atlas-night"] {
+    color-scheme: dark;
+
+    --background: var(--color-ink);
+    --foreground: var(--color-paper);
+
+    --surface: var(--color-panel);
+    --surface-foreground: var(--color-paper);
+    --surface-secondary: var(--color-panel-high);
+    --surface-secondary-foreground: var(--color-paper);
+    --surface-tertiary: var(--color-panel-high);
+    --surface-tertiary-foreground: var(--color-paper);
+
+    --overlay: var(--color-panel);
+    --overlay-foreground: var(--color-paper);
+
+    --muted: var(--color-paper-muted);
+    /* Ours: the quietest readable text ("perkiraan", sources, tick values). */
+    --faint: var(--color-paper-faint);
+
+    --default: var(--color-panel-high);
+    --default-foreground: var(--color-paper);
+
+    /* The single accent is luminance, not hue: state only (focus, selected option, switch on, needle). */
+    --accent: var(--color-paper-bright);
+    --accent-foreground: var(--color-ink);
+    --segment: var(--color-paper-bright);
+    --segment-foreground: var(--color-ink);
+
+    --border: var(--color-rule);
+    /* Ours: control outlines and the ramp frame. */
+    --border-strong: var(--color-rule-strong);
+    --separator: var(--color-rule);
+    --focus: var(--color-paper-bright);
+    --link: var(--color-paper);
+
+    --field-background: var(--color-panel-high);
+    --field-foreground: var(--color-paper);
+    --field-placeholder: var(--color-paper-faint);
+    --field-border: var(--color-rule-strong);
+
+    --scrollbar-thumb: var(--color-rule-strong);
+
+    --surface-shadow: var(--shadow-panel);
+    --overlay-shadow: var(--shadow-float);
+    --field-shadow: none;
+  }
+}
+
+/* ---------- HeroUI component customizations ---------- */
+
+/* Buttons: one radius per level (controls sm), our type, no pill shapes. */
+.button {
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
+  font-weight: var(--font-weight-medium);
+}
+/* The one primary button per view: filled accent. */
+.button--primary {
+  font-weight: var(--font-weight-semibold);
+}
+/* Every other button is text or outlined (00-direction section 7). */
+.button--outline {
+  border-color: var(--border-strong);
+  --button-bg: var(--surface);
+  --button-bg-hover: var(--surface-secondary);
+  --button-bg-pressed: var(--surface-secondary);
+  --button-fg: var(--foreground);
+}
+.button--ghost {
+  --button-fg: var(--muted);
+  --button-bg-hover: var(--surface-secondary);
+  --button-bg-pressed: var(--surface-secondary);
+}
+.button--ghost:hover {
+  color: var(--foreground);
+}
+
+/* Segmented choice (ToggleButtonGroup, single selection): an outlined frame, the chosen option filled
+   with the accent. */
+.toggle-button-group {
+  position: relative;
+  padding: --spacing(0.5);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+}
+.toggle-button-group .toggle-button {
+  height: auto;
+  padding: --spacing(1.5) --spacing(3);
+  border-radius: var(--radius-xs);
+  font-size: var(--text-sm);
+  font-weight: var(--font-weight-medium);
+  --toggle-button-bg: transparent;
+  --toggle-button-bg-hover: transparent;
+  --toggle-button-bg-pressed: transparent;
+  --toggle-button-fg: var(--muted);
+  /* The filled marker is a Motion layer that slides between options (SegmentedIndicator). */
+  --toggle-button-bg-selected: transparent;
+  --toggle-button-bg-selected-hover: transparent;
+  --toggle-button-bg-selected-pressed: transparent;
+  --toggle-button-fg-selected: var(--accent-foreground);
+  transition: color var(--duration-quick) var(--ease-standard);
+}
+.toggle-button-group .toggle-button:hover:not([data-selected="true"]) {
+  color: var(--foreground);
+}
+.toggle-button-group .toggle-button:active {
+  transform: none;
+}
+
+/* Switch: a small track, the accent when on. */
+.switch__content {
+  gap: --spacing(2);
+  font-size: var(--text-sm);
+  font-weight: var(--font-weight-medium);
+  color: var(--foreground);
+}
+.switch:not([data-selected="true"]) .switch__content {
+  color: var(--muted);
+}
+.switch {
+  --switch-control-bg: var(--surface-secondary);
+  --switch-control-bg-hover: var(--surface-secondary);
+  --switch-control-bg-checked: var(--accent);
+  --switch-control-bg-checked-hover: var(--accent);
+}
+.switch .switch__control {
+  width: --spacing(7);
+  height: --spacing(4);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-full);
+}
+.switch[data-selected="true"] .switch__control {
+  border-color: var(--accent);
+}
+.switch .switch__thumb {
+  width: --spacing(2.5);
+  height: --spacing(2.5);
+  margin-inline-start: --spacing(0.5);
+  border-radius: var(--radius-full);
+  background: var(--muted);
+  box-shadow: none;
+}
+.switch[data-selected="true"] .switch__thumb {
+  margin-inline-start: calc(100% - --spacing(3));
+  background: var(--accent-foreground);
+  box-shadow: none;
+}
+
+/* Tooltip and popover: panel, strong rule, radius sm, the float shadow (00-direction section 7). */
+.tooltip,
+.popover {
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  color: var(--overlay-foreground);
+}
+.tooltip {
+  padding: --spacing(1) --spacing(2);
+  font-size: var(--text-xs);
+  line-height: var(--text-xs--line-height);
+  word-break: normal;
+}
+.popover__dialog {
+  padding: --spacing(4);
+}
+
+/* Card: the panels. Radius md, a hairline, the panel shadow; padding is the panel's own business. */
+.card {
+  gap: 0;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  color: var(--surface-foreground);
+}

@@ -1,3 +1,4 @@
+import { Button } from "@heroui/react";
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect } from "react";
 import { DURATION, EASE_IN, EASE_OUT } from "../motion.ts";
@@ -46,9 +47,9 @@ export function Intro({ phase, onSkip }: Props) {
               {phase === "loading" ? (
                 <span className="intro__status">Memuat peta…</span>
               ) : (
-                <button type="button" className="button-quiet" onClick={onSkip}>
+                <Button variant="outline" onPress={onSkip}>
                   Lewati intro
-                </button>
+                </Button>
               )}
             </motion.div>
           </div>

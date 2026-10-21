@@ -1,3 +1,4 @@
+import { Button, Card } from "@heroui/react";
 import { AnimatePresence, motion } from "motion/react";
 import { type ReactNode, type RefObject, useEffect, useMemo, useRef } from "react";
 import { fmtCompact, fmtNumber } from "../../shared/format.ts";
@@ -46,7 +47,7 @@ export function RegionPanel({ regions }: Props) {
   };
 
   return (
-    <section className="sheet" aria-label="Data wilayah">
+    <Card className="sheet" role="region" aria-label="Data wilayah">
       <header className="sheet__masthead">
         <span className="sheet__brand">Malas Ngoding</span>
         {/* The span of the figures shown: emission factor 2019 data, PLN sales 2024, population projection
@@ -66,7 +67,7 @@ export function RegionPanel({ regions }: Props) {
           )}
         </AnimatePresence>
       </div>
-    </section>
+    </Card>
   );
 }
 
@@ -198,12 +199,12 @@ function RegionDetail({
 
   return (
     <div className="sheet__body">
-      <button type="button" className="back" onClick={onBack}>
+      <Button variant="ghost" size="sm" className="back" onPress={onBack}>
         <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden>
           <path d="M10 3 5 8l5 5" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
         Semua wilayah
-      </button>
+      </Button>
       <h2 className="place">{region.name}</h2>
       <p className="place__meta">{region.kind === "kota" ? "Kota" : "Kabupaten"}</p>
       <Readout label={m.label} value={m.value(region) * m.scale} unit={m.unit} />

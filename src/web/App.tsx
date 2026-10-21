@@ -1,3 +1,4 @@
+import { Button, Card } from "@heroui/react";
 import { AnimatePresence, MotionConfig, motion } from "motion/react";
 import { type Ref, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { fmtCompact } from "../shared/format.ts";
@@ -130,13 +131,11 @@ export function App() {
         <Intro phase={failure ? "done" : phase} onSkip={skipIntro} />
 
         {failure && (
-          <div className="failure" role="alert">
+          <Card className="failure" role="alert">
             <h2 className="failure__title">Peta belum bisa ditampilkan</h2>
             <p className="failure__text">{failure}</p>
-            <button type="button" className="button-primary" onClick={load}>
-              Coba lagi
-            </button>
-          </div>
+            <Button onPress={load}>Coba lagi</Button>
+          </Card>
         )}
       </main>
     </MotionConfig>

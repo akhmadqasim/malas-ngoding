@@ -11,6 +11,8 @@ import { FUEL_LABELS, fuelsPresent } from "../map/fuels.ts";
 import { intensities } from "../map/regionsLayer.ts";
 import { METRIC_TEXT } from "../metrics.ts";
 import { DURATION, SPRING } from "../motion.ts";
+import { LayerSwitch } from "../components/LayerSwitch.tsx";
+import { Segmented } from "../components/Segmented.tsx";
 import { linkedLightMode, type Metric, useAppStore } from "../store.ts";
 
 const METRICS: { key: Metric; label: string }[] = [
@@ -69,31 +71,23 @@ export function Legend({ plants, regions }: { plants: PlantCollection; regions: 
         <span className="legend__label" id="legend-metric">
           Tinggi kolom
         </span>
-        <div className="segmented" role="radiogroup" aria-labelledby="legend-metric">
-          {METRICS.map((m) => (
-            <button
-              key={m.key}
-              type="button"
-              role="radio"
-              aria-checked={metric === m.key}
-              className="segmented__option"
-              onClick={() => setMetric(m.key)}
-            >
-              {metric === m.key && <motion.span layoutId="metric-indicator" className="segmented__indicator" transition={SPRING.control} />}
-              <span className="segmented__label">{chem(m.label)}</span>
-            </button>
-          ))}
-        </div>
+        <Segmented
+          labelledBy="legend-metric"
+          options={METRICS.map((m) => ({ key: m.key, label: chem(m.label) }))}
+          value={metric}
+          onChange={setMetric}
+          indicatorId="metric-indicator"
+        />
       </div>
 
       <Meter metric={metric} regions={regions} />
 
       <div className="legend__layers" role="group" aria-label="Lapisan peta">
         <div className="layer">
-          <Toggle label="Wilayah" on={layers.regions} onChange={(v) => setLayer("regions", v)} />
+          <LayerSwitch label="Wilayah" on={layers.regions} onChange={(v) => setLayer("regions", v)} />
         </div>
         <div className="layer">
-          <Toggle label="Pembangkit" on={layers.plants} onChange={(v) => setLayer("plants", v)} />
+          <LayerSwitch label="Pembangkit" on={layers.plants} onChange={(v) => setLayer("plants", v)} />
           <ul className="fuel-key" aria-label="Jenis pembangkit">
             {fuels.map((f) => (
               <li key={f}>
@@ -110,24 +104,15 @@ export function Legend({ plants, regions }: { plants: PlantCollection; regions: 
         <span className="legend__label" id="legend-light">
           {lightNote ? `Cahaya ${lightNote}` : "Cahaya"}
         </span>
-        <div className="segmented" role="radiogroup" aria-labelledby="legend-light">
-          {LIGHTS.map((l) => (
-            <button
-              key={l.key}
-              type="button"
-              role="radio"
-              aria-checked={chosenLight === l.key}
-              className="segmented__option"
-              title={l.key === "auto" ? AUTO_TITLE : undefined}
-              onClick={() => setLightMode(lightModeFor(l.key, linkedLightMode))}
-            >
-              {chosenLight === l.key && <motion.span layoutId="light-indicator" className="segmented__indicator" transition={SPRING.control} />}
-              <span className="segmented__label">{l.label}</span>
-            </button>
-          ))}
-        </div>
+        <Segmented
+          labelledBy="legend-light"
+          options={LIGHTS.map((l) => ({ key: l.key, label: l.label, title: l.key === "auto" ? AUTO_TITLE : undefined }))}
+          value={chosenLight}
+          onChange={(key) => setLightMode(lightModeFor(key, linkedLightMode))}
+          indicatorId="light-indicator"
+        />
         <div className="legend__rain">
-          <Toggle label="Hujan" on={rain === "on"} onChange={(v) => setRain(v ? "on" : "auto")} />
+          <LayerSwitch label="Hujan" on={rain === "on"} onChange={(v) => setRain(v ? "on" : "auto")} />
           <AnimatePresence initial={false}>
             {rainHint && (
               <motion.p
@@ -164,20 +149,20 @@ function Meter({ metric, regions }: { metric: Metric; regions: RegionSummary[] }
   if (active) position.current = t.get(active.id) ?? 0;
 
   return (
-    <div className="meter">
-      <p className="meter__reading">
+    <div className="gauge">
+      <p className="gauge__reading">
         {active ? (
           <>
-            <span className="meter__name">{active.name}</span> <span className="num">{fmtCompact(m.value(active) * m.scale)}</span>
+            <span className="gauge__name">{active.name}</span> <span className="num">{fmtCompact(m.value(active) * m.scale)}</span>
           </>
         ) : (
-          <span className="meter__hint">Arahkan ke wilayah</span>
+          <span className="gauge__hint">Arahkan ke wilayah</span>
         )}
       </p>
-      <div className="meter__scale">
-        <div className="meter__ramp" />
+      <div className="gauge__scale">
+        <div className="gauge__ramp" />
         <motion.div
-          className="meter__needle"
+          className="gauge__needle"
           initial={false}
           animate={{ left: `${position.current * 100}%`, opacity: active ? 1 : 0 }}
           transition={{ left: SPRING.needle, opacity: { duration: DURATION.exit } }}
@@ -185,25 +170,14 @@ function Meter({ metric, regions }: { metric: Metric; regions: RegionSummary[] }
         />
       </div>
       {/* The scale is a square root (like the column heights), so the middle tick is a quarter of the top. */}
-      <div className="meter__ticks num" aria-hidden>
-        <span className="meter__tick meter__tick--start">0</span>
-        <span className="meter__tick meter__tick--mid">{fmtCompact((max / 4) * m.scale)}</span>
-        <span className="meter__tick meter__tick--end">{fmtCompact(max * m.scale)}</span>
+      <div className="gauge__ticks num" aria-hidden>
+        <span className="gauge__tick gauge__tick--start">0</span>
+        <span className="gauge__tick gauge__tick--mid">{fmtCompact((max / 4) * m.scale)}</span>
+        <span className="gauge__tick gauge__tick--end">{fmtCompact(max * m.scale)}</span>
       </div>
-      <p className="meter__unit">
+      <p className="gauge__unit">
         {chem(m.unit)}, <Estimate />
       </p>
     </div>
-  );
-}
-
-function Toggle({ label, on, onChange }: { label: string; on: boolean; onChange: (on: boolean) => void }) {
-  return (
-    <button type="button" role="switch" aria-checked={on} className="toggle" onClick={() => onChange(!on)}>
-      <span className="toggle__track" aria-hidden>
-        <motion.span className="toggle__thumb" initial={false} animate={{ x: on ? 12 : 0 }} transition={SPRING.control} />
-      </span>
-      <span className="toggle__label">{label}</span>
-    </button>
   );
 }
