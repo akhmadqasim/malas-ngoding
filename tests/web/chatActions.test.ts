@@ -75,6 +75,7 @@ beforeEach(() => {
     },
     reducedMotion: () => false,
     viewPadding: () => undefined,
+    tabShown: async () => true,
   };
 });
 
@@ -239,6 +240,14 @@ describe("runAction", () => {
       },
     });
     expect(await runAction({ name: "select_building_at", input: { lng: 117.1, lat: -0.5 } }, target)).toBe("failed");
+  });
+
+  test("open_tab reports a failure when the panel cannot show that tab", async () => {
+    expect(await runAction({ name: "open_tab", input: { tab: "surya" } }, { ...target, tabShown: async () => false })).toBe("failed");
+    expect(state().panelTab).toBe("surya");
+    expect(actionChips([{ name: "open_tab", input: { tab: "surya" } }], ["failed"])).toEqual([
+      { label: "Tab belum bisa dibuka", index: 0, failed: true },
+    ]);
   });
 
   test("toggle_layer, set_metric, set_rain and open_tab go to the store", async () => {

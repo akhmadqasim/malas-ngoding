@@ -62,6 +62,7 @@ export interface ActionChip {
 /** What a failed action's button says instead of its usual label. */
 const FAILED_LABELS: Partial<Record<ChatAction["name"], string>> = {
   select_building_at: "Gedung tidak ditemukan",
+  open_tab: "Tab belum bisa dibuka",
 };
 /** What an action's button says while it is still running, when its usual label would claim too much. */
 const PENDING_LABELS: Partial<Record<ChatAction["name"], string>> = {

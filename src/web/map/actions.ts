@@ -19,6 +19,21 @@ export interface ActionTarget {
   reducedMotion: () => boolean;
   /** Screen padding that keeps a point clear of the open panels, the chat included; none in tests. */
   viewPadding: () => Padding | undefined;
+  /** Whether the building panel now shows this tab (it may have none open, or the tab may not exist yet). */
+  tabShown: (tab: PanelTab) => Promise<boolean>;
+}
+
+const TAB_LABELS: Record<PanelTab, string> = { energi: "Energi", emisi: "Emisi", surya: "Surya", cuaca: "Cuaca" };
+
+/** After the next frame: is the building panel's tab with this label the selected one? */
+function panelShowsTab(tab: PanelTab): Promise<boolean> {
+  if (typeof document === "undefined") return Promise.resolve(false);
+  return new Promise((resolve) =>
+    requestAnimationFrame(() => {
+      const selected = document.querySelector(".building-panel [role='tab'][aria-selected='true']");
+      resolve(selected?.textContent?.trim() === TAB_LABELS[tab]);
+    }),
+  );
 }
 
 /**
@@ -55,6 +70,7 @@ export const appTarget: ActionTarget = {
   showPlaces,
   reducedMotion: () => typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches,
   viewPadding: panelsPadding,
+  tabShown: panelShowsTab,
 };
 
 const LAYERS: readonly LayerKey[] = ["regions", "plants", "buildings"];
@@ -302,8 +318,10 @@ export async function runAction(
       }
       case "open_tab": {
         const tab = oneOf(input.tab, TABS);
-        if (tab) state.setPanelTab(tab);
-        return did(tab !== null);
+        if (!tab) return "skipped";
+        state.setPanelTab(tab);
+        // No building open, or the tab is not there yet: the button must not say it opened.
+        return (await target.tabShown(tab)) ? "ok" : "failed";
       }
       case "mark_places": {
         const places = placesOf(input.places);
