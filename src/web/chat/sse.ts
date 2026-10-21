@@ -17,6 +17,7 @@ export interface SseMessage {
  */
 export function createSseParser(): { push: (chunk: string) => SseMessage[]; end: () => SseMessage[] } {
   let buffer = "";
+  let pendingCr = "";
   const parse = (block: string): SseMessage | null => {
     let event = "message";
     const data: string[] = [];
@@ -48,10 +49,17 @@ export function createSseParser(): { push: (chunk: string) => SseMessage[]; end:
   };
   return {
     push: (chunk) => {
-      buffer += chunk.replace(/\r\n?/g, "\n");
+      // A CR at the end of a chunk may be the first half of a CRLF: keep it until the next chunk.
+      const text = pendingCr + chunk;
+      pendingCr = text.endsWith("\r") ? "\r" : "";
+      buffer += (pendingCr ? text.slice(0, -1) : text).replace(/\r\n?/g, "\n");
       return drain(false);
     },
-    end: () => drain(true),
+    end: () => {
+      if (pendingCr) buffer += "\n";
+      pendingCr = "";
+      return drain(true);
+    },
   };
 }
 

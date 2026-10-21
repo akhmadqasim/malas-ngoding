@@ -101,8 +101,10 @@ export function createPlaceSearch(
       throw new Error(timedOut ? "Place search: request timed out" : "Place search: request failed");
     }
     if (!res.ok) throw new Error(`Place search: HTTP ${res.status}`);
-    const body = (await res.json().catch(() => null)) as { features?: SearchFeature[] } | null;
-    const hits = (body?.features ?? []).map(toHit).filter((h): h is PlaceHit => h !== null);
+    const body = (await res.json().catch(() => null)) as { features?: unknown } | null;
+    // An answer that cannot be read is a failure, not "nothing found" (which would be kept for an hour).
+    if (!body || !Array.isArray(body.features)) throw new Error("Place search: unreadable answer");
+    const hits = (body.features as SearchFeature[]).map(toHit).filter((h): h is PlaceHit => h !== null);
 
     if (cache.size >= MAX_CACHED) cache.delete(cache.keys().next().value!);
     cache.set(key, { at: now(), hits });

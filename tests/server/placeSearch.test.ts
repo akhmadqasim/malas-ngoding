@@ -70,6 +70,19 @@ describe("createPlaceSearch", () => {
     expect(calls).toBe(3);
   });
 
+  test("an unreadable 200 answer is a failure, not an hour of 'nothing found'", async () => {
+    let calls = 0;
+    const fetcher = (async () => {
+      calls++;
+      return calls === 1
+        ? new Response("<html>proxy</html>", { status: 200 })
+        : Response.json({ features: [feature("SMA", 117.1, -0.5)] });
+    }) as unknown as typeof fetch;
+    const search = createPlaceSearch("pk.test", { fetch: fetcher });
+    await expect(search(QUERY)).rejects.toThrow(/unreadable/);
+    expect(await search(QUERY)).toHaveLength(1);
+  });
+
   test("a failed answer is not kept", async () => {
     let calls = 0;
     const fetcher = (async () => {

@@ -1017,8 +1017,8 @@ describe("chat server tools", () => {
         input: {
           label: "sekolah",
           places: [
-            { name: "SMA Negeri 1", lng: 117.151, lat: -0.501 },
-            { name: "SD Negeri 2", lng: 117.16, lat: -0.49 },
+            { name: "SMA Negeri 1", lng: 117.151, lat: -0.501, type: "sekolah" },
+            { name: "SD Negeri 2", lng: 117.16, lat: -0.49, type: "sekolah" },
           ],
         },
       },
@@ -1108,10 +1108,42 @@ describe("the event stream", () => {
 
   test("no keep-alive comment once the stream has ended", async () => {
     const req = new Request("http://localhost/api/chat", { method: "POST" });
-    const res = eventStream(req, async (send) => send({ event: "done", data: {} }), 10);
-    expect(await res.text()).toBe("event: done\ndata: {}\n\n");
-    // The timer is gone: nothing writes to the closed stream later (that would throw and be logged).
-    await Bun.sleep(40);
+    const cleared = spyOn(globalThis, "clearInterval");
+    try {
+      const res = eventStream(req, async (send) => send({ event: "done", data: {} }), 10);
+      expect(await res.text()).toBe("event: done\ndata: {}\n\n");
+      expect(cleared).toHaveBeenCalled();
+    } finally {
+      cleared.mockRestore();
+    }
+  });
+
+  test("a client that leaves stops the keep-alive and aborts the answer", async () => {
+    const req = new Request("http://localhost/api/chat", { method: "POST" });
+    const cleared = spyOn(globalThis, "clearInterval");
+    let aborted = false;
+    try {
+      const res = eventStream(
+        req,
+        (_send, signal) =>
+          new Promise<void>((resolve) =>
+            signal.addEventListener("abort", () => {
+              aborted = true;
+              resolve();
+            }),
+          ),
+        10,
+      );
+      const reader = res.body!.getReader();
+      const first = new TextDecoder().decode((await reader.read()).value);
+      expect(first).toBe(": ping\n\n");
+      cleared.mockClear();
+      await reader.cancel();
+      expect(aborted).toBe(true);
+      expect(cleared).toHaveBeenCalled();
+    } finally {
+      cleared.mockRestore();
+    }
   });
 });
 

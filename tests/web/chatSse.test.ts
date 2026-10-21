@@ -49,6 +49,15 @@ describe("createSseParser", () => {
     expect(parser.push("event: done\ndata: {}")).toEqual([]);
     expect(parser.end()).toEqual([{ event: "done", data: "{}" }]);
   });
+
+  test("a CRLF split across two chunks is one line break", () => {
+    const parser = createSseParser();
+    expect(parser.push('event: text\r\ndata: {"delta":"a"}\r')).toEqual([]);
+    expect(parser.push("\n\r\nevent: done\r\ndata: {}\r\n\r\n")).toEqual([
+      { event: "text", data: '{"delta":"a"}' },
+      { event: "done", data: "{}" },
+    ]);
+  });
 });
 
 describe("streamChat", () => {
