@@ -921,6 +921,7 @@ try {
   await page.waitForTimeout(300);
   check(!(await mapState(page)).haze, "switching the rain off clears the haze");
   await autoRainChecks(page);
+  await chatChecks(page);
   await buildingChecks(page);
   await solarPanelChecks(page);
   await buildingHeapSoak(page);
@@ -1503,4 +1504,84 @@ async function buildingHeapSoak(page: Page) {
     `JS heap soak (not GPU or renderer memory): ${step} moves at building zoom over ${Math.round((Date.now() - t0) / 1000)} s, JS heap ${start.toFixed(0)} → ${end.toFixed(0)} MB (peak ${peak.toFixed(0)} MB), terrain ${terrain ? "on" : "off"}`,
   );
   await cdp.detach();
+}
+
+/**
+ * The AI chat (Task 8b), with canned answers so the check spends no tokens: the button opens the panel with
+ * the suggested questions; an answer streams in, its map actions move the map (a region is selected, the
+ * metric switches) and show as buttons; an error shows "Coba lagi"; the panel never covers the dock cards;
+ * Escape closes it and gives focus back to the button. Leaves the province view as it found it.
+ */
+async function chatChecks(page: Page) {
+  const sse = (events: [string, unknown][]) => events.map(([e, d]) => `event: ${e}\ndata: ${JSON.stringify(d)}\n\n`).join("");
+  const reply = (body: string) => (route: import("playwright").Route) =>
+    route.fulfill({ status: 200, headers: { "content-type": "text/event-stream" }, body });
+  await page.evaluate((view) => (window as MapWindow).__malasMap!.jumpTo(view), KALTIM_VIEW);
+  await waitForMapIdle(page, 12_000);
+
+  const launcher = page.getByRole("button", { name: "Tanya asisten AI" });
+  check(await launcher.isVisible(), "the chat button sits in the bottom-right corner");
+  await launcher.click();
+  const panel = page.getByRole("region", { name: "Asisten AI" });
+  await panel.waitFor({ timeout: 3000 });
+  const prompts = await panel.locator(".chat__prompt").count();
+  check(prompts === 4, `the empty chat offers the 4 suggested questions (${prompts})`);
+  const focused = await page.evaluate(() => document.activeElement?.getAttribute("aria-label"));
+  check(focused === "Pertanyaan untuk asisten AI", `opening the chat puts the cursor in the question box (${focused})`);
+
+  await page.route(
+    "**/api/chat",
+    reply(
+      sse([
+        ["action", { name: "set_metric", input: { metric: "kwh" } }],
+        ["action", { name: "fly_to_region", input: { region: "samarinda" } }],
+        ["text", { delta: "**Samarinda** emisinya paling tinggi, sekitar 1,6 juta ton CO2 per tahun (perkiraan).\n\n" }],
+        ["text", { delta: "Berikutnya:\n- Kutai Kartanegara\n- Balikpapan" }],
+        ["done", {}],
+      ]),
+    ),
+  );
+  await panel.getByRole("button", { name: "Wilayah mana emisinya paling tinggi?" }).click();
+  await panel.locator(".chat-chip").first().waitFor({ timeout: 5000 });
+  const answer = (await panel.locator(".chat-msg--ai").last().textContent()) ?? "";
+  check(answer.includes("Samarinda emisinya paling tinggi") && !answer.includes("**"), "the answer streams in as formatted text");
+  check((await panel.locator(".chat-msg--ai li").count()) === 2, "the answer's list renders as a list");
+  const chips = await panel.locator(".chat-chip").allTextContents();
+  check(chips.join("|") === "Warna menurut listrik|Samarinda", `the map actions show as buttons under the answer (${chips.join(", ")})`);
+  await page.getByRole("button", { name: "Semua wilayah" }).waitFor({ timeout: 5000 }).catch(() => {});
+  check(await page.getByRole("button", { name: "Semua wilayah" }).isVisible(), "fly_to_region selects the region (the region detail opens)");
+  check((await page.getByRole("radio", { name: "Listrik" }).getAttribute("aria-checked")) === "true", "set_metric switches the columns to kWh");
+  await page.waitForTimeout(2200);
+  await shot(page, "9-chat-answer");
+
+  // The panel ends above any dock card under it.
+  const overlap = await page.evaluate((cards) => {
+    const p = document.querySelector(".chat__card")!.getBoundingClientRect();
+    return cards.some((sel) => {
+      const r = document.querySelector(sel)?.getBoundingClientRect();
+      return r && r.left < p.right && r.right > p.left && r.top < p.bottom && r.bottom > p.top;
+    });
+  }, DOCK_CARDS);
+  check(!overlap, "the chat panel does not cover the legend or the map controls");
+
+  await page.unroute("**/api/chat");
+  await page.route("**/api/chat", reply(sse([["error", { message: "Asisten AI sedang sibuk. Coba lagi sebentar lagi." }]])));
+  await panel.getByRole("textbox", { name: "Pertanyaan untuk asisten AI" }).fill("Bandingkan emisi Samarinda dan Balikpapan");
+  await page.keyboard.press("Enter");
+  const problem = panel.getByRole("alert");
+  await problem.waitFor({ timeout: 5000 });
+  check(((await problem.textContent()) ?? "").includes("sibuk"), "a failed answer says why and offers 'Coba lagi'");
+  await shot(page, "9-chat-error");
+  await page.unroute("**/api/chat");
+
+  await page.keyboard.press("Escape");
+  await panel.waitFor({ state: "detached", timeout: 3000 }).catch(() => {});
+  check(!(await panel.isVisible()), "Escape closes the chat");
+  const back = await page.evaluate(() => document.activeElement?.getAttribute("aria-label"));
+  check(back === "Tanya asisten AI", `closing the chat gives focus back to its button (${back})`);
+
+  // Leave the province view as the next checks expect it.
+  await page.getByRole("radio", { name: "Emisi CO2" }).click();
+  await page.getByRole("button", { name: "Semua wilayah" }).click();
+  await page.evaluate(() => localStorage.removeItem("malas-ngoding.chat"));
 }
