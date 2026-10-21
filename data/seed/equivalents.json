@@ -29,9 +29,9 @@
   },
   {
     "key": "penerbangan",
-    "label": "penerbangan Jakarta–Balikpapan",
+    "label": "penumpang terbang Jakarta–Balikpapan",
     "kgCo2PerUnit": 111.1,
-    "unit": "penerbangan",
+    "unit": "penumpang",
     "source": "ICAO ICEC API, CGK-BPN economy one way, 1,255 km, 111.13 kg CO2 per passenger (verified, queried 2026-10-21)"
   }
 ]

@@ -298,7 +298,7 @@ Padanan adalah kg CO2 dibagi faktor per satuan, supaya angka kilogram mudah diba
 | km naik motor | 0,05 | Perkiraan: 2,31 kg CO2 per liter ÷ 45 km per liter |
 | pohon menyerap setahun | 22 | Angka yang sering dikutip, dengan rentang 10 sampai 40 (diperdebatkan) |
 | kali charge HP | 0,017 | Perkiraan: 15 Wh × 1,14 kg/kWh |
-| penerbangan Jakarta ke Balikpapan | 111,1 | Kalkulator ICAO ICEC (ekonomi, sekali jalan, 1.255 km), dicek 21 Oktober 2026 |
+| penumpang terbang Jakarta–Balikpapan | 111,1 | Satu penumpang, kelas ekonomi, sekali jalan, 1.255 km (Kalkulator ICAO ICEC, dicek 21 Oktober 2026) |
 
 ### 6. Simulasi panel surya
 
