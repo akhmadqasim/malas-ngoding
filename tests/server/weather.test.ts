@@ -145,6 +145,12 @@ describe("GET /api/weather", () => {
 });
 
 describe("currentConditions", () => {
+  test("includes current wind only when present and recent", () => {
+    const now = Date.now();
+    const hour = { time: wita(now), ghiWm2: 0, cloudPct: 40, precipMm: 0, weatherCode: 2, windSpeedMs: 5, windFromDeg: 90 };
+    expect(currentConditions([hour], now).wind).toMatchObject({ speedMs: 5, fromDeg: 90, heightM: 10 });
+    expect(currentConditions([hour], now + 4 * 3600000).wind).toBeUndefined();
+  });
   const base = { cloudPct: 40, precipMm: 0, weatherCode: 2 };
   // 2026-10-21 12:00 WITA is 04:00 UTC.
   const noon = Date.UTC(2026, 9, 21, 4, 0);
@@ -171,6 +177,17 @@ describe("currentConditions", () => {
 });
 
 describe("cachedForecast", () => {
+  test("a wind request upgrades a fresh old cache whose forecast has no wind fields", async () => {
+    const hours = forecast().map(h => ({ ...h, windSpeedMs: 4, windFromDeg: 120 }));
+    const fake = fakeDeps(null, { meteo: hours });
+    fake.stored.set(CACHE_KEY, { hours: forecast() });
+    fake.ages.set(CACHE_KEY, new Date());
+    const out = await cachedForecast(fake.deps, -0.5, 117.15, Date.now(), true);
+    expect(fake.meteoCalls).toHaveLength(1);
+    expect(out?.hours[0]?.windFromDeg).toBe(120);
+    await cachedForecast(fake.deps, -0.5, 117.15, Date.now(), true);
+    expect(fake.meteoCalls).toHaveLength(1);
+  });
   let warn: ReturnType<typeof spyOn>;
   beforeEach(() => {
     warn = spyOn(console, "warn").mockImplementation(() => {});

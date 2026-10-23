@@ -1,4 +1,4 @@
-import { ChevronLeft } from "@gravity-ui/icons";
+import { ChevronLeft } from "../icons.ts";
 import { Button, Card, Disclosure } from "@heroui/react";
 import { AnimatePresence, motion } from "motion/react";
 import { type ReactNode, type RefObject, useEffect, useMemo, useRef } from "react";
@@ -16,6 +16,12 @@ import { type Metric, useAppStore } from "../store.ts";
 import { mixRamp, rampTokens } from "../theme.ts";
 import { RecommendationPanel } from "./RecommendationPanel.tsx";
 import { EmissionContext } from "./EmissionContext.tsx";
+import { ScenarioView } from "./ScenarioPanel.tsx";
+import { TwinView } from "./TwinPanel.tsx";
+import { PotentialView } from "./PotentialPanel.tsx";
+import { AccountControl } from "./AccountControl.tsx";
+import { HomeView } from "./HomeView.tsx";
+import { PemdaView } from "./PemdaView.tsx";
 
 interface Props {
   regions: RegionSummary[];
@@ -38,6 +44,12 @@ export function RegionPanel({ regions }: Props) {
   const selectedId = useAppStore((s) => s.selectedRegionId);
   const metric = useAppStore((s) => s.metric);
   const selectRegion = useAppStore((s) => s.selectRegion);
+  const scenarioOpen = useAppStore((s) => s.scenarioOpen);
+  const twinOpen = useAppStore((s) => s.twinOpen);
+  const potentialOpen = useAppStore((s) => s.potentialOpen);
+  const homeOpen = useAppStore((s) => s.homeOpen);
+  const signedIn = useAppStore((s) => s.user !== null);
+  const pemdaOpen = useAppStore((s) => s.pemdaOpen);
   const selected = regions.find((r) => r.id === selectedId) ?? null;
   // The list bars grow only the first time the overview appears; coming back should not replay it.
   const overviewShown = useRef(false);
@@ -56,13 +68,35 @@ export function RegionPanel({ regions }: Props) {
         <span className="sheet__brand">Malas Ngoding</span>
         {/* The span of the figures shown: emission factor 2019 data, PLN sales 2024, population projection
             2025, villages without PLN 2026. The detail view names the year of each figure. */}
-        <span className="sheet__edition">Data 2019–2026</span>
+        {/* Signed in, the account takes the edition's place: the masthead keeps one line. */}
+        {!signedIn && <span className="sheet__edition">Data 2019–2026</span>}
+        <AccountControl />
       </header>
       <div className="sheet__scroll">
         <AnimatePresence mode="wait" initial={false}>
           {selected ? (
             <motion.div key={selected.id} {...swap}>
               <RegionDetail region={selected} regions={regions} metric={metric} onBack={back} />
+            </motion.div>
+          ) : homeOpen ? (
+            <motion.div key="home" {...swap}>
+              <HomeView />
+            </motion.div>
+          ) : pemdaOpen ? (
+            <motion.div key="pemda" {...swap}>
+              <PemdaView regions={regions} />
+            </motion.div>
+          ) : potentialOpen ? (
+            <motion.div key="potential" {...swap}>
+              <PotentialView />
+            </motion.div>
+          ) : twinOpen ? (
+            <motion.div key="twin" {...swap}>
+              <TwinView regions={regions} />
+            </motion.div>
+          ) : scenarioOpen ? (
+            <motion.div key="scenario" {...swap}>
+              <ScenarioView regions={regions} />
             </motion.div>
           ) : (
             <motion.div key="overview" {...swap}>

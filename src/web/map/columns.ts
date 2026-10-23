@@ -15,10 +15,15 @@ export const HIDE_ZOOM = 12;
 
 export const metricValue = (r: RegionSummary, metric: Metric) => (metric === "co2" ? r.co2KgYear : r.kwhYear);
 
-/** 0..1 per region. Square root so small regions (Mahakam Ulu) still read, and Samarinda does not dwarf all. */
-export function intensities(regions: RegionSummary[], metric: Metric): Map<string, number> {
+/**
+ * 0..1 per region. Square root so small regions (Mahakam Ulu) still read, and Samarinda does not dwarf all.
+ * `scale` (the rooftop solar scenario, CO2 only) shrinks a region's value against the unscaled maximum, so
+ * the columns sink instead of being stretched back to full height.
+ */
+export function intensities(regions: RegionSummary[], metric: Metric, scale?: ReadonlyMap<string, number>): Map<string, number> {
   const max = Math.max(...regions.map((r) => metricValue(r, metric)), 1);
-  return new Map(regions.map((r) => [r.id, Math.sqrt(Math.max(metricValue(r, metric), 0) / max)]));
+  const k = (id: string) => (metric === "co2" ? (scale?.get(id) ?? 1) : 1);
+  return new Map(regions.map((r) => [r.id, Math.sqrt(Math.max(metricValue(r, metric) * k(r.id), 0) / max)]));
 }
 
 /** Resting height of a column at the province view, in metres, for an intensity `t` (0..1). */

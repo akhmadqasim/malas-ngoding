@@ -28,6 +28,8 @@ export interface Feature {
  */
 export function fakeBuildingMap(opts: { zoom?: number; rendered?: Feature[]; holdFlights?: boolean } = {}) {
   const interactions = new Map<string, Handler>();
+  const layers = new Map<string, unknown>();
+  const sources = new Map<string, unknown>();
   const states = new Map<number | undefined, Record<string, unknown>>();
   const config: Record<string, unknown> = {};
   type Listener = (e?: Record<string, unknown>) => void;
@@ -43,6 +45,12 @@ export function fakeBuildingMap(opts: { zoom?: number; rendered?: Feature[]; hol
     queueMicrotask(() => fire("idle"));
   };
   const map = {
+    getLayer: (id: string) => layers.get(id),
+    addLayer: (layer: { id: string }) => void layers.set(layer.id, layer),
+    removeLayer: (id: string) => void layers.delete(id),
+    getSource: (id: string) => sources.get(id),
+    addSource: (id: string, source: unknown) => void sources.set(id, source),
+    removeSource: (id: string) => void sources.delete(id),
     addInteraction: (id: string, spec: { handler: Handler }) => void interactions.set(id, spec.handler),
     removeInteraction: (id: string) => void interactions.delete(id),
     setFeatureState: (f: Feature, s: Record<string, unknown>) => void states.set(f.id, { ...states.get(f.id), ...s }),

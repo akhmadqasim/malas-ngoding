@@ -10,6 +10,7 @@ import {
   riseRegions,
   setRegionHover,
   setRegionMetric,
+  setRegionScale,
   setRegionsVisible,
   setSelectedRegion,
 } from "../../src/web/map/regionsLayer.ts";
@@ -420,5 +421,38 @@ describe("cleanup", () => {
     removeRegions(map);
     flush();
     expect(labelOpacity()).toBeUndefined();
+  });
+});
+
+describe("the rooftop solar scenario", () => {
+  test("the CO2 columns sink and pale by the share of CO2 left, then rise back when it closes", () => {
+    const { map, state, labelData } = setup();
+    riseRegions(map, fc);
+    flush();
+    const full = { h: Number(state("samarinda").h), t: Number(state("samarinda").t) };
+    setRegionScale(map, new Map([["samarinda", 0.5], ["paser", 1]]));
+    flush();
+    expect(Number(state("samarinda").h)).toBeLessThan(full.h);
+    expect(Number(state("samarinda").t)).toBeCloseTo(full.t * Math.SQRT1_2, 6);
+    // The labels move to the lower tops.
+    expect(labelData().length).toBeGreaterThan(0);
+    setRegionScale(map, null);
+    flush();
+    expect(Number(state("samarinda").h)).toBeCloseTo(full.h, 6);
+    expect(Number(state("samarinda").t)).toBeCloseTo(full.t, 6);
+    removeRegions(map);
+  });
+
+  test("the kWh columns keep their height", () => {
+    const { map, state } = setup();
+    riseRegions(map, fc);
+    flush();
+    setRegionMetric(map, "kwh");
+    flush();
+    const kwh = Number(state("samarinda").h);
+    setRegionScale(map, new Map([["samarinda", 0.5]]));
+    flush();
+    expect(Number(state("samarinda").h)).toBeCloseTo(kwh, 6);
+    removeRegions(map);
   });
 });

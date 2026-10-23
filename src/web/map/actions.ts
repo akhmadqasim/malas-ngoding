@@ -23,7 +23,7 @@ export interface ActionTarget {
   tabShown: (tab: PanelTab) => Promise<boolean>;
 }
 
-const TAB_LABELS: Record<PanelTab, string> = { energi: "Energi", emisi: "Emisi", surya: "Surya", cuaca: "Cuaca" };
+const TAB_LABELS: Record<PanelTab, string> = { energi: "Energi", emisi: "Emisi", surya: "Surya", cuaca: "Cuaca", sensor: "Sensor IoT" };
 
 /** After the next frame: is the building panel's tab with this label the selected one? */
 function panelShowsTab(tab: PanelTab): Promise<boolean> {
@@ -75,7 +75,7 @@ export const appTarget: ActionTarget = {
 const LAYERS: readonly LayerKey[] = ["regions", "plants", "buildings"];
 const METRICS: readonly Metric[] = ["co2", "kwh"];
 const RAIN: readonly RainMode[] = ["auto", "on", "off"];
-const TABS: readonly PanelTab[] = ["energi", "emisi", "surya", "cuaca"];
+const TABS: readonly PanelTab[] = ["energi", "emisi", "surya", "cuaca", "sensor"];
 const BUILDING_TYPES: readonly BuildingType[] = [
   "rumah",
   "ruko",

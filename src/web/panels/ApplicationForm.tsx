@@ -1,0 +1,54 @@
+import { useRef, useState, type FormEvent } from "react";
+import type {SolarApplication,SolarApplicationCreateInput,ApplicationFile,FileKind,ComplianceType,Ownership,ContactWindow} from "../../shared/applications.ts";
+import {FILE_KIND_LABELS,FILE_TYPES,MAX_FILE_BYTES,MAX_FILES_PER_APPLICATION} from "../../shared/applications.ts";
+import {applicationsApi} from "../applicationsApi.ts";
+import {api,ApiError} from "../api.ts";
+import {useAppStore} from "../store.ts";
+import {VisualGuide} from "../components/VisualGuide.tsx";
+import {PanelsTopLeft,Camera,ShieldCheck,ArrowLeft,ArrowRight,Send, Xmark} from "../icons.ts";
+export function ApplicationForm({existing,onDone,onCancel}:{existing?:SolarApplication;onDone:(app:SolarApplication)=>void;onCancel:()=>void}){
+ const home=useAppStore(s=>s.home),user=useAppStore(s=>s.user);
+ const [errorCode,setErrorCode]=useState<string|undefined>();
+ const [step,setStep]=useState(0),[busy,setBusy]=useState(false),[uncertain,setUncertain]=useState(false),[error,setError]=useState<string|null>(null);
+ const [files,setFiles]=useState<ApplicationFile[]>([]),[kind,setKind]=useState<FileKind>("installation"),[consent,setConsent]=useState(false);
+ const [form,setForm]=useState({installedKwp:String(existing?.report.installedKwp??home?.installedKwp??""),panelCount:String(existing?.report.panelCount??""),installedOn:existing?.report.installedOn??"",installerName:existing?.report.installerName??"",plnApprovalNumber:existing?.report.plnApprovalNumber??"",complianceType:existing?.report.complianceType??"pending" as ComplianceType,complianceNumber:existing?.report.complianceNumber??"",contactName:existing?.contact.name??user?.name??"",phone:existing?.contact.phone??"",ownership:existing?.contact.ownership??"owner" as Ownership,ownerPermissionConfirmed:existing?.contact.ownerPermissionConfirmed??false,preferredContactWindow:existing?.contact.preferredContactWindow??"weekday_afternoon" as ContactWindow,notes:existing?.contact.notes??""});
+ const prepared=useRef<{key:string;body:SolarApplicationCreateInput}|null>(null),element=useRef<HTMLFormElement>(null);
+ const update=<K extends keyof typeof form>(key:K,value:(typeof form)[K])=>setForm(f=>({...f,[key]:value}));
+ const upload=async(file:File)=>{setError(null);if(files.length+(existing?.files.length??0)>=MAX_FILES_PER_APPLICATION){setError("Maksimal 10 foto per laporan.");return;}if(file.size>MAX_FILE_BYTES||!(FILE_TYPES as readonly string[]).includes(file.type)){setError("Pilih foto JPEG, PNG, atau WebP maksimal 5 MB.");return;}setBusy(true);try{const result=await applicationsApi.upload(file,kind);setFiles(f=>[...f,result.file]);}catch(e){setError(e instanceof Error?e.message:"Foto gagal diunggah.");}finally{setBusy(false);}};
+ const next=()=>{if(element.current?.reportValidity()){setError(null);setStep(s=>s+1);}};
+ const submit=async(e:FormEvent)=>{e.preventDefault();if(step<2){next();return;}if(!home||busy)return;setError(null);setErrorCode(undefined);
+ if(!existing&&!files.some(f=>f.kind==="installation")){setError("Unggah minimal satu foto panel yang sudah terpasang.");return;}
+ if(!existing&&!consent){setError("Setujui pemrosesan data laporan terlebih dahulu.");return;}
+ const body:SolarApplicationCreateInput={...form,installedKwp:Number(form.installedKwp),panelCount:Number(form.panelCount),complianceNumber:form.complianceType==="pending"?null:form.complianceNumber.trim()||null,plnApprovalNumber:form.plnApprovalNumber.trim()||null,expectedHomeUpdatedAt:home.updatedAt,consentApplicationProcessing:true,fileIds:files.map(f=>f.id)};
+ setBusy(true);try{let app:SolarApplication;if(existing){const {expectedHomeUpdatedAt,consentApplicationProcessing,fileIds,...fields}=body;app=(await applicationsApi.patch(existing.id,{...fields,expectedVersion:existing.version,addFileIds:fileIds})).application;}else{prepared.current??={key:crypto.randomUUID(),body};app=(await applicationsApi.create(prepared.current.body,prepared.current.key)).application;}onDone(app);}catch(e){setErrorCode(e instanceof ApiError?e.code:undefined);setError(e instanceof Error?e.message:"Laporan gagal dikirim.");if(!existing&&(!(e instanceof ApiError)||e.status===0||e.status>=500||e.status===200))setUncertain(true);else{prepared.current=null;setUncertain(false);} }finally{setBusy(false);}};
+ if(!home)return <p>Hubungkan rumah ke akun terlebih dahulu.</p>;
+ const today=new Intl.DateTimeFormat("en-CA",{timeZone:"Asia/Makassar",year:"numeric",month:"2-digit",day:"2-digit"}).format(new Date());
+ return <form ref={element} className="application-form" onSubmit={submit} aria-label={existing?"Perbaiki laporan PLTS":"Laporkan pemasangan PLTS"}>
+ <VisualGuide role="teknisi" title={existing?"Lengkapi laporanmu":"Panel sudah terpasang? Laporkan, yuk!"}>Untuk pendataan pemda. Bukan permohonan pemasangan atau izin pasang.</VisualGuide>
+ <ol className="report-steps" aria-label="Langkah laporan">{["Panel terpasang","Kontak dan foto","Periksa dan kirim"].map((s,i)=><li key={s} aria-current={step===i?"step":undefined}>{i+1}. {s}</li>)}</ol>
+ <fieldset disabled={busy||uncertain}>
+ {step===0&&<><h3><PanelsTopLeft aria-hidden/>Data pemasangan nyata</h3><p>Rumah tersimpan: {home.regionName}. Isi sesuai sistem yang sudah dipasang, bukan angka simulasi.</p>
+ <label>Kapasitas terpasang (kWp)<input required type="number" min="0.001" max="10000" step="any" value={form.installedKwp} onChange={e=>update("installedKwp",e.target.value)}/></label>
+ <label>Jumlah panel terpasang<input required type="number" min="1" max="20000" step="1" value={form.panelCount} onChange={e=>update("panelCount",e.target.value)}/></label>
+ <label>Tanggal selesai pemasangan<input required type="date" max={today} value={form.installedOn} onChange={e=>update("installedOn",e.target.value)}/></label>
+ <label>Nama badan usaha pemasang<input required minLength={2} maxLength={120} value={form.installerName} onChange={e=>update("installerName",e.target.value)}/></label>
+ <label>Nomor persetujuan PLN (bila ada)<input maxLength={60} value={form.plnApprovalNumber} onChange={e=>update("plnApprovalNumber",e.target.value)}/></label>
+ <label>Bukti keamanan<select aria-label="Bukti keamanan" value={form.complianceType} onChange={e=>{update("complianceType",e.target.value as ComplianceType);update("complianceNumber","");}}><option value="pending">Masih dalam proses</option><option value="slo">SLO</option><option value="registration">Registrasi ESDM</option></select></label>
+ {form.complianceType!=="pending"&&<label>Nomor SLO / registrasi (atau unggah fotonya)<input maxLength={60} value={form.complianceNumber} onChange={e=>update("complianceNumber",e.target.value)}/></label>}</>}
+ {step===1&&<><h3><Camera aria-hidden/>Kontak dan bukti foto</h3><label>Nama kontak<input required minLength={2} maxLength={80} value={form.contactName} onChange={e=>update("contactName",e.target.value)}/></label><label>Nomor telepon<input required type="tel" maxLength={30} autoComplete="tel" value={form.phone} onChange={e=>update("phone",e.target.value)}/></label>
+ <label>Hubungan dengan rumah<select aria-label="Hubungan dengan rumah" value={form.ownership} onChange={e=>update("ownership",e.target.value as Ownership)}><option value="owner">Saya pemilik</option><option value="authorized_resident">Penghuni dengan izin pemilik</option></select></label>
+ <label className="report-check"><input type="checkbox" required={form.ownership==="authorized_resident"} checked={form.ownerPermissionConfirmed} onChange={e=>update("ownerPermissionConfirmed",e.target.checked)}/>Saya pemilik atau sudah mendapat izin pemilik.</label>
+ <label>Waktu dihubungi<select aria-label="Waktu dihubungi" value={form.preferredContactWindow} onChange={e=>update("preferredContactWindow",e.target.value as ContactWindow)}><option value="weekday_morning">Hari kerja, pagi</option><option value="weekday_afternoon">Hari kerja, siang</option><option value="weekend">Akhir pekan</option></select></label>
+ <label>Catatan<textarea maxLength={500} value={form.notes} onChange={e=>update("notes",e.target.value)}/></label>
+ <label>Jenis foto<select aria-label="Jenis foto" value={kind} onChange={e=>setKind(e.target.value as FileKind)}>{Object.entries(FILE_KIND_LABELS).map(([k,v])=><option key={k} value={k}>{v}</option>)}</select></label>
+ <label>Unggah foto (JPEG / PNG / WebP, maksimal 5 MB)<input type="file" accept="image/jpeg,image/png,image/webp" onChange={e=>{const file=e.target.files?.[0];if(file)void upload(file);e.target.value="";}}/></label>
+ <p>Foto panel terpasang wajib. Foto yang sudah masuk riwayat tetap disimpan; unggahan baru dapat dilepas sebelum dikirim.</p>
+ <div className="report-files">{existing?.files.map(f=><span key={f.id}>{FILE_KIND_LABELS[f.kind]} (tersimpan)</span>)}{files.map(f=><div key={f.id}><img src={f.url} alt={FILE_KIND_LABELS[f.kind]}/><span>{FILE_KIND_LABELS[f.kind]}</span><button type="button" aria-label={`Lepas ${FILE_KIND_LABELS[f.kind]}`} onClick={()=>setFiles(fs=>fs.filter(v=>v.id!==f.id))}><Xmark aria-hidden/></button></div>)}</div></>}
+ {step===2&&<><h3><ShieldCheck aria-hidden/>Periksa sebelum mengirim</h3><dl className="report-facts"><div><dt>Kapasitas</dt><dd>{form.installedKwp} kWp · {form.panelCount} panel</dd></div><div><dt>Pemasang</dt><dd>{form.installerName} · {form.installedOn}</dd></div><div><dt>Kontak</dt><dd>{form.contactName} · {form.phone}</dd></div><div><dt>Foto</dt><dd>{files.length+(existing?.files.length??0)} foto</dd></div></dl>
+ {form.complianceType==="pending"&&<p>Bukti keamanan masih diproses. Laporan dapat dikirim, tetapi belum bisa diverifikasi sampai bukti dilengkapi.</p>}
+ {!existing&&<label className="report-check"><input type="checkbox" required checked={consent} onChange={e=>setConsent(e.target.checked)}/>Saya setuju data dan foto diproses untuk pendataan pemasangan PLTS.</label>}</>}
+ </fieldset>
+ {error&&<p role="alert">{error}</p>}{errorCode==="home_changed"&&<button type="button" onClick={()=>void api.home().then(r=>{useAppStore.getState().setHome(r.home);onCancel();},()=>setError("Data rumah belum berhasil dimuat. Coba kembali ke daftar."))}>Muat rumah terbaru dan kembali ke daftar</button>}{uncertain&&<p>Hasil pengiriman belum dapat dipastikan. Coba kirim ulang dengan data dan kunci yang sama, atau kembali untuk memeriksa daftar laporan.</p>}
+ <div className="journey-actions"><button type="button" disabled={busy} onClick={onCancel}>Kembali ke laporan</button>{step>0&&!uncertain&&<button type="button" disabled={busy} onClick={()=>setStep(s=>s-1)}><ArrowLeft aria-hidden/>Sebelumnya</button>}<button type="submit" disabled={busy}>{busy?"Memproses…":step<2?<><ArrowRight aria-hidden/>Lanjut</>:existing?<><ShieldCheck aria-hidden/>Simpan perbaikan</>:<><Send aria-hidden/>{uncertain?"Coba kirim ulang":"Kirim laporan"}</>}</button></div>
+ </form>;
+}

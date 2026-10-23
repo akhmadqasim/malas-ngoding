@@ -27,7 +27,7 @@ export function createMeteoLookup(opts: { fetch?: typeof fetch; timeoutMs?: numb
     const url =
       "https://api.open-meteo.com/v1/forecast" +
       `?latitude=${roundWeatherCoord(lat)}&longitude=${roundWeatherCoord(lng)}` +
-      "&hourly=shortwave_radiation,cloud_cover,precipitation,weather_code" +
+      "&hourly=shortwave_radiation,cloud_cover,precipitation,weather_code,wind_speed_10m,wind_direction_10m&wind_speed_unit=ms" +
       "&timezone=Asia%2FMakassar&forecast_days=7";
 
     let res: Response;
@@ -53,6 +53,7 @@ export function createMeteoLookup(opts: { fetch?: typeof fetch; timeoutMs?: numb
     const cloud = col("cloud_cover");
     const rain = col("precipitation");
     const code = col("weather_code");
+    const speed = col("wind_speed_10m"), direction = col("wind_direction_10m");
 
     // Open-Meteo sends null for a value it does not have. Reading that as 0 would turn a missing hour into
     // a clear, dry one, so an hour with any missing value is left out of the forecast.
@@ -66,6 +67,8 @@ export function createMeteoLookup(opts: { fetch?: typeof fetch; timeoutMs?: numb
         cloudPct: Math.min(100, Math.max(0, c)),
         precipMm: Math.max(0, p),
         weatherCode: w,
+        ...(isNum(speed[i]) && isNum(direction[i]) && speed[i] >= 0 && direction[i] >= 0 && direction[i] <= 360
+          ? { windSpeedMs: speed[i], windFromDeg: direction[i] % 360 } : {}),
       });
     });
     if (hours.length === 0) throw new Error("Open-Meteo: forecast is empty");

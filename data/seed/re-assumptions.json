@@ -1,0 +1,23 @@
+{
+  "pv": { "performanceRatio": 0.8, "haPerMwp": 1.75, "costRpPerMwp": 10000000000 },
+  "wind": {
+    "hubHeightM": 100,
+    "shearExponent": 0.143,
+    "ratedMw": 4.5,
+    "lossFactor": 0.85,
+    "curve": [
+      [3, 0],
+      [4, 0.028],
+      [5, 0.075],
+      [6, 0.145],
+      [7, 0.242],
+      [8, 0.372],
+      [9, 0.538],
+      [10, 0.746],
+      [11, 1],
+      [24.5, 1]
+    ],
+    "viableMeanMs": 6
+  },
+  "source": "docs/research/renewable-potential.md. PLTS: performance ratio 0.8 asumsi (PVWatts 14% loss default); 1.75 ha per MWp derived from PLTS Nusantara (87 ha for 50 MW, listrikindonesia.com); Rp 10 miliar per MWp (KCE, investortrust.id Nov 2024). Wind: hub 100 m; 1/7 shear asumsi; a generic 4.5 MW turbine (Vestas V150-4.5: cut-in 3 m/s, cut-out 24.5 m/s), rated speed 11 m/s asumsi, cubic power curve between cut-in and rated asumsi, losses 0.85 asumsi; utility wind viable from about 6 m/s mean at hub, asumsi (NREL wind class table)."
+}

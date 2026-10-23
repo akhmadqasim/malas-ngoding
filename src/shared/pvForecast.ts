@@ -7,6 +7,8 @@ export interface ForecastHour {
   cloudPct: number;
   precipMm: number;
   weatherCode: number;
+  windSpeedMs?: number;
+  windFromDeg?: number;
 }
 
 export function pvFromForecast(

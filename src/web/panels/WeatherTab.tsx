@@ -1,5 +1,5 @@
 import { Skeleton } from "@heroui/react";
-import { Clouds, Droplet, Sun } from "@gravity-ui/icons";
+import { Clouds, Droplet, Sun } from "../icons.ts";
 import { motion } from "motion/react";
 import { type PointerEvent, useEffect, useMemo, useRef, useState } from "react";
 import { fmtNumber } from "../../shared/format.ts";

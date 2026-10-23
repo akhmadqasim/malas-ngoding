@@ -1,0 +1,32 @@
+import { launchBrowser } from "./chromium.ts";
+const browser = await launchBrowser(); const errors: string[] = [];
+try {
+ const context = await browser.newContext({ viewport: {width:1440,height:1000} }); const p = await context.newPage(); p.on("pageerror", e => errors.push(e.message));
+ await p.goto("http://localhost:3000/?cahaya=day");
+ await p.getByRole("button", { name: /Coba tanpa akun/ }).click();
+ if (await p.getByRole("button", {name:"Lewati intro"}).isVisible()) await p.getByRole("button", {name:"Lewati intro"}).click();
+ await p.getByRole("heading",{name:"Energi rumah tanpa akun"}).waitFor();
+ if (await p.locator("[role=dialog]").count()) throw new Error("Guest flow requires sign in");
+ await p.getByRole("button",{name:"Kalau hujan?",exact:true}).click();
+ await p.getByText("Panel tetap bisa menghasilkan listrik ketika hujan", {exact:false}).waitFor();
+ await p.getByLabel("Panel (kWp)",{exact:true}).fill("4"); await p.getByLabel("Baterai (kWh)",{exact:true}).fill("1");
+ await p.getByRole("button",{name:"Hujan lebat",exact:true}).click();
+ await p.locator('.lab-scene[data-weather="heavy-rain"]').waitFor();
+ await p.waitForTimeout(10000);
+ const values=await p.locator(".lab-comparison tbody tr").allTextContents();
+ if(!values[2]?.includes("kg/jam")) throw new Error("CO2 not displayed");
+ const duration=await p.locator('.lab-rain i').first().evaluate(e=>getComputedStyle(e).animationDuration);
+ if(duration==='0s') throw new Error("Rain CSS not loaded");
+ await p.screenshot({path:"output/lab-public-desktop.png"});
+ await p.getByRole("button",{name:"Jeda eksperimen",exact:true}).click();
+ const frozen=await p.locator('.lab-comparison').innerText(); await p.waitForTimeout(2200);
+ if(frozen!==await p.locator('.lab-comparison').innerText()) throw new Error("Pause failed");
+ await p.setViewportSize({width:390,height:844}); await p.waitForTimeout(500);
+ if(await p.evaluate(()=>document.documentElement.scrollWidth>innerWidth)) throw new Error("Mobile overflow");
+ await p.screenshot({path:"output/lab-public-mobile.png"});
+ await p.emulateMedia({reducedMotion:"reduce"});
+ if(await p.locator('.lab-rain i').first().evaluate(e=>getComputedStyle(e).animationName)!=='none') throw new Error("Reduced motion ignored");
+ await context.close();
+ if(errors.length)throw new Error(errors.join('\n'));
+ console.log(JSON.stringify({guestWithoutAccount:true,rain:true,battery:true,co2:true,pause:true,mobile:true,reducedMotion:true,errors}));
+}finally{await browser.close();}

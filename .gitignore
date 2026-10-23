@@ -12,3 +12,8 @@ data/cache/
 
 # JetBrains
 .idea/
+
+# Local QA output and development handoff notes
+output/
+docs/plans/2026-10-22-solar-applications-handoff.md
+public/characters/README.md

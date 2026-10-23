@@ -1,8 +1,10 @@
 import Anthropic from "@anthropic-ai/sdk";
+import type { Home } from "../../shared/auth.ts";
 import { fmtKg, fmtKwh, fmtNumber } from "../../shared/format.ts";
 import type { BuildingEstimate } from "../../shared/types.ts";
 import type { AppDeps } from "../index.ts";
 import { CHAT_TOOLS, type ChatAction, buildingTypeLabel, runToolCalls } from "./chatTools.ts";
+import { describeHome, myHomeDefinition } from "./chatTools/homeTool.ts";
 
 export const CHAT_MODEL = "claude-sonnet-5-5";
 export const CHAT_MAX_TOKENS = 2048;
@@ -82,6 +84,8 @@ export interface ChatContext {
   /** Where the selected building is, [lng, lat]; null when the app does not say. */
   selectedBuildingAt: [number, number] | null;
   view: { center: [number, number]; zoom: number };
+  /** The signed-in resident's own home, read from their session by the server (never from the request body). */
+  myHome?: Home | null;
 }
 
 export interface HistoryTurn {
@@ -139,6 +143,12 @@ export function describeContext(context: ChatContext, now: Date): string {
     const point = at ? "koordinat gedung" : "koordinat gedung tidak dikirim, jadi dipakai pusat peta";
     lines.push(`  Nilai untuk simulate_solar dan get_weather (${point}; atap = luas lantai dasar): ${JSON.stringify(tools)}`);
     if (b.assumptions.length > 0) lines.push(`  Asumsi perkiraan gedung ini: ${b.assumptions.join(" ")}`);
+  }
+  const home = context.myHome;
+  if (home) {
+    lines.push(
+      `- Rumah pengguna yang sedang masuk (data akun, bukan ketikan pengguna): ${describeHome(home)}. Untuk rincian dan simulasi panel surya rumah ini, panggil get_my_home.`,
+    );
   }
   return lines.join("\n");
 }
@@ -232,12 +242,13 @@ function describeError(err: unknown): string {
   return err instanceof Error ? `${err.name}: ${err.message}` : "unknown error";
 }
 
-function requestParams(messages: Anthropic.MessageParam[], lastCall: boolean): Anthropic.MessageStreamParams {
+function requestParams(messages: Anthropic.MessageParam[], lastCall: boolean, withHome: boolean): Anthropic.MessageStreamParams {
   return {
     model: CHAT_MODEL,
     max_tokens: CHAT_MAX_TOKENS,
     system: SYSTEM_PROMPT,
-    tools: CHAT_TOOLS,
+    // get_my_home goes last and only for a signed-in resident with a home, so everyone else keeps the same tool prefix.
+    tools: withHome ? [...CHAT_TOOLS, myHomeDefinition] : CHAT_TOOLS,
     // On the last call the conversation ends with tool results, which a system message may follow.
     messages: lastCall ? [...messages, { role: "system", content: LAST_CALL_NOTICE }] : [...messages],
     thinking: { type: "adaptive" },
@@ -273,6 +284,8 @@ export async function runChat(opts: {
   onText: (delta: string) => void;
   onAction: (action: ChatAction) => void;
   deadlineMs?: number;
+  /** The signed-in resident's own home; enables get_my_home. */
+  myHome?: Home | null;
 }): Promise<ChatOutcome> {
   const deadlineMs = opts.deadlineMs ?? CHAT_DEADLINE_MS;
   const deadline = AbortSignal.timeout(deadlineMs);
@@ -294,7 +307,7 @@ export async function runChat(opts: {
     for (let call = 1; call <= CHAT_MAX_ITERATIONS; call++) {
       signal.throwIfAborted();
       const lastCall = call === CHAT_MAX_ITERATIONS;
-      const stream = opts.deps.chatModel(requestParams(messages, lastCall), { signal });
+      const stream = opts.deps.chatModel(requestParams(messages, lastCall, Boolean(opts.myHome)), { signal });
       // Text after a tool round starts a new paragraph.
       let startOfCall = true;
       // Iterate first and read the final message after: an error that arrives between two events only
@@ -321,7 +334,7 @@ export async function runChat(opts: {
         note(TOO_MANY_STEPS_NOTE);
         break;
       }
-      messages.push({ role: "user", content: await runToolCalls(opts.deps, toolCalls, onAction) });
+      messages.push({ role: "user", content: await runToolCalls(opts.deps, toolCalls, onAction, opts.myHome ?? null) });
     }
   } catch (err) {
     if (opts.signal.aborted) return { status: "aborted" };
