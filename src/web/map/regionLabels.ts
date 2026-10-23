@@ -101,9 +101,9 @@ interface LabelCollection {
 }
 
 /** One label point per region with a label point in the data. */
-export function labelFeatures(fc: RegionCollection, metric: Metric): LabelCollection {
+export function labelFeatures(fc: RegionCollection, metric: Metric, scale?: ReadonlyMap<string, number>): LabelCollection {
   const regions = fc.features.map((f) => f.properties);
-  const t = intensities(regions, metric);
+  const t = intensities(regions, metric, scale);
   const ranked = [...regions].sort((a, b) => metricValue(b, metric) - metricValue(a, metric));
   const rank = new Map(ranked.map((r, i) => [r.id, i]));
   return {
@@ -179,10 +179,10 @@ export function addRegionLabels(map: MapboxMap, fc: RegionCollection, metric: Me
   });
 }
 
-/** Moves the labels to the column heights of another metric. */
-export function setRegionLabelData(map: MapboxMap, fc: RegionCollection, metric: Metric): void {
+/** Moves the labels to the column heights of another metric (or of the rooftop solar scenario). */
+export function setRegionLabelData(map: MapboxMap, fc: RegionCollection, metric: Metric, scale?: ReadonlyMap<string, number>): void {
   const source = map.getSource(SOURCE) as { setData?: (data: unknown) => void } | undefined;
-  source?.setData?.(labelFeatures(fc, metric));
+  source?.setData?.(labelFeatures(fc, metric, scale));
 }
 
 /** Fades the labels in (they still hand over to the place names by zoom) or out. */

@@ -8,6 +8,11 @@ export function error(message: string, status: number): Response {
   return Response.json({ error: message }, { status });
 }
 
+/** An error with a machine-readable `code` next to the message, for clients that branch on the cause. */
+export function failure(f: { status: number; code: string; message: string }): Response {
+  return Response.json({ error: f.message, code: f.code }, { status: f.status });
+}
+
 /** 405 with the `Allow` header, for a known path called with the wrong method. */
 export function methodNotAllowed(allow: string): Response {
   return Response.json({ error: `Metode tidak diizinkan. Gunakan ${allow}.` }, { status: 405, headers: { Allow: allow } });

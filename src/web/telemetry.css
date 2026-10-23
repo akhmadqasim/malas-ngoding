@@ -1,0 +1,99 @@
+.iot-monitor { padding: --spacing(5) 0; border-top: 1px solid var(--border); margin-top: --spacing(4); }
+.iot-monitor__header { display: flex; justify-content: space-between; align-items: flex-start; gap: --spacing(3); }
+.iot-monitor__header > div { display: grid; grid-template-columns: auto 1fr; gap: --spacing(1) --spacing(2); align-items: center; }
+.iot-monitor__header strong { font-size: var(--text-base); }
+.iot-monitor__header small { grid-column: 2; font-size: var(--text-2xs); color: var(--muted); }
+.iot-monitor__header time { font-size: var(--text-2xs); color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.iot-monitor__header .character { flex-shrink: 0; }
+.iot-monitor__header > div { margin-right: auto; }
+.iot-heartbeat { display: block; width: --spacing(2); height: --spacing(2); background: var(--color-kwh-day-2); border-radius: var(--radius-full); }
+.iot-monitor[data-offline="true"] .iot-heartbeat { background: var(--muted); }
+.iot-monitor__intro, .iot-monitor__note, .iot-monitor__insight, .iot-method p { font-size: var(--text-xs); line-height: 1.7; color: var(--muted); margin: --spacing(3) 0; }
+.iot-monitor__note button { text-decoration: underline; cursor: pointer; }
+.iot-weather-controls { display: flex; flex-wrap: wrap; gap: --spacing(1.5); margin: --spacing(4) 0; }
+.iot-weather-controls button { background: var(--default); color: var(--muted); border: 0; border-radius: var(--radius-full); padding: --spacing(1.5) --spacing(2.5); font-size: var(--text-2xs); cursor: pointer; }
+.iot-weather-controls button[aria-pressed="true"] { background: var(--accent); color: var(--accent-foreground); }
+.iot-weather-controls button:disabled { opacity: var(--disabled-opacity); cursor: default; }
+.iot-capacity { display: flex; justify-content: space-between; align-items: center; gap: --spacing(3); font-size: var(--text-xs); color: var(--muted); }
+.iot-capacity input { width: --spacing(20); padding: --spacing(2) --spacing(3); border: 1px solid var(--border); border-radius: var(--radius-dashboard-control); color: var(--foreground); background: var(--default); font-variant-numeric: tabular-nums; }
+.iot-weather { display: flex; gap: --spacing(3); font-size: var(--text-xs); align-items: center; margin: --spacing(4) 0; color: var(--muted); }
+.iot-weather strong { color: var(--foreground); font-weight: var(--font-weight-medium); }
+.iot-flow { display: grid; grid-template-columns: 1fr --spacing(5) 1fr --spacing(5) 1fr; align-items: center; background: var(--default); border-radius: var(--radius-dashboard-control); padding: --spacing(4) --spacing(2); margin: --spacing(4) 0; }
+.iot-flow__node { display: grid; justify-items: center; gap: --spacing(1.5); min-width: 0; }
+.iot-flow__node svg { width: --spacing(5); height: --spacing(5); color: var(--muted); margin-bottom: --spacing(1); }
+.iot-flow__node span { font-size: var(--text-2xs); color: var(--muted); }
+.iot-flow__node strong { font-size: var(--text-sm); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.iot-flow__link { position: relative; text-align: center; color: var(--muted); }
+.iot-flow__link svg { width: --spacing(4); height: --spacing(4); }
+.iot-flow__link::after { content: ""; width: --spacing(1); height: --spacing(1); position: absolute; left: 0; top: --spacing(1); background: var(--color-kwh-day-2); border-radius: var(--radius-full); opacity: 0; }
+.iot-flow[data-running="true"] .iot-flow__link[data-active="true"]::after { opacity: 1; animation: iot-packet var(--duration-iot-flow) linear infinite; }
+.iot-flow__link[data-import="true"]::after { animation-direction: reverse !important; }
+@keyframes iot-packet { from { transform: translateX(0); } to { transform: translateX(--spacing(4)); } }
+.iot-chart { display: block; width: 100%; height: --spacing(22); margin-top: --spacing(4); overflow: visible; }
+.iot-chart polyline { fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.iot-chart__baseline { stroke: var(--border); }
+.iot-chart__solar { stroke: var(--color-fuel-surya); }
+.iot-chart__load { stroke: var(--foreground); }
+.iot-chart__key { display: flex; gap: --spacing(3); font-size: var(--text-2xs); color: var(--muted); }
+.iot-chart__key > span:first-child { color: var(--color-sun-day-3); }
+.iot-chart__key small { margin-left: auto; font-size: var(--text-2xs); }
+.iot-facts { display: grid; grid-template-columns: 1fr 1fr; gap: --spacing(4); margin: --spacing(5) 0; }
+.iot-facts dt { font-size: var(--text-xs); color: var(--muted); margin-bottom: --spacing(1); }
+.iot-facts dd { font-size: var(--text-lg); font-variant-numeric: tabular-nums; }
+.iot-facts small { font-size: var(--text-2xs); color: var(--muted); }
+.iot-method { margin-top: --spacing(3); font-size: var(--text-xs); color: var(--muted); }
+.iot-method summary { cursor: pointer; }
+.iot-map-marker { background: var(--surface); color: var(--foreground); padding: --spacing(2) --spacing(3); border-radius: var(--radius-full); box-shadow: var(--surface-shadow); font-size: var(--text-xs); font-variant-numeric: tabular-nums; border-bottom: 2px solid var(--color-kwh-day-2); pointer-events: none; }
+.iot-map-marker[data-offline="true"] { border-color: var(--muted); }
+.twin-live-status { display: flex; flex-wrap: wrap; gap: --spacing(2); align-items: center; font-size: var(--text-xs); padding: --spacing(3) 0; color: var(--muted); }
+.twin-live-status strong { color: var(--foreground); }
+.twin-live-mode { display: flex; gap: --spacing(2); margin: --spacing(4) 0; }
+.twin-live-mode .button { flex: 1; }
+@media (prefers-reduced-motion: reduce) { .iot-flow__link::after { animation: none !important; } }
+.character { position: relative; display: inline-block; flex-shrink: 0; }
+.character img { display: block; object-fit: contain; }
+.character--avatar { width: --spacing(9); height: --spacing(9); border-radius: var(--radius-full); overflow: hidden; background: var(--default); }
+.character--avatar img { position: absolute; width: 220%; max-width: none; height: auto; left: -60%; top: -15%; }
+.character--guide { width: --spacing(22); height: --spacing(32); }
+.character--guide img { width: 100%; height: 100%; }
+.dashboard-character-guide { display: flex; gap: --spacing(2); align-items: flex-end; }
+.dashboard-character-guide > span:last-child { font-size: var(--text-xs); line-height: 1.6; color: var(--color-paper-muted); margin-bottom: --spacing(4); }
+.story__track > .character { float: right; margin-left: --spacing(3); }
+.account-control > .character { margin-right: --spacing(2); }
+@media (max-height: 850px) and (min-width: 761px) { .dashboard-character-guide { display: none; } }
+@media (max-width: 760px) { .dashboard-account .character, .dashboard-character-guide { display: none; } }
+.iot-map-marker--energy { padding: 0; border: 0; box-shadow: none; background: transparent; }
+.energy-beacon { display: flex; align-items: center; gap: --spacing(3); --energy-signal: var(--color-kwh-day-2); }
+.energy-beacon[data-level="high"] { --energy-signal: var(--color-co2-day-1); }
+.energy-beacon[data-level="low"] { --energy-signal: var(--color-co2-1); }
+.energy-beacon__halo { width: --spacing(12); height: --spacing(12); position: relative; flex-shrink: 0; }
+.energy-beacon__halo > i { position: absolute; inset: --spacing(2); border: 2px solid var(--energy-signal); border-radius: var(--radius-full); animation: energy-halo var(--duration-energy-halo) ease-out infinite; }
+.energy-beacon__halo > i:nth-child(2) { animation-delay: calc(var(--duration-energy-halo) / -3); }
+.energy-beacon__halo > i:nth-child(3) { animation-delay: calc(var(--duration-energy-halo) * -2 / 3); }
+.energy-beacon[data-level="high"] .energy-beacon__halo > i { animation-duration: var(--duration-energy-fast); }
+.energy-beacon__packet { position: absolute; inset: --spacing(4.5); background: var(--energy-signal); border-radius: var(--radius-full); animation: energy-packet var(--duration-tooltip) ease-out; }
+.energy-beacon__label { display: grid; gap: --spacing(1); padding: --spacing(3) --spacing(4); background: var(--surface); border-radius: var(--radius-dashboard-control); box-shadow: var(--surface-shadow); }
+.energy-beacon__label strong { font-size: var(--text-xs); }
+.energy-beacon__label > span { display: flex; gap: --spacing(1.5); align-items: center; font-size: var(--text-xs); font-variant-numeric: tabular-nums; }
+.energy-beacon__label svg { width: --spacing(3); height: --spacing(3); }
+.energy-beacon__label small { font-size: var(--text-2xs); color: var(--muted); }
+.energy-beacon[data-offline="true"] { --energy-signal: var(--muted); }
+.energy-beacon[data-offline="true"] i, .energy-beacon[data-offline="true"] .energy-beacon__packet { animation-play-state: paused; }
+@keyframes energy-halo { from { transform: scale(0.25); opacity: 0.75; } to { transform: scale(1.8); opacity: 0; } }
+@keyframes energy-packet { from { transform: scale(1.6); } to { transform: scale(1); } }
+.energy-impact { padding: --spacing(4); background: var(--default); border-radius: var(--radius-dashboard-control); margin: --spacing(4) 0; }
+.energy-impact__heading { display: flex; justify-content: space-between; align-items: center; gap: --spacing(3); font-size: var(--text-xs); }
+.energy-impact__heading strong { font-size: var(--text-lg); font-variant-numeric: tabular-nums; }
+.energy-impact progress { display: block; width: 100%; height: --spacing(1.5); appearance: none; border: 0; border-radius: var(--radius-full); overflow: hidden; margin: --spacing(3) 0 --spacing(4); background: var(--border); }
+.energy-impact progress::-webkit-progress-bar { background: var(--border); }
+.energy-impact progress::-webkit-progress-value { background: var(--color-kwh-day-2); transition: width var(--duration-tooltip); }
+.energy-impact progress::-moz-progress-bar { background: var(--color-kwh-day-2); }
+.energy-impact__comparison { display: flex; justify-content: space-between; gap: --spacing(4); align-items: center; }
+.energy-impact__comparison > div { display: grid; gap: --spacing(1); }
+.energy-impact__comparison span { font-size: var(--text-xs); color: var(--muted); }
+.energy-impact__comparison strong { font-size: var(--text-xl); font-variant-numeric: tabular-nums; }
+.energy-impact__comparison strong .num { font-size: inherit; color: inherit; }
+.live-overview__metric strong > .live-co2-value { font-size: inherit; font-weight: inherit; color: inherit; letter-spacing: inherit; }
+.energy-impact__comparison svg { width: --spacing(5); height: --spacing(5); color: var(--muted); }
+.energy-impact p { font-size: var(--text-2xs); color: var(--muted); line-height: 1.6; margin: --spacing(3) 0 0; }
+@media (prefers-reduced-motion: reduce) { .energy-beacon i, .energy-beacon__packet { animation: none; } .energy-beacon__halo > i { opacity: 0.5; } .energy-impact progress::-webkit-progress-value { transition: none; } }

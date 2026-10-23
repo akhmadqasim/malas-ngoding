@@ -4,9 +4,12 @@ import type { BuildingInput } from "../../shared/types.ts";
 import { token } from "../theme.ts";
 import { FLY_MS } from "./camera.ts";
 import type { Tone } from "./effects.ts";
+import { ARCHITECTURE_LAYER, architectureColor } from "./architecture.ts";
+import { clearBuildingDesign, showBuildingDesign } from "./buildingDesign.ts";
+import type { BuildingType } from "../../shared/types.ts";
 
-/** Every building of the Mapbox Standard basemap: hover and click go through this featureset. */
-export const BUILDINGS = { featuresetId: "buildings", importId: "basemap" } as const;
+/** The architectural building layer: the visible roof, hover and click share the same footprint. */
+export const BUILDINGS = { layerId: ARCHITECTURE_LAYER } as const;
 
 /** The camera `selectBuildingAt` flies to: close enough that one building fills a good part of the view. */
 export const BUILDING_ZOOM = 17.5;
@@ -101,19 +104,23 @@ export function buildingInputFrom(feature: BuildingFeature): BuildingInput | nul
  * than the hover. On a dark ground the hover is paper and the selection the light CO2 amber: rendered, the
  * night basemap theme (`faded`) grades light neutrals down toward the other buildings, so a paper-bright
  * selection all but vanished and a paper-muted hover was hard to see, while the amber stays clear. It is
- * the colour of what the panel measures.
+ * the colour of what the panel measures. While the panel shows the solar simulation (`solar`), the selected
+ * building turns the solar fuel colour in every light: its roof is where the panels would go.
  */
-export function buildingColors(tone: Tone): { highlight: string; select: string } {
-  return tone === "light"
-    ? { highlight: token("--color-ink-faint"), select: token("--color-outline-light") }
-    : { highlight: token("--color-paper"), select: token("--color-co2-4") };
+export function buildingColors(tone: Tone, solar = false): { highlight: string; select: string } {
+  const c =
+    tone === "light"
+      ? { highlight: token("--color-ink-faint"), select: token("--color-outline-light") }
+      : { highlight: token("--color-paper"), select: token("--color-co2-4") };
+  return solar ? { ...c, select: token("--color-fuel-surya") } : c;
 }
 
-/** Sets the basemap's building hover and select colours for the ground tone. */
-export function setBuildingTone(map: MapboxMap, tone: Tone): void {
-  const c = buildingColors(tone);
+/** Sets the basemap's building hover and select colours for the ground tone (and the solar tab). */
+export function setBuildingTone(map: MapboxMap, tone: Tone, solar = false): void {
+  const c = buildingColors(tone, solar);
   map.setConfigProperty("basemap", "colorBuildingHighlight", c.highlight);
   map.setConfigProperty("basemap", "colorBuildingSelect", c.select);
+  if (map.getLayer(ARCHITECTURE_LAYER)) map.setPaintProperty(ARCHITECTURE_LAYER, "building-color", architectureColor(c.highlight, c.select));
 }
 
 type OnSelect = (input: BuildingInput) => void;
@@ -128,17 +135,21 @@ interface BuildingState {
 }
 
 const states = new WeakMap<MapboxMap, BuildingState>();
+export function setBuildingDesign(map: MapboxMap, type: BuildingType, name: string | null): void {
+  const feature = states.get(map)?.selected;
+  if (feature) showBuildingDesign(map, feature, type, name);
+}
 const INTERACTIONS = ["building-enter", "building-leave", "building-click", "building-background-click"] as const;
 /** From this zoom a click on empty ground (no building, no other layer) closes the building panel. */
 export const BACKGROUND_CLOSE_ZOOM = 14;
 
 /**
- * Marks `feature` as the selected building (and only it) and returns its estimate request. The featureset
- * returns whole footprints (checked over about 11,600 building views: none came in pieces at a tile edge).
+ * Marks `feature` as the selected building (and only it) and returns its estimate request.
  */
 function select(map: MapboxMap, s: BuildingState, feature: TargetFeature): BuildingInput | null {
   const input = buildingInputFrom(feature);
   if (!input) return null;
+  clearBuildingDesign(map);
   if (s.selected) map.setFeatureState(s.selected, { select: false });
   s.selected = feature;
   map.setFeatureState(feature, { select: true });
@@ -146,7 +157,7 @@ function select(map: MapboxMap, s: BuildingState, feature: TargetFeature): Build
 }
 
 /**
- * Makes the basemap buildings hoverable and clickable (Standard `buildings` featureset): hover lights a
+ * Makes the architectural buildings hoverable and clickable: hover lights a
  * building, a click selects it and calls `onSelect` with the estimate request, and a click on empty ground
  * at building zoom calls `onBackground`. Also switches terrain off at building zoom. Returns a function
  * that undoes all of it.
@@ -216,6 +227,7 @@ export function disableBuildingInteraction(map: MapboxMap): void {
   map.off("zoom", s.onZoom);
   for (const id of INTERACTIONS) map.removeInteraction(id);
   try {
+    clearBuildingDesign(map);
     if (s.hovered) map.setFeatureState(s.hovered, { highlight: false });
     if (s.selected) map.setFeatureState(s.selected, { select: false });
     if (s.terrain && !map.getTerrain()) map.setTerrain(s.terrain);
@@ -227,6 +239,7 @@ export function disableBuildingInteraction(map: MapboxMap): void {
 
 /** Clears the selected building on the map (the panel closed). */
 export function clearBuildingSelection(map: MapboxMap): void {
+  clearBuildingDesign(map);
   const s = states.get(map);
   if (!s?.selected) return;
   map.setFeatureState(s.selected, { select: false });
@@ -289,8 +302,15 @@ export function buildingViewPadding(): Padding {
   const sheet = document.querySelector(".sheet-slot")?.getBoundingClientRect();
   const panel = document.querySelector(".building-slot")?.getBoundingClientRect();
   const chat = document.querySelector(".chat")?.getBoundingClientRect();
-  if (sheet && sheet.width < w / 2) pad.left = Math.max(pad.left, sheet.right + PANEL_GAP);
-  if (panel && panel.width < w / 2) pad.right = Math.max(pad.right, w - panel.left + PANEL_GAP);
+  const nav = document.querySelector(".dashboard-nav")?.getBoundingClientRect();
+  const context = document.querySelector(".dashboard-context")?.getBoundingClientRect();
+  if (context?.height) pad.top = Math.max(pad.top, context.bottom + PANEL_GAP);
+  if (nav && nav.width > 0 && nav.width < w / 2) pad.left = Math.max(pad.left, nav.right + PANEL_GAP);
+  if (sheet && sheet.width > 0 && sheet.width < w / 2) {
+    if (sheet.left > w / 2) pad.right = Math.max(pad.right, w - sheet.left + PANEL_GAP);
+    else pad.left = Math.max(pad.left, sheet.right + PANEL_GAP);
+  } else if (sheet && sheet.height > 0) pad.bottom = Math.max(pad.bottom, h - sheet.top + PANEL_GAP);
+  if (panel && panel.width > 0 && panel.width < w / 2) pad.right = Math.max(pad.right, w - panel.left + PANEL_GAP);
   else if (panel && panel.height > 0) pad.bottom = Math.max(pad.bottom, h - panel.top + PANEL_GAP);
   // The chat panel sits left of the building panel when both are open.
   if (chat && chat.width > 0 && chat.width < w / 2 && chat.left > w / 2) pad.right = Math.max(pad.right, w - chat.left + PANEL_GAP);

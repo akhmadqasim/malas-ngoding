@@ -1,0 +1,106 @@
+import { launchBrowser } from "./chromium.ts";
+import { mkdirSync } from "node:fs";
+mkdirSync("output", { recursive: true });
+const browser = await launchBrowser();
+const errors: string[] = [];
+async function open(role: "pemda" | "warga", homeMode: "none" | "not-installed" | "installed" = "not-installed") {
+  const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
+  const page = await context.newPage(); page.on("pageerror", error => errors.push(error.message));
+  if (role === "warga") await page.route("**/api/me/home", async route => {
+    const response = await route.fetch(); const data = await response.json();
+    if (homeMode === "none") data.home = null;
+    else if (data.home) { data.home.installedPv = homeMode === "installed"; data.home.installedKwp = homeMode === "installed" ? 3 : null; }
+    await route.fulfill({ response, json: data });
+  });
+  await page.addInitScript(() => sessionStorage.setItem("malas:landing-seen", "1"));
+  await page.goto("http://localhost:3000/?cahaya=day");
+  if (await page.getByRole("button", {name:"Lewati intro"}).isVisible()) await page.getByRole("button", {name:"Lewati intro"}).click();
+  await page.locator(".dashboard-header").getByRole("button", { name: "Masuk", exact: true }).click();
+  await page.getByRole("button", { name: `Masuk sebagai ${role} demo` }).click();
+  return { context, page };
+}
+try {
+  const government = await open("pemda"); const g = government.page;
+  await g.getByRole("region", { name: "Prioritas awal transisi wilayah" }).waitFor();
+  await g.locator(".transition-ranking button").first().waitFor();
+  const candidates = await g.locator(".transition-ranking button strong").allTextContents();
+  await g.locator(".transition-ranking button").nth(1).click();
+  if (!(await g.locator(".journey-next h3").innerText()).includes(candidates[1]!)) throw new Error("Selected priority does not update its explanation");
+  await g.getByText("Cek kesiapan pilot wilayah ini", { exact: true }).click();
+  await g.getByText("Audit atap selesai", { exact: true }).click();
+  if (!(await g.locator(".transition-readiness").innerText()).includes("1/4")) throw new Error("Readiness checklist did not update");
+  await g.getByLabel("Lokasi pilot / fasilitas", {exact:true}).fill("Kantor uji browser");
+  const download = g.waitForEvent("download");
+  await g.getByRole("button", {name:"Unduh draf kajian pilot",exact:true}).click();
+  const file = await (await download).path();
+  const draft = await Bun.file(file!).json();
+  if (draft.evidence.site !== "Kantor uji browser" || draft.type !== "draft-pilot-belum-diverifikasi") throw new Error("Pilot draft missing evidence or verification status");
+  await g.getByLabel("Tujuan prioritas").selectOption("impact");
+  await g.screenshot({ path: "output/journey-pemda-priorities.png" });
+  await g.setViewportSize({ width: 390, height: 844 }); await g.waitForTimeout(500);
+  if (await g.evaluate(() => document.documentElement.scrollWidth > innerWidth)) throw new Error("Government priorities overflow on mobile");
+  await g.screenshot({ path: "output/journey-pemda-mobile.png" });
+  await g.setViewportSize({ width: 1440, height: 1000 });
+  await g.getByRole("button", { name: "Adopsi PLTS warga", exact: true }).click();
+  await g.getByText("Rumah warga terdaftar", { exact: true }).waitFor();
+  await g.getByLabel("Rumah dari database").waitFor();
+  await government.context.close();
+
+  const citizen = await open("warga"); const c = citizen.page;
+  await c.getByRole("region", { name: "Manfaat panel surya untuk rumah" }).waitFor();
+  await c.getByText("Perkiraan penghematan", { exact: true }).waitFor();
+  if (await c.locator(".iot-monitor").count()) throw new Error("Uninstalled home is forced into technical monitoring");
+  await c.getByRole("button", { name: "Manfaat untuk saya", exact: true }).click();
+  if (await c.locator(".dashboard-nav").count()) throw new Error("Resident still has atlas navigation");
+  const zoom = await c.evaluate(() => (window as any).__malasMap.getZoom());
+  if (await c.evaluate(() => Math.abs((window as any).__malasMap.queryTerrainElevation((window as any).__malasMap.getCenter()) ?? 0) > 0.01)) throw new Error("Terrain buries the resident home");
+  if (zoom < 18.5) throw new Error("Resident camera is still at neighbourhood zoom");
+  await c.waitForTimeout(350);
+  if (await c.locator(".building-panel").count()) throw new Error("Benefits navigation unexpectedly opens a technical building panel");
+  await c.waitForFunction(() => { const image=document.querySelector<HTMLImageElement>(".visual-guide img"); return image?.complete && image.naturalWidth > 0; });
+  if (await c.locator(".visual-task-tabs svg.lucide").count() !== 2) throw new Error("Resident task buttons lack Lucide icons");
+  await c.getByRole("button",{name:"Data rumah",exact:true}).click();
+  if (!await c.getByText("Ubah tagihan, pemasangan, dan izin data",{exact:true}).evaluate(el => (el.parentElement as HTMLDetailsElement).open)) throw new Error("Data shortcut failed to open settings");
+  await c.locator(".citizen-content").evaluate(el => {el.scrollTop=0;});
+  await c.screenshot({ path: "output/journey-warga-benefits.png" });
+  await c.getByRole("button", { name: "Lihat pilihan panel di atap", exact: true }).click();
+  await c.getByRole("region", { name: "Simulasi pemasangan panel surya" }).waitFor();
+  if (await c.getByLabel("Angin uji (m/s)", {exact:true}).count()) throw new Error("Resident solar lab contains wind controls");
+  if (await c.locator(".building-panel").count()) throw new Error("Citizen home experiment opens atlas building selection");
+  await c.reload(); if (await c.getByRole("button", {name:"Lewati intro"}).isVisible()) await c.getByRole("button", {name:"Lewati intro"}).click();
+  await c.getByRole("region", {name:"Dashboard rumah pribadi"}).waitFor();
+  const savedHome = await c.evaluate(async () => (await (await fetch("/api/me/home")).json()).home);
+  if (!await c.locator('[aria-label="Peta 3D Kalimantan Timur"]').evaluate(e => e.hasAttribute("inert"))) throw new Error("Resident map still permits selecting other houses");
+  await c.getByRole("button", { name: "Pantau rumah", exact: true }).click();
+  if (await c.locator(".iot-monitor").getAttribute("data-device") !== savedHome.featureId) throw new Error("Reload does not monitor the account's saved home");
+  await c.getByRole("region", { name: "Sensor simulasi gedung" }).waitFor();
+  if (await c.getByRole("button", { name: "Uji cerah", exact: true }).isVisible()) throw new Error("Technical weather controls clutter the citizen monitor");
+  const markerGap = await c.evaluate(home => {
+    const map=(window as any).__malasMap, at=map.project([home.lng,home.lat]), canvas=map.getContainer().getBoundingClientRect();
+    const marker=document.querySelector(".iot-map-marker--energy")!.getBoundingClientRect();
+    return Math.hypot(marker.left+marker.width/2-canvas.left-at.x,marker.bottom-canvas.top-at.y);
+  }, savedHome);
+  if(markerGap>80) throw new Error(`Sensor indicator floats away from the roof: ${markerGap}px`);
+  await c.screenshot({ path: "output/journey-warga-monitor.png" });
+  await c.getByRole("button", { name: "Manfaat untuk saya", exact: true }).click();
+  await c.setViewportSize({ width: 390, height: 844 }); await c.waitForTimeout(3500);
+  if (await c.evaluate(() => document.documentElement.scrollWidth > innerWidth)) throw new Error("Citizen page overflows on mobile");
+  await c.screenshot({ path: "output/journey-warga-mobile.png" });
+  await c.getByRole("button",{name:"Pantau rumah",exact:true}).click();
+  await c.getByRole("region",{name:"Sensor simulasi gedung"}).waitFor();
+  await c.waitForTimeout(400);
+  const mobileGap=await c.evaluate(home=>{const m=(window as any).__malasMap,p=m.project([home.lng,home.lat]),canvas=m.getContainer().getBoundingClientRect(),r=document.querySelector(".iot-map-marker--energy")!.getBoundingClientRect();return Math.hypot(r.left+r.width/2-canvas.left-p.x,r.bottom-canvas.top-p.y);},savedHome);
+  if(mobileGap>80)throw new Error(`Mobile sensor indicator drifts ${mobileGap}px`);
+  await c.screenshot({path:"output/journey-warga-mobile-monitor.png"});
+  await citizen.context.close();
+
+  const fresh = await open("warga", "none");
+  await fresh.page.getByText("Mulai dari rumahmu", { exact: true }).waitFor();
+  await fresh.page.screenshot({ path: "output/journey-warga-start.png" });
+  await fresh.context.close();
+  const installed = await open("warga", "installed");
+  await installed.page.getByRole("region", { name: "Sensor simulasi gedung" }).waitFor();
+  await installed.context.close();
+  if (errors.length) throw new Error(JSON.stringify(errors));
+  console.log(JSON.stringify({ governmentPriorities: candidates, sorting: true, adoption: true, citizenBenefitsFirst: true, installedMonitorFirst: true, noHomeOnboarding: true, savedHomeAfterReload: true, residentMapReadOnly: true, mobile: true, errors }));
+} finally { await browser.close(); }

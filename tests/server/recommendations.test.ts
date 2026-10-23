@@ -122,11 +122,17 @@ function start(upstreams: FakeUpstreams = {}) {
   const fake = fakeDeps(null, upstreams);
   const server = createServer({ port: 0, deps: fake.deps });
   servers.push(server);
+  // Refreshing is for signed-in government accounts only; every server here has one ready.
+  pemdaCookies.set(server, fake.signIn("pemda").then((s) => s.cookie));
   return { server, fake };
 }
+const pemdaCookies = new WeakMap<Server<undefined>, Promise<string>>();
 const get = (s: Server<undefined>, id: string) => fetch(new URL(`/api/recommendations/${id}`, s.url));
-const refresh = (s: Server<undefined>, id: string) =>
-  fetch(new URL(`/api/recommendations/${id}/refresh`, s.url), { method: "POST" });
+const refresh = async (s: Server<undefined>, id: string, cookie?: string) =>
+  fetch(new URL(`/api/recommendations/${id}/refresh`, s.url), {
+    method: "POST",
+    headers: { cookie: cookie ?? (await pemdaCookies.get(s)) ?? "" },
+  });
 
 let warn: ReturnType<typeof spyOn>;
 beforeEach(() => {
@@ -272,8 +278,10 @@ describe("recommendation routes", () => {
   ] as const)("%s %s raises the idle timeout above the generation budget", async (path, method) => {
     const timeouts: number[] = [];
     const server = { timeout: (_req: Request, seconds: number) => void timeouts.push(seconds) };
-    const handler = (recommendationRoutes(fakeDeps().deps)[path] as Partial<Record<"GET" | "POST", Handler>>)[method]!;
-    const req = Object.assign(new Request(`http://x/api/recommendations/nope`, { method }), { params: { regionId: "nope" } });
+    const fake = fakeDeps();
+    const { cookie } = await fake.signIn("pemda");
+    const handler = (recommendationRoutes(fake.deps)[path] as Partial<Record<"GET" | "POST", Handler>>)[method]!;
+    const req = Object.assign(new Request(`http://x/api/recommendations/nope`, { method, headers: { cookie } }), { params: { regionId: "nope" } });
     const res = await handler(req as unknown as Parameters<Handler>[0], server as unknown as Parameters<Handler>[1]);
     expect(res.status).toBe(404);
     expect(timeouts).toHaveLength(1);
@@ -283,6 +291,27 @@ describe("recommendation routes", () => {
 });
 
 describe("POST /api/recommendations/:regionId/refresh", () => {
+  test("is for a signed-in government account only", async () => {
+    const writer = fakeWriter(VALID);
+    const { server, fake } = start({ recommender: writer.fn });
+    const guest = await fetch(new URL("/api/recommendations/samarinda/refresh", server.url), { method: "POST" });
+    expect(guest.status).toBe(401);
+    expect(((await guest.json()) as { error: string }).error.length).toBeGreaterThan(0);
+    const warga = await fake.signIn("warga");
+    const resident = await refresh(server, "samarinda", warga.cookie);
+    expect(resident.status).toBe(403);
+    expect(((await resident.json()) as { error: string }).error.length).toBeGreaterThan(0);
+    const pemda = await fake.signIn("pemda");
+    const other = await fetch(new URL("/api/recommendations/samarinda/refresh", server.url), {
+      method: "POST",
+      headers: { cookie: pemda.cookie, origin: "https://evil.example" },
+    });
+    expect(other.status).toBe(403);
+    expect(writer.calls).toHaveLength(0);
+    expect((await refresh(server, "samarinda", pemda.cookie)).status).toBe(200);
+    expect(writer.calls).toHaveLength(1);
+  });
+
   const NEW: RecommendationItem[] = VALID.map((i) => ({ ...i, title: `${i.title} (baru)` }));
 
   test("regenerates and stores new content even when a copy is cached", async () => {

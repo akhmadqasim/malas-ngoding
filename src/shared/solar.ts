@@ -8,6 +8,8 @@ const BATTERY_EFFICIENCY = 0.9;
 /** A closed building's base load (fridges, servers, security) runs all day and night: half of it in daylight. */
 const BASE_LOAD_DAYTIME_SHARE = 0.5;
 const DAYS = 365;
+/** Bump when the constants above or the seed costs change, so stored estimates say which model made them. */
+export const SOLAR_MODEL_VERSION = "solar-2026-10";
 
 const ZERO: SolarResult = {
   kWp: 0,
@@ -73,7 +75,8 @@ export function simulateSolar(input: SolarInput): SolarResult {
   // Rounded down, at least 1: export earns nothing, so a part panel above the daytime use would only add cost.
   // The epsilon keeps a load sized to exactly n panels at n despite float error.
   const fittingPanels = Math.max(1, Math.floor(daytimeLoad / yieldPerKwp / PANEL_KWP + 1e-9));
-  const panels = Math.min(fittingPanels, maxPanels);
+  const requested = input.panelCount == null ? fittingPanels : Math.floor(pos(input.panelCount));
+  const panels = Math.min(requested, maxPanels);
   if (!(panels > 0)) return { ...ZERO };
   // Rounded to whole watts, so 3 x 0.55 is 1.65 and not 1.6500000000000001.
   const kWp = Math.round(panels * PANEL_KWP * 1000) / 1000;
