@@ -10,7 +10,6 @@ export interface CurrentConditions {
   cloudPct: number;
   precipMm: number;
   isDay: boolean;
-  wind?: { speedMs: number; fromDeg: number; heightM: 10; time: string };
 }
 
 /** Conditions from the forecast hour nearest to `nowMs`. It is daytime when that hour has sunshine. */
@@ -30,8 +29,6 @@ export function currentConditions(hours: ForecastHour[], nowMs: number): Current
     cloudPct: best.cloudPct,
     precipMm: best.precipMm,
     isDay: best.ghiWm2 > 0,
-    ...(bestGap <= 3 * 60 * 60 * 1000 && Number.isFinite(best.windSpeedMs) && Number.isFinite(best.windFromDeg)
-      ? { wind: { speedMs: best.windSpeedMs!, fromDeg: best.windFromDeg!, heightM: 10 as const, time: best.time } } : {}),
   };
 }
 
@@ -50,7 +47,7 @@ export function weatherRoutes(deps: AppDeps): RouteTable {
         if (!Number.isFinite(kWp) || kWp < 0) return error("Kapasitas panel (kWp) harus berupa angka 0 atau lebih.", 400);
 
         const nowMs = Date.now();
-        const forecast = await cachedForecast(deps, lat, lng, nowMs, q.get("wind") === "1");
+        const forecast = await cachedForecast(deps, lat, lng, nowMs);
         if (!forecast) return error("Prakiraan cuaca sedang tidak tersedia", 503);
 
         const hours: PvHour[] = pvFromForecast(forecast.hours, kWp);

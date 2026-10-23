@@ -3,7 +3,6 @@ import { AnimatePresence, motion } from "motion/react";
 import { type ComponentType, type CSSProperties, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { fmtCompact, fmtNumber } from "../../shared/format.ts";
 import type { BuildingEstimate, BuildingType } from "../../shared/types.ts";
-import { api } from "../api.ts";
 import { AnimatedNumber } from "../components/AnimatedNumber.tsx";
 import { Estimate } from "../components/Estimate.tsx";
 import {
@@ -12,7 +11,6 @@ import {
   enableBuildingInteraction,
   revealBuilding,
   setBuildingTone,
-  setBuildingDesign,
 } from "../map/buildings.ts";
 import { presetTone } from "../map/effects.ts";
 import { DURATION, EASE_IN, EASE_OUT } from "../motion.ts";
@@ -22,14 +20,12 @@ import { EmissionTab } from "./EmissionTab.tsx";
 import { EnergyTab } from "./EnergyTab.tsx";
 import { SolarTab } from "./SolarTab.tsx";
 import { WeatherTab } from "./WeatherTab.tsx";
-import { BuildingTelemetry } from "./TelemetryPanel.tsx";
 
 /**
  * The tabs of the panel. A tab whose `Panel` is null is not built yet and shows as disabled; the
  * solar-weather lane registers SolarTab and WeatherTab here.
  */
 const TABS: { id: PanelTab; label: string; Panel: ComponentType<BuildingTabProps> | null }[] = [
-  { id: "sensor", label: "Sensor IoT", Panel: BuildingTelemetry },
   { id: "energi", label: "Energi", Panel: EnergyTab },
   { id: "emisi", label: "Emisi", Panel: EmissionTab },
   { id: "surya", label: "Surya", Panel: SolarTab },
@@ -66,9 +62,8 @@ function closeToMap() {
  */
 function useBuildingMap() {
   const map = useAppStore((s) => s.map);
-  const planning = useAppStore(s => s.potentialOpen);
   useEffect(() => {
-    if (!map || planning) return;
+    if (!map) return;
     const off = enableBuildingInteraction(
       map,
       (input) => {
@@ -83,13 +78,7 @@ function useBuildingMap() {
       },
     );
     const unsubscribe = useAppStore.subscribe((s, prev) => {
-      if (s.selectedBuilding && (s.selectedBuilding !== prev.selectedBuilding || s.buildingName !== prev.buildingName)) {
-        setBuildingDesign(map, s.selectedBuilding.type, s.buildingName);
-      }
-      // The selected building turns solar yellow while the Surya tab shows its rooftop panels.
-      if (s.lightPreset !== prev.lightPreset || s.panelTab !== prev.panelTab) {
-        setBuildingTone(map, presetTone(s.lightPreset), s.panelTab === "surya");
-      }
+      if (s.lightPreset !== prev.lightPreset) setBuildingTone(map, presetTone(s.lightPreset));
       if (s.buildingStatus === "idle" && prev.buildingStatus !== "idle") clearBuildingSelection(map);
     });
     // Test hook for scripts/smoke.ts: the chat's select building action.
@@ -99,7 +88,7 @@ function useBuildingMap() {
       off();
       delete (window as TestWindow).__malasSelectBuildingAt;
     };
-  }, [map, planning]);
+  }, [map]);
 }
 
 /**
@@ -108,10 +97,8 @@ function useBuildingMap() {
  */
 function useDockClearance(): number | null {
   const [clearance, setClearance] = useState<number | null>(null);
-  // While the guided story runs, its card takes the dock's place at the bottom.
-  const storyOpen = useAppStore((s) => s.story !== null);
   useLayoutEffect(() => {
-    const dock = document.querySelector(storyOpen ? ".story-slot" : ".dock-slot");
+    const dock = document.querySelector(".dock-slot");
     if (!dock) return;
     const update = () => {
       const r = dock.getBoundingClientRect();
@@ -125,7 +112,7 @@ function useDockClearance(): number | null {
       observer.disconnect();
       window.removeEventListener("resize", update);
     };
-  }, [storyOpen]);
+  }, []);
   return clearance;
 }
 
@@ -212,71 +199,6 @@ function PanelBody() {
   return <BuildingView building={building} at={at} />;
 }
 
-/**
- * For a signed-in resident: marks the open building as their home, with the type and floors the panel shows
- * now. A home already marked keeps its bill and choices; a new one starts private (not shared with pemda).
- */
-function MyHomeButton({ building }: { building: BuildingEstimate }) {
-  const user = useAppStore((s) => s.user);
-  const home = useAppStore((s) => s.home);
-  const input = useAppStore((s) => s.buildingInput);
-  const [busy, setBusy] = useState(false);
-  const [problem, setProblem] = useState<string | null>(null);
-  if (user?.role !== "warga" || !input) return null;
-  const isHome = home?.featureId === building.featureId;
-  const same = isHome && home.buildingType === building.type && home.floors === building.floors;
-
-  const mark = async () => {
-    setBusy(true);
-    setProblem(null);
-    try {
-      const keep = isHome ? home : null;
-      const answer = await api.saveHome({
-        featureId: building.featureId,
-        lng: input.lng,
-        lat: input.lat,
-        footprintM2: input.footprintM2,
-        heightM: input.heightM,
-        buildingType: building.type,
-        floors: building.floors,
-        kwhMonth: keep?.kwhMonth ?? null,
-        billRpMonth: keep?.billRpMonth ?? null,
-        interestedPv: keep?.interestedPv ?? false,
-        installedPv: keep?.installedPv ?? false,
-        installedKwp: keep?.installedKwp ?? null,
-        consentMap: keep?.consentMap ?? false,
-      });
-      useAppStore.getState().setHome(answer.home);
-    } catch (err) {
-      setProblem(err instanceof Error ? err.message : "Gagal menyimpan rumah.");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <div className="my-home">
-      {same ? (
-        <>
-          <span className="my-home__done">Ini rumah saya</span>
-          <Button variant="ghost" size="sm" onPress={() => useAppStore.getState().setHomeOpen(true)}>
-            Buka Rumah saya
-          </Button>
-        </>
-      ) : (
-        <Button variant="primary" size="sm" isPending={busy} onPress={mark}>
-          {isHome ? "Simpan jenis dan lantai baru" : home ? "Pindahkan rumah saya ke sini" : "Ini rumah saya"}
-        </Button>
-      )}
-      {problem && (
-        <p className="account__problem" role="alert">
-          {problem}
-        </p>
-      )}
-    </div>
-  );
-}
-
 function BuildingView({ building, at }: BuildingTabProps) {
   const updating = useAppStore((s) => s.buildingUpdating);
   const name = useAppStore((s) => s.buildingName);
@@ -319,11 +241,8 @@ function BuildingView({ building, at }: BuildingTabProps) {
         </Select>
         <p className="building-panel__meta">
           {building.region ? building.region.name : "Di luar Kalimantan Timur"}. {TYPE_SOURCE[building.typeSource]}
-          {" "}Bentuk atap dan fasad pada peta bersifat ilustratif.
         </p>
-        {building.type === "ibadah" && <WorshipDesign key={building.featureId} building={building} name={name} />}
         <FloorsField floors={building.floors} onCommit={(floors) => void override({ floorsOverride: floors })} />
-        <MyHomeButton building={building} />
       </header>
 
       <div className="readout building-panel__readout" data-updating={updating || undefined}>
@@ -358,20 +277,6 @@ function BuildingView({ building, at }: BuildingTabProps) {
       </Tabs>
     </div>
   );
-}
-
-function WorshipDesign({ building, name }: { building: BuildingEstimate; name: string | null }) {
-  const map = useAppStore(s => s.map);
-  const [design, setDesign] = useState("auto");
-  useEffect(() => {
-    if (map) setBuildingDesign(map, "ibadah", design === "mosque" ? "Masjid (pilihan model pengguna)" : name);
-  }, [map, building, name, design]);
-  return <label className="building-panel__meta">Model tempat ibadah (ilustrasi)
-    <select className="pemda__filter" aria-label="Model tempat ibadah" value={design} onChange={e => setDesign(e.target.value)}>
-      <option value="auto">Sesuai nama tempat / umum</option>
-      <option value="mosque">Masjid — kubah dan menara</option>
-    </select>
-  </label>;
 }
 
 /** The floors stepper: shows the estimate's floors, and asks for a new estimate once the presses stop. */

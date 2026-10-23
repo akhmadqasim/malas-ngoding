@@ -8,11 +8,6 @@ import { ChatPanel } from "./chat/ChatPanel.tsx";
 import { chem } from "./components/Chem.tsx";
 import { Estimate } from "./components/Estimate.tsx";
 import { Intro } from "./components/Intro.tsx";
-import { Landing } from "./components/Landing.tsx";
-import { PlaceHint } from "./components/PlaceHint.tsx";
-import { goToPlace } from "./map/goToPlace.ts";
-import { AccountDialog } from "./panels/AccountDialog.tsx";
-import { useSession } from "./panels/AccountControl.tsx";
 import { skipIntro } from "./map/camera.ts";
 import { presetTone } from "./map/effects.ts";
 import { MapView } from "./map/MapView.tsx";
@@ -22,10 +17,6 @@ import { BuildingPanel } from "./panels/BuildingPanel.tsx";
 import { Dock } from "./panels/Dock.tsx";
 import { MapTools } from "./panels/MapTools.tsx";
 import { RegionPanel } from "./panels/RegionPanel.tsx";
-import { House as HouseLoading } from "./icons.ts";
-import { CitizenWorkspace } from "./panels/CitizenWorkspace.tsx";
-import { DashboardShell } from "./panels/DashboardShell.tsx";
-import { StoryBar } from "./panels/StoryBar.tsx";
 import { type Metric, useAppStore } from "./store.ts";
 
 interface AppData {
@@ -43,19 +34,10 @@ export function App() {
   const [data, setData] = useState<AppData | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
   const [phase, setPhase] = useState<Phase>("loading");
-  const [mapReady, setMapReady] = useState(false);
-  const citizenFixed = useAppStore(s => s.user?.role === "warga" && s.home !== null);
-  const landingOpen = useAppStore((s) => s.landing === "open");
-  const session = useSession();
-  const user = useAppStore(s => s.user);
-  const resume = session.ready && (user !== null || !landingOpen);
   // The region the pointer is over on the map: the one hover that shows a tooltip. It changes on enter and
   // leave only (never per mouse move) and ends with the hover, e.g. when a click selects the region.
   const mapHoverId = useAppStore((s) => (s.hoverOrigin === "map" ? s.hoveredRegionId : null));
   const metric = useAppStore((s) => s.metric);
-  const potentialOpen = useAppStore((s) => s.potentialOpen);
-  const chatOpen = useAppStore(s => s.chatOpen);
-  const storyOpen = useAppStore((s) => s.story !== null);
   const tone = useAppStore((s) => presetTone(s.lightPreset));
   const regionList = useMemo(() => data?.regions.features.map((f) => f.properties) ?? [], [data]);
   const attempt = useRef(0);
@@ -82,21 +64,8 @@ export function App() {
   }, []);
   useEffect(load, [load]);
 
-  const onMapReady = useCallback(() => setMapReady(true), []);
-  // A place picked on the landing page: the flight to Kaltim is cut short and the camera goes on to it.
-  const onIntroStart = useCallback(() => {
-    setPhase("flying");
-    if (useAppStore.getState().pendingPlace) setTimeout(skipIntro, 0);
-  }, []);
-  const onIntroEnd = useCallback(() => {
-    setPhase("done");
-    const s = useAppStore.getState();
-    if (s.user?.role === "warga" && s.home) { s.setPendingPlace(null); return; }
-    const place = s.pendingPlace;
-    if (!place) return;
-    s.setPendingPlace(null);
-    void goToPlace(place);
-  }, []);
+  const onIntroStart = useCallback(() => setPhase("flying"), []);
+  const onIntroEnd = useCallback(() => setPhase("done"), []);
   const onFailure = useCallback((message: string) => setFailure(message), []);
 
   // The tooltip follows the pointer through a ref, so moving the mouse never re-renders React.
@@ -127,19 +96,17 @@ export function App() {
   }, []);
 
   const showUi = phase === "done" && !failure;
-  const buildingOpen = useAppStore(s => s.buildingStatus !== "idle");
   const hovered = mapHoverId ? regionList.find((r) => r.id === mapHoverId) : undefined;
   useLayoutEffect(placeTooltip, [placeTooltip, hovered, metric]);
 
   return (
     <MotionConfig reducedMotion="user">
-      <main className="app" data-citizen={citizenFixed || undefined} data-metric={metric} data-tone={tone} data-failed={failure ? "" : undefined} data-dashboard={showUi ? "" : undefined} data-planning={potentialOpen || undefined} data-building-open={buildingOpen || undefined} data-chat-open={chatOpen || undefined}>
-        {data && session.ready && (
+      <main className="app" data-metric={metric} data-tone={tone} data-failed={failure ? "" : undefined}>
+        {data && (
           <MapView
             token={data.token}
             regions={data.regions}
             plants={data.plants}
-            onMapReady={onMapReady}
             onIntroStart={onIntroStart}
             onIntroEnd={onIntroEnd}
             onRegionHover={onRegionHover}
@@ -157,24 +124,17 @@ export function App() {
               animate="shown"
               variants={{ shown: { transition: { delayChildren: 0.15, staggerChildren: 0.08 } } }}
             >
-              {citizenFixed ? <CitizenWorkspace /> : <>
               <motion.div className="sheet-slot" variants={assemble(0, -16)}>
                 <RegionPanel regions={regionList} />
               </motion.div>
               <BuildingPanel />
-              <DashboardShell regions={regionList} />
-              <StoryBar />
-              {/* The column legend means nothing while the potential cells replace the columns; the story takes its place. */}
-              {!potentialOpen && !storyOpen && (
-                <motion.div className="dock-slot" variants={assemble(12, 0)}>
-                  <Dock plants={data.plants} regions={regionList} />
-                </motion.div>
-              )}
+              <motion.div className="dock-slot" variants={assemble(12, 0)}>
+                <Dock plants={data.plants} regions={regionList} />
+              </motion.div>
               {/* After the dock in the tab order: the tools sit to its right. */}
               <motion.div className="tools-slot" variants={assemble(0, 12)}>
                 <MapTools />
               </motion.div>
-              </>}
               <ChatPanel />
             </motion.div>
           )}
@@ -182,12 +142,7 @@ export function App() {
 
         {hovered && showUi && <RegionTooltip ref={tooltip} region={hovered} metric={metric} />}
 
-        {/* The landing page comes first; the intro title card takes over once the flight starts. */}
-        <Intro phase={failure || landingOpen || resume || !session.ready ? "done" : phase} onSkip={skipIntro} />
-        {!failure && session.ready && <Landing ready={mapReady} />}
-        {!failure && !session.ready && <div className="session-loading" role="status"><HouseLoading /><p>{session.problem ?? "Membuka akun dan rumah tersimpan…"}</p>{session.problem && <Button onPress={session.retry}>Coba lagi</Button>}</div>}
-        <AccountDialog />
-        {showUi && !citizenFixed && <PlaceHint />}
+        <Intro phase={failure ? "done" : phase} onSkip={skipIntro} />
 
         {failure && (
           <Card className="failure" role="alert">

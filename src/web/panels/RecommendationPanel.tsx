@@ -1,4 +1,4 @@
-import { ArrowsRotateRight } from "../icons.ts";
+import { ArrowsRotateRight } from "@gravity-ui/icons";
 import { Accordion, Button, ProgressBar, Skeleton } from "@heroui/react";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import type { RecommendationCategory, RecommendationItem, Recommendations, RegionSummary } from "../../shared/types.ts";

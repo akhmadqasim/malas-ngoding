@@ -3,11 +3,6 @@
 @import "./atlas-theme.css";
 @import "./buildings.css";
 @import "./solar-weather.css";
-@import "./scenario.css";
-@import "./dashboard.css";
-@import "./telemetry.css";
-@import "./journeys.css";
-@import "./applications.css";
 
 /*
  * Visual direction "Atlas malam": docs/research/design/00-direction.md (binding).
@@ -72,41 +67,9 @@
   --color-kwh-day-4: #006878;
   --color-kwh-day-5: #045c6e;
   --color-kwh-day-6: #025064;
-  /* Renewable potential map: sun (solar fuel yellow) and wind (hydro-to-sky blue), one hue each. */
-  --color-sun-1: #8a7a2e;
-  --color-sun-2: #a89432;
-  --color-sun-3: #c6ad38;
-  --color-sun-4: #e0c443;
-  --color-sun-5: #f2d65c;
-  --color-sun-6: #fbe89a;
-  --color-wind-1: #3d6f93;
-  --color-wind-2: #4a85ad;
-  --color-wind-3: #5a9bc6;
-  --color-wind-4: #73b1d8;
-  --color-wind-5: #94c7e6;
-  --color-wind-6: #b9ddf2;
-  --color-sun-day-1: #c9a227;
-  --color-sun-day-2: #b38c16;
-  --color-sun-day-3: #9c760b;
-  --color-sun-day-4: #856106;
-  --color-sun-day-5: #6e4e04;
-  --color-sun-day-6: #593e03;
-  --color-wind-day-1: #4f8fbf;
-  --color-wind-day-2: #3a7aab;
-  --color-wind-day-3: #2a6696;
-  --color-wind-day-4: #1d5482;
-  --color-wind-day-5: #13436d;
-  --color-wind-day-6: #0c3459;
   --color-dim-dark: #3e4a5a;
   --color-dim-light: #c2cad0;
   --color-outline-light: #1c222c;
-  /* Illustrative architectural materials and reported rooftop solar. */
-  --color-building-sand: #bca58d;
-  --color-building-stone: #c4b8a5;
-  --color-building-slate: #a8b5b6;
-  --color-building-clay: #c3a08a;
-  --color-building-sage: #b1b8a0;
-  --color-pv-installed: #26a69a;
 
   /* Power plants by fuel. */
   /* The fuel colours of the design direction: coal charcoal (a slate light enough not to read as a hole),
@@ -167,12 +130,6 @@
   --radius-xs: 2px;
   --radius-sm: 4px;
   --radius-md: 6px;
-  --radius-dashboard-panel: 28px;
-  --radius-dashboard-control: 16px;
-  --radius-dashboard-nav: 22px;
-  --duration-iot-flow: 1200ms;
-  --duration-energy-halo: 3200ms;
-  --duration-energy-fast: 1800ms;
   --radius-full: 999px;
 
   --shadow-panel: 0 1px 0 rgb(4 7 12 / 0.3), 0 12px 32px -16px rgb(4 7 12 / 0.55);

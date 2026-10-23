@@ -32,7 +32,7 @@ const INTERACTIONS = ["regions-enter", "regions-leave", "regions-click", "region
 /** By this zoom the columns have all but faded, so a hover on them ends (see `onZoom` in addRegions). */
 const HOVER_END_ZOOM = HIDE_ZOOM - 0.5;
 /** Map motion in ms (docs/research/design/00-direction.md section 6). */
-const MS = { rise: 1600, riseStagger: 110, hover: 300, select: 900, sink: 380, swapRise: 900, swapStagger: 40, scenario: 600 } as const;
+const MS = { rise: 1600, riseStagger: 110, hover: 300, select: 900, sink: 380, swapRise: 900, swapStagger: 40 } as const;
 /** Hover previews a selection: the column under the pointer rises this much ... */
 const HOVER_LIFT = 1.12;
 /** With nothing selected, the columns are opaque until they fade out toward city zoom. */
@@ -159,8 +159,8 @@ function emitTops(ids?: Iterable<string>) {
 // Heights (`h`) and colour fades (`fade`) live in feature-state, so animating them only updates paint
 // buffers (no re-tiling).
 
-/** The animated feature-state values of a column: height, colour fade and ramp position (the scenario moves it). */
-type Channel = "h" | "fade" | "t";
+/** The animated feature-state values of a column. */
+type Channel = "h" | "fade";
 
 interface Tween {
   id: string;
@@ -199,8 +199,6 @@ interface LayerState {
   drawnSelected: string | null;
   /** The Wilayah switch. */
   visible: boolean;
-  /** The rooftop solar scenario: the share of each region's CO2 left (CO2 columns only), or undefined. */
-  scale: ReadonlyMap<string, number> | undefined;
 }
 let state: LayerState | null = null;
 
@@ -250,7 +248,7 @@ function animateTo(id: string, channel: Channel, to: number, duration: number, d
 /** Target height for a region given the selection: the chosen one grows a little, the rest step back. */
 function targetHeight(id: string): number {
   if (!state?.risen) return 0;
-  const t = intensities(state.regions, state.metric, state.scale).get(id) ?? 0;
+  const t = intensities(state.regions, state.metric).get(id) ?? 0;
   const base = columnHeight(t);
   if (!state.selected) return state.hovered === id ? base * HOVER_LIFT : base;
   // The others sink to the ground; they are gone from zoom 8.6 anyway (NEIGHBOUR_OPACITY).
@@ -275,9 +273,7 @@ function fadeColumns(duration: number) {
 
 function writeIntensity() {
   if (!state) return;
-  for (const [id, t] of intensities(state.regions, state.metric, state.scale)) {
-    state.tweens.delete(valueKey("t", id));
-    state.values.set(valueKey("t", id), t);
+  for (const [id, t] of intensities(state.regions, state.metric)) {
     state.map.setFeatureState({ source: REGION_SOURCE, id }, { t });
   }
 }
@@ -407,7 +403,6 @@ export function addRegions(
     handlers,
     drawnSelected: null,
     visible: true,
-    scale: undefined,
   };
   writeIntensity();
   emitTops();
@@ -486,29 +481,11 @@ export function setRegionMetric(map: MapboxMap, metric: Metric): void {
     if (state !== s) return;
     s.swapPending = false;
     // The labels follow the new metric's column heights (hidden until the rise below has finished).
-    setRegionLabelData(map, s.fc, s.metric, s.scale);
+    setRegionLabelData(map, s.fc, s.metric);
     for (const layer of COLUMN_LAYERS) map.setPaintProperty(layer, "fill-extrusion-color", colorExpression(s.metric, s.tone));
     writeIntensity();
     s.regions.forEach((r, i) => animateTo(r.id, "h", targetHeight(r.id), MS.swapRise, i * MS.swapStagger));
   }, MS.sink + 20);
-}
-
-/**
- * Applies the rooftop solar scenario (per region, the share of its CO2 left), or clears it with `null`. The
- * CO2 columns sink and their colour follows the lower value; the kWh columns do not change (solar used on
- * site still counts as electricity used). The names follow once the columns stand still.
- */
-export function setRegionScale(map: MapboxMap, scale: ReadonlyMap<string, number> | null): void {
-  if (!state || state.map !== map) return;
-  const s = state;
-  s.scale = scale ?? undefined;
-  if (s.metric !== "co2" || s.swapPending) return;
-  holdLabels(s);
-  setRegionLabelData(map, s.fc, s.metric, s.scale);
-  for (const [id, t] of intensities(s.regions, s.metric, s.scale)) {
-    animateTo(id, "t", t, MS.scenario);
-    animateTo(id, "h", targetHeight(id), MS.scenario);
-  }
 }
 
 /** Highlights one region (the others dim and step back), or clears the selection with `null`. */

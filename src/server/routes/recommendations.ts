@@ -1,7 +1,6 @@
 import type { AppDeps } from "../index.ts";
 import { type RouteTable, error, json, safe } from "../http.ts";
 import { GENERATION_BUDGET_MS, recommendationsFor } from "../services/recommendations.ts";
-import { requireRole, sameOriginProblem } from "../services/session.ts";
 
 const NOT_FOUND = "Wilayah tidak ditemukan";
 /**
@@ -21,11 +20,6 @@ export function recommendationRoutes(deps: AppDeps): RouteTable {
     },
     "/api/recommendations/:regionId/refresh": {
       POST: safe(async (req, server) => {
-        // Regenerating costs a Claude call, so only a signed-in government account may ask for it.
-        const origin = sameOriginProblem(req);
-        if (origin) return origin;
-        const auth = await requireRole(deps.db, req, "pemda");
-        if ("res" in auth) return auth.res;
         server.timeout(req, IDLE_TIMEOUT_S);
         const out = await recommendationsFor(deps, String(req.params.regionId), { refresh: true });
         return out ? json(out) : error(NOT_FOUND, 404);

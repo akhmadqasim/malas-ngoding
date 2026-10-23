@@ -30,7 +30,7 @@ export const RAMP_STEPS = 6;
  * The six stops of a metric's colour ramp, low to high. On a dark ground the highest value is the
  * lightest; on a light ground (the `-day` ramps) it is the darkest, so the top value always stands out most.
  */
-export function rampTokens(metric: Metric | "sun" | "wind", tone: Tone): string[] {
+export function rampTokens(metric: Metric, tone: Tone): string[] {
   const set = tone === "light" ? `${metric}-day` : metric;
   return Array.from({ length: RAMP_STEPS }, (_, i) => token(`--color-${set}-${i + 1}`));
 }

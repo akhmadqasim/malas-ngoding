@@ -1,9 +1,7 @@
 import type Anthropic from "@anthropic-ai/sdk";
-import type { Home } from "../../shared/auth.ts";
 import type { AppDeps } from "../index.ts";
 import { ACTION_TOOL_DEFINITIONS, ACTIONS, type ChatAction, type ClientActionName } from "./chatTools/actions.ts";
 import { estimateBuildingAt, simulateSolar } from "./chatTools/buildingTools.ts";
-import { GET_MY_HOME, myHomeTool } from "./chatTools/homeTool.ts";
 import type { ServerTool } from "./chatTools/common.ts";
 import { findPlaces } from "./chatTools/placeTools.ts";
 import { getGridMix, getRecommendations, getRegionStats, listRegions } from "./chatTools/regionTools.ts";
@@ -63,14 +61,12 @@ const TOO_MANY_TOOLS =
  * Runs the tool calls of one Claude reply. Map actions are checked and handed to `onAction` right away,
  * in the order Claude asked for them; server tools run concurrently, at most MAX_SERVER_TOOLS_PER_REPLY
  * of them. Returns one result per call, in the same order, to send back in a single user message.
- * `home` is the signed-in resident's own home (null for guests): only then does get_my_home exist, built around
- * that one home. Never throws: a failing or skipped tool becomes an error result.
+ * Never throws: a failing or skipped tool becomes an error result.
  */
 export async function runToolCalls(
   deps: AppDeps,
   calls: Anthropic.ToolUseBlock[],
   onAction: (action: ChatAction) => void,
-  home: Home | null = null,
 ): Promise<Anthropic.ToolResultBlockParam[]> {
   let serverCalls = 0;
   return Promise.all(
@@ -83,7 +79,7 @@ export async function runToolCalls(
         onAction({ name, input: checked.input });
         return result(call.id, { ok: true });
       }
-      const tool = SERVER_TOOLS_BY_NAME.get(call.name) ?? (home && call.name === GET_MY_HOME ? myHomeTool(home) : undefined);
+      const tool = SERVER_TOOLS_BY_NAME.get(call.name);
       if (!tool) {
         return failure(call.id, `Alat "${call.name.slice(0, 80)}" tidak ada. Alat yang tersedia: ${ALL_TOOL_NAMES}.`);
       }

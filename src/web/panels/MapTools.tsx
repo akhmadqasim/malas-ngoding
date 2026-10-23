@@ -1,4 +1,4 @@
-import { CircleInfo, Compass, House, Minus, Plus } from "../icons.ts";
+import { CircleInfo, Compass, House, Minus, Plus } from "@gravity-ui/icons";
 import { Button, Popover, Separator, Toolbar, Tooltip } from "@heroui/react";
 import type { Map as MapboxMap } from "mapbox-gl";
 import { type ReactNode, useEffect, useRef, useState } from "react";

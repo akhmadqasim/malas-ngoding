@@ -60,13 +60,13 @@
 .sw-solar__roof .number-field__increment-button {
   color: var(--muted);
 }
-:is(.sw-solar__backup, .scenario__slider) .slider__output {
+.sw-solar__backup .slider__output {
   font-size: var(--text-sm);
   font-weight: var(--font-weight-medium);
   color: var(--foreground);
 }
 /* A slim track; the fill and thumb are the accent (state), not a data colour. */
-:is(.sw-solar__backup, .scenario__slider) .slider__track {
+.sw-solar__backup .slider__track {
   height: --spacing(1.5);
   /* Room for half the thumb at each end; the fill-start border is the rounded start of the fill. */
   border-inline-width: --spacing(2);
@@ -74,20 +74,20 @@
   border-radius: var(--radius-full);
   background: var(--border);
 }
-:is(.sw-solar__backup, .scenario__slider) .slider__fill {
+.sw-solar__backup .slider__fill {
   border-radius: 0;
   background: var(--accent);
 }
-:is(.sw-solar__backup, .scenario__slider) .slider__track[data-fill-start="true"] {
+.sw-solar__backup .slider__track[data-fill-start="true"] {
   border-inline-start-color: var(--accent);
 }
-:is(.sw-solar__backup, .scenario__slider) .slider__thumb {
+.sw-solar__backup .slider__thumb {
   width: --spacing(4);
   height: --spacing(4);
   border-radius: var(--radius-full);
   background: var(--accent);
 }
-:is(.sw-solar__backup, .scenario__slider) .slider__thumb::after {
+.sw-solar__backup .slider__thumb::after {
   width: --spacing(2);
   height: --spacing(2);
   border-radius: var(--radius-full);

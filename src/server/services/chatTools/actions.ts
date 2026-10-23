@@ -7,7 +7,7 @@ import { inRange, latParam, lngParam, oneOf, point, REGION_PARAM, region } from 
 const LAYERS = ["regions", "plants", "buildings"] as const;
 const METRICS = ["co2", "kwh"] as const;
 const RAIN_MODES = ["auto", "on", "off"] as const;
-const TABS = ["energi", "emisi", "surya", "cuaca", "sensor"] as const;
+const TABS = ["energi", "emisi", "surya", "cuaca"] as const;
 
 export const ACTION_TOOL_DEFINITIONS: Anthropic.Tool[] = [
   {
@@ -68,7 +68,7 @@ export const ACTION_TOOL_DEFINITIONS: Anthropic.Tool[] = [
   {
     name: "open_tab",
     description:
-      "Map action: open a tab of the building panel: energi (electricity use), emisi (CO2 and everyday equivalents), surya (solar simulation), cuaca (weather and solar forecast), or sensor (virtual IoT readings every 2 seconds, not physical sensors). Works when a building is selected.",
+      "Map action: open a tab of the building panel: energi (electricity use), emisi (CO2 and everyday equivalents), surya (solar simulation) or cuaca (weather and solar forecast). Works when a building is selected.",
     input_schema: { type: "object", properties: { tab: { type: "string", enum: [...TABS] } }, required: ["tab"] },
   },
 ];

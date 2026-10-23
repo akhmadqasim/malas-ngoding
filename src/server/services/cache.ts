@@ -154,7 +154,6 @@ export async function cachedForecast(
   lat: number,
   lng: number,
   nowMs = Date.now(),
-  needWind = false,
 ): Promise<{ hours: ForecastHour[]; stale: boolean } | null> {
   const key = weatherKey(lat, lng);
   let cached: { hours: ForecastHour[]; fetchedAt: Date } | null = null;
@@ -165,7 +164,7 @@ export async function cachedForecast(
   } catch (err) {
     warn("weather cache read failed", err);
   }
-  if (cached && nowMs - cached.fetchedAt.getTime() < WEATHER_TTL_MS && (!needWind || cached.hours.some(h => h.windFromDeg !== undefined && h.windSpeedMs !== undefined))) {
+  if (cached && nowMs - cached.fetchedAt.getTime() < WEATHER_TTL_MS) {
     return { hours: cached.hours, stale: false };
   }
   try {

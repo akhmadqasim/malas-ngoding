@@ -143,10 +143,6 @@ Semua jalur di bawah `/api/`, tanpa nomor versi. Galat selalu berbentuk `{ "erro
 | `GET /api/plants` | Pembangkit | | GeoJSON titik: nama, bahan bakar, MW, status, `approx` | 500 |
 | `GET /api/grid` | Bauran listrik dan faktor emisi tahun terbaru | | `GridMix` | 500 |
 | `GET /api/equivalents` | Faktor padanan CO2 (km mobil, km motor, pohon, charge HP, penerbangan) | | Daftar `EquivalentFactor`: `key`, `label`, `kgCo2PerUnit`, `unit` | 500 |
-| `GET /api/scenario` | Dasar skenario PLTS atap provinsi; hitungannya di browser (`src/shared/scenario.ts`) | | `costRpPerKwp`, `solarFactorKgPerKwh`, `gridSolarShare`, `regions` (`id`, `peakSunHours` NASA POWER) | 500 |
-| `GET /api/twin` | Hari kembar digital: prakiraan Open-Meteo per wilayah dari jam WITA sekarang (25 jam) dan pola beban harian (asumsi); hitungannya di browser (`src/shared/twin.ts`) | | `syncedAt`, `stale`, `gridFactorKgPerKwh`, `profile` (`hourlyFactor`, `source`), `regions` (`id`, `hours`, `borrowedFrom`) | 500 |
-| `GET /api/potential` | Peta potensi EBT: sel grid NASA POWER yang dipotong ke daratan Kaltim (PostGIS), dengan wilayah dan pembangkit terdekat | | FeatureCollection sel (`ghi`, `ws50`, `ws10`, `regionId`, `regionName`, `plantName`, `plantKm`, `at`), `source`, `assumptions` | 500 |
-| `GET /models/:name` | Model 3D glTF buatan sendiri (`solar-table.glb`, `turbine-tower.glb`, `turbine-rotor.glb`) untuk lapisan `model` Mapbox | `name`: hanya `[a-z0-9-]+.glb` | `model/gltf-binary` | 404 |
 | `POST /api/buildings/estimate` | Perkiraan satu gedung | `featureId`, `lng`, `lat`, `footprintM2`, `heightM`, opsional `poiClass`, `poiType`, `typeOverride`, `floorsOverride`, `typeHint` | `BuildingEstimate` | 400 bila isian tidak valid |
 | `POST /api/solar/simulate` | Simulasi panel surya | `lat`, `lng`, `roofAreaM2`, `kwhYear`, `backupHours`, opsional `buildingType` | Hasil simulasi, `peakSunHours`, `pshByMonth`, `assumptions` | 400 bila isian tidak valid |
 | `GET /api/weather?lat=&lng=&kWp=` | Prakiraan 7 hari dan produksi panel | | `{ hours, days, current, stale }` | 400 bila isian tidak valid; 503 bila tidak ada prakiraan sama sekali |

@@ -1,5 +1,4 @@
 import type { BunRequest, Server } from "bun";
-import type { Home } from "../../shared/auth.ts";
 import { resolveRegion } from "../../shared/regionAlias.ts";
 import type { BuildingEstimate, BuildingType } from "../../shared/types.ts";
 import type { AppDeps } from "../index.ts";
@@ -14,7 +13,6 @@ import {
   isChatModelConfigured,
   runChat,
 } from "../services/claude.ts";
-import { currentUser } from "../services/session.ts";
 
 /** Messages of the session sent to Claude as history. */
 export const CHAT_HISTORY_LIMIT = 20;
@@ -192,22 +190,10 @@ async function storeMessage(
   }
 }
 
-/** The home of the signed-in resident who sent the request; null for guests, other roles and any lookup failure. */
-async function residentHome(deps: AppDeps, req: Request): Promise<Home | null> {
-  try {
-    const user = await currentUser(deps.db, req);
-    return user?.role === "warga" ? await deps.db.homeGet(user.id) : null;
-  } catch (err) {
-    warn("resident home unavailable", err);
-    return null;
-  }
-}
-
 /** One question and its answer, streamed through `send`. Resolves when the stream may close. */
 async function converse(
   deps: AppDeps,
   { sessionId, message, context }: ParsedRequest,
-  myHome: Home | null,
   send: (event: ChatEvent) => void,
   signal: AbortSignal,
 ): Promise<void> {
@@ -215,9 +201,8 @@ async function converse(
   await storeMessage(deps, sessionId, "user", { text: message });
   const outcome = await runChat({
     deps,
-    messages: buildMessages(history, message, { ...context, myHome }, new Date()),
+    messages: buildMessages(history, message, context, new Date()),
     signal,
-    myHome,
     onText: (delta) => send({ event: "text", data: { delta } }),
     onAction: (action) => send({ event: "action", data: action }),
   });
@@ -320,8 +305,7 @@ export function chatRoutes(deps: AppDeps) {
           if ("problem" in parsed) return error(parsed.problem, 400);
           // Claude and the tools can stay quiet for longer than Bun's 10 s idle timeout.
           server.timeout(r, 0);
-          const myHome = await residentHome(deps, r);
-          return eventStream(r, (send, signal) => converse(deps, parsed.request, myHome, send, signal));
+          return eventStream(r, (send, signal) => converse(deps, parsed.request, send, signal));
         })(req, server),
     },
   };

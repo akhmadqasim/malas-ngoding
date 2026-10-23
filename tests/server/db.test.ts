@@ -1,4 +1,4 @@
-import { beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { runMigrations } from "../../scripts/migrate.ts";
 import { seedAll } from "../../scripts/seed.ts";
 import {
@@ -50,6 +50,10 @@ describe.skipIf(!reachable)("db", () => {
     await runMigrations();
     await seedAll();
   });
+  afterAll(async () => {
+    await sql.close();
+  });
+
   test("migrate and seed are idempotent", async () => {
     await runMigrations();
     await seedAll();

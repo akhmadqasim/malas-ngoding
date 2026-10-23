@@ -3,7 +3,7 @@ import type { ChatAction } from "./sse.ts";
 // What each chat map action did, in a few Indonesian words, for the action buttons under an answer.
 
 const LAYER_WORDS: Record<string, string> = { regions: "Kolom wilayah", plants: "Pembangkit", buildings: "Gedung 3D" };
-const TAB_WORDS: Record<string, string> = { energi: "Energi", emisi: "Emisi", surya: "Surya", cuaca: "Cuaca", sensor: "Sensor IoT" };
+const TAB_WORDS: Record<string, string> = { energi: "Energi", emisi: "Emisi", surya: "Surya", cuaca: "Cuaca" };
 const RAIN_WORDS: Record<string, string> = { auto: "ikut cuaca", on: "nyala", off: "mati" };
 
 /** "kutai-kartanegara" reads "Kutai Kartanegara". Region ids are their names in lower case with dashes. */

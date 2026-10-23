@@ -53,14 +53,6 @@ describe("createNasaLookup", () => {
 });
 
 describe("createMeteoLookup", () => {
-  test("wind units are m/s and missing wind does not discard a valid solar forecast", async () => {
-    const data = { hourly: { time: ["2026-10-22T12:00", "2026-10-22T13:00"], shortwave_radiation: [500, 450], cloud_cover: [20, 25],
-      precipitation: [0, 0], weather_code: [1, 1], wind_speed_10m: [5, null], wind_direction_10m: [360, null] } };
-    const hours = await createMeteoLookup({ fetch: respond(data) })(0, 117);
-    expect(hours).toHaveLength(2);
-    expect(hours[0]).toMatchObject({ windSpeedMs: 5, windFromDeg: 0 });
-    expect(hours[1]?.windFromDeg).toBeUndefined();
-  });
   const body = {
     hourly: {
       time: ["2026-10-21T00:00", "2026-10-21T01:00"],
@@ -71,7 +63,7 @@ describe("createMeteoLookup", () => {
     },
   };
 
-  test("requests the six hourly variables for 7 days in Asia/Makassar and maps the columns", async () => {
+  test("requests the four hourly variables for 7 days in Asia/Makassar and maps the columns", async () => {
     let seen = "";
     const fetcher = (async (url: string) => {
       seen = url;
@@ -79,8 +71,7 @@ describe("createMeteoLookup", () => {
     }) as unknown as typeof fetch;
     const hours = await createMeteoLookup({ fetch: fetcher })(-0.5, 117.15);
     const u = new URL(seen);
-    expect(u.searchParams.get("hourly")).toBe("shortwave_radiation,cloud_cover,precipitation,weather_code,wind_speed_10m,wind_direction_10m");
-    expect(u.searchParams.get("wind_speed_unit")).toBe("ms");
+    expect(u.searchParams.get("hourly")).toBe("shortwave_radiation,cloud_cover,precipitation,weather_code");
     expect(u.searchParams.get("forecast_days")).toBe("7");
     expect(u.searchParams.get("timezone")).toBe("Asia/Makassar");
     expect(hours).toEqual([
