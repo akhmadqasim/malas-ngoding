@@ -9,14 +9,14 @@ import type {
   RegionSummary,
 } from "../../shared/types.ts";
 import type { RegionPlant } from "../db.ts";
-import type { AppDeps } from "../index.ts";
+import type { AppDeps } from "../app.ts";
 import { cachedClimatology } from "./cache.ts";
 import type { Climatology } from "./nasaPower.ts";
 import { CATEGORIES, describeRegionFacts, RECOMMENDATION_TOOL, SYSTEM_PROMPT, TOOL_NAME } from "./recommendationPrompt.ts";
 import { ruleBasedRecommendations } from "./recommendationRules.ts";
 import { simulateBuildingSolar } from "./solarTariff.ts";
 
-const MODEL = "claude-sonnet-5-5";
+const MODEL = "claude-haiku-5-5";
 const MAX_TOKENS = 2048;
 /** Per attempt; an answer took 8 to 10 s in testing. The client retries once on a timeout, a 429 or a 5xx. */
 const ATTEMPT_TIMEOUT_MS = 45_000;

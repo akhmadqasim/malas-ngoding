@@ -291,7 +291,7 @@ describe("POST /api/chat", () => {
     expect(events.at(-1)?.data).toEqual({});
 
     const params = model.calls[0]!;
-    expect(params.model).toBe("claude-sonnet-5-5");
+    expect(params.model).toBe("claude-haiku-5-5");
     expect(params.max_tokens).toBe(2048);
     expect(CHAT_MAX_TOKENS).toBe(2048);
     expect(CHAT_MAX_ITERATIONS).toBe(8);
@@ -1024,10 +1024,10 @@ describe("chat server tools", () => {
       impact: `Dampak ${n}.`,
       priority: n as 1 | 2 | 3,
     }));
-    await fake.deps.db.recommendationsSet("samarinda", items, "claude-sonnet-5-5");
+    await fake.deps.db.recommendationsSet("samarinda", items, "claude-haiku-5-5");
     await chat(server, body("Apa saran untuk Samarinda?"));
     const json = resultJson(toolResults(model.calls[1])[0]);
-    expect(json.source).toContain("claude-sonnet-5-5");
+    expect(json.source).toContain("claude-haiku-5-5");
     expect(json.source).toMatch(/dibuat \d+ \w+ \d{4}/);
     expect(json.items.map((i: { title: string }) => i.title)).toEqual(["Saran 1", "Saran 2", "Saran 3"]);
     expect(json.items[0]).toMatchObject({ category: "efisiensi energi", priority: "prioritas 1 (paling penting)" });

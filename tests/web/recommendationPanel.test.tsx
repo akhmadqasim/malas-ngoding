@@ -16,7 +16,7 @@ import {
 
 const ai: Recommendations = {
   regionId: "samarinda",
-  model: "claude-sonnet-5-5",
+  model: "claude-haiku-5-5",
   generatedAt: "2026-10-21T03:59:33.444Z",
   items: [
     {
@@ -49,14 +49,14 @@ describe("who wrote the recommendations", () => {
     expect(provenance(rules)).toStartWith("Berbasis aturan");
   });
   test("AI items name the model and the day, in WITA", () => {
-    expect(provenance(ai)).toContain("claude-sonnet-5-5");
+    expect(provenance(ai)).toContain("claude-haiku-5-5");
     expect(provenance(ai)).toContain("21 Oktober 2026");
     // 17:30 UTC on 20 October is already 21 October in Kalimantan Timur (UTC+8).
     expect(fmtWrittenOn("2026-10-20T17:30:00Z")).toBe("21 Oktober 2026");
   });
   test("a broken date leaves the day out instead of printing 'Invalid Date'", () => {
     expect(fmtWrittenOn("not a date")).toBe("");
-    expect(provenance({ model: "claude-sonnet-5-5", generatedAt: "" })).not.toContain("Invalid");
+    expect(provenance({ model: "claude-haiku-5-5", generatedAt: "" })).not.toContain("Invalid");
   });
 });
 
@@ -82,7 +82,7 @@ describe("the list", () => {
     expect(html).toContain("Prioritas 1, energi terbarukan");
     expect(html).toContain("Prioritas 2, efisiensi energi");
     expect(html).toContain("Prioritas 3, kebijakan");
-    expect(html).toContain("Ditulis AI (claude-sonnet-5-5) pada 21 Oktober 2026");
+    expect(html).toContain("Ditulis AI (claude-haiku-5-5) pada 21 Oktober 2026");
   });
   test("rule-based items carry the 'berbasis aturan' label", () => {
     expect(renderToStaticMarkup(<RecommendationList data={rules} />)).toContain("Berbasis aturan");
