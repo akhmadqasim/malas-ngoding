@@ -1,5 +1,5 @@
 import type { BuildingInput } from "../../shared/types.ts";
-import type { AppDeps } from "../index.ts";
+import type { AppDeps } from "../app.ts";
 import type { ForecastHour } from "../../shared/pvForecast.ts";
 import { climatologyKey, type Climatology } from "./nasaPower.ts";
 import { weatherKey } from "./openMeteo.ts";

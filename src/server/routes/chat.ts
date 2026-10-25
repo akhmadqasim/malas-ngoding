@@ -1,7 +1,7 @@
 import type { BunRequest, Server } from "bun";
 import { resolveRegion } from "../../shared/regionAlias.ts";
 import type { BuildingEstimate, BuildingType } from "../../shared/types.ts";
-import type { AppDeps } from "../index.ts";
+import type { AppDeps } from "../app.ts";
 import { error, json, safe } from "../http.ts";
 import type { ChatAction } from "../services/chatTools.ts";
 import {

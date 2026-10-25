@@ -12,3 +12,7 @@ data/cache/
 
 # JetBrains
 .idea/
+
+# Vercel
+public/
+.vercel/
