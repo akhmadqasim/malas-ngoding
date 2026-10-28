@@ -17,3 +17,6 @@ data/cache/
 output/
 docs/plans/2026-10-22-solar-applications-handoff.md
 public/characters/README.md
+
+# Vercel
+.vercel/

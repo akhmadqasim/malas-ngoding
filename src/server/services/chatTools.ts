@@ -1,6 +1,6 @@
 import type Anthropic from "@anthropic-ai/sdk";
 import type { Home } from "../../shared/auth.ts";
-import type { AppDeps } from "../index.ts";
+import type { AppDeps } from "../app.ts";
 import { ACTION_TOOL_DEFINITIONS, ACTIONS, type ChatAction, type ClientActionName } from "./chatTools/actions.ts";
 import { estimateBuildingAt, simulateSolar } from "./chatTools/buildingTools.ts";
 import { GET_MY_HOME, myHomeTool } from "./chatTools/homeTool.ts";

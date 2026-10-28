@@ -2,11 +2,11 @@ import Anthropic from "@anthropic-ai/sdk";
 import type { Home } from "../../shared/auth.ts";
 import { fmtKg, fmtKwh, fmtNumber } from "../../shared/format.ts";
 import type { BuildingEstimate } from "../../shared/types.ts";
-import type { AppDeps } from "../index.ts";
+import type { AppDeps } from "../app.ts";
 import { CHAT_TOOLS, type ChatAction, buildingTypeLabel, runToolCalls } from "./chatTools.ts";
 import { describeHome, myHomeDefinition } from "./chatTools/homeTool.ts";
 
-export const CHAT_MODEL = "claude-sonnet-5-5";
+export const CHAT_MODEL = "claude-haiku-5-5";
 export const CHAT_MAX_TOKENS = 2048;
 /** Model calls per user message. The last call tells Claude to answer with the data it has (LAST_CALL_NOTICE). */
 export const CHAT_MAX_ITERATIONS = 8;

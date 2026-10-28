@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "bun --hot src/server/index.ts",
     "start": "NODE_ENV=production bun src/server/index.ts",
+    "build": "bun scripts/build.ts",
     "test": "bun test",
     "migrate": "bun scripts/migrate.ts",
     "seed": "bun scripts/seed.ts",

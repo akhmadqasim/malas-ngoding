@@ -1,6 +1,6 @@
 import { type ForecastHour, isRainyHour, pvFromForecast, summariseDays, witaMs } from "../../shared/pvForecast.ts";
 import type { PvHour } from "../../shared/types.ts";
-import type { AppDeps } from "../index.ts";
+import type { AppDeps } from "../app.ts";
 import { type RouteTable, error, json, safe } from "../http.ts";
 import { cachedForecast } from "../services/cache.ts";
 

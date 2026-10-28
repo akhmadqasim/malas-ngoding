@@ -1,7 +1,7 @@
 import { fmtNumber } from "../../shared/format.ts";
 import type { BuildingType, SolarResult } from "../../shared/types.ts";
 import costs from "../../../data/seed/solar-costs.json";
-import type { AppDeps } from "../index.ts";
+import type { AppDeps } from "../app.ts";
 import { type RouteTable, error, json, safe } from "../http.ts";
 import { cachedClimatology } from "../services/cache.ts";
 import { isBuildingType, simulateBuildingSolar } from "../services/solarTariff.ts";

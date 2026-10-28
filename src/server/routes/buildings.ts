@@ -1,6 +1,6 @@
 import { estimateBuilding } from "../../shared/estimate.ts";
 import type { BuildingEstimate, BuildingInput, BuildingType } from "../../shared/types.ts";
-import type { AppDeps } from "../index.ts";
+import type { AppDeps } from "../app.ts";
 import { type RouteTable, error, json, methodNotAllowed, safe } from "../http.ts";
 import { cachedPoi, estimateCacheKey } from "../services/cache.ts";
 

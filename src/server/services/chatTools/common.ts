@@ -2,7 +2,7 @@ import type Anthropic from "@anthropic-ai/sdk";
 import { fmtCompact, fmtNumber } from "../../../shared/format.ts";
 import { resolveRegion } from "../../../shared/regionAlias.ts";
 import type { BuildingType } from "../../../shared/types.ts";
-import type { AppDeps } from "../../index.ts";
+import type { AppDeps } from "../../app.ts";
 import type { ChatAction } from "./actions.ts";
 
 // Shared by every chat tool: input checks, parameter schemas and the formatting of numbers Claude quotes.

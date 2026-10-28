@@ -1,4 +1,4 @@
-import type { AppDeps } from "../index.ts";
+import type { AppDeps } from "../app.ts";
 import { type RouteTable, error, json, safe } from "../http.ts";
 import { GENERATION_BUDGET_MS, recommendationsFor } from "../services/recommendations.ts";
 import { requireRole, sameOriginProblem } from "../services/session.ts";

@@ -63,7 +63,7 @@ function facts(regionId: string, patch: { plants?: RegionPlant[]; climate?: Regi
 }
 
 /** A writer that records the facts it was given and answers with `answer` (or throws it). */
-function fakeWriter(answer: RecommendationItem[] | Error, model = "claude-sonnet-5-5") {
+function fakeWriter(answer: RecommendationItem[] | Error, model = "claude-haiku-5-5") {
   const calls: RegionFacts[] = [];
   const fn: RecommendationWriter = async (f) => {
     calls.push(f);
@@ -80,7 +80,7 @@ function slowWriter(answer: RecommendationItem[], ms = 30) {
     counts.started++;
     await Bun.sleep(ms);
     counts.finished++;
-    return { items: answer, model: "claude-sonnet-5-5" };
+    return { items: answer, model: "claude-haiku-5-5" };
   };
   return { fn, counts };
 }
@@ -91,7 +91,7 @@ function messageJson(content: unknown[], stopReason = "tool_use") {
     id: "msg_test",
     type: "message",
     role: "assistant",
-    model: "claude-sonnet-5-5",
+    model: "claude-haiku-5-5",
     content,
     stop_reason: stopReason,
     stop_sequence: null,
@@ -147,14 +147,14 @@ describe("GET /api/recommendations/:regionId", () => {
   test("returns the cached content without calling Claude", async () => {
     const writer = fakeWriter(new Error("Claude must not be called"));
     const { server, fake } = start({ recommender: writer.fn });
-    const at = await fake.deps.db.recommendationsSet("samarinda", VALID, "claude-sonnet-5-5");
+    const at = await fake.deps.db.recommendationsSet("samarinda", VALID, "claude-haiku-5-5");
 
     const res = await get(server, "samarinda");
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({
       regionId: "samarinda",
       items: VALID,
-      model: "claude-sonnet-5-5",
+      model: "claude-haiku-5-5",
       generatedAt: at.toISOString(),
     });
     expect(writer.calls).toHaveLength(0);
@@ -167,7 +167,7 @@ describe("GET /api/recommendations/:regionId", () => {
     const first = (await (await get(server, "kutai-kartanegara")).json()) as Recommendations;
     expect(first.regionId).toBe("kutai-kartanegara");
     expect(first.items).toEqual(VALID);
-    expect(first.model).toBe("claude-sonnet-5-5");
+    expect(first.model).toBe("claude-haiku-5-5");
     expect(Number.isNaN(Date.parse(first.generatedAt))).toBe(false);
 
     expect(writer.calls).toHaveLength(1);
@@ -232,7 +232,7 @@ describe("GET /api/recommendations/:regionId", () => {
     const writer = fakeWriter(VALID);
     const { server, fake } = start({ recommender: writer.fn, nasa: new Error("nasa down") });
     const body = (await (await get(server, "samarinda")).json()) as Recommendations;
-    expect(body.model).toBe("claude-sonnet-5-5");
+    expect(body.model).toBe("claude-haiku-5-5");
     expect(writer.calls[0]?.climate.fallback).toContain("NASA POWER");
     expect(writer.calls[0]?.climate.pshYear).toBe(4.2);
     expect(fake.stored.has("recommendations:samarinda")).toBe(false);
@@ -323,7 +323,7 @@ describe("POST /api/recommendations/:regionId/refresh", () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as Recommendations;
     expect(body.items).toEqual(NEW);
-    expect(body.model).toBe("claude-sonnet-5-5");
+    expect(body.model).toBe("claude-haiku-5-5");
     expect(writer.calls).toHaveLength(1);
     expect(((await (await get(server, "samarinda")).json()) as Recommendations).items).toEqual(NEW);
   });
@@ -379,15 +379,15 @@ describe("POST /api/recommendations/:regionId/refresh", () => {
 });
 
 describe("createClaudeRecommender", () => {
-  test("sends one claude-sonnet-5-5 request with a strict tool, auto tool choice and the region's facts", async () => {
+  test("sends one claude-haiku-5-5 request with a strict tool, auto tool choice and the region's facts", async () => {
     const claude = claudeFetch(messageJson([{ type: "thinking", thinking: "", signature: "sig" }, toolUse({ items: VALID })]));
     const write = createClaudeRecommender("test-key", { fetch: claude.fetcher, maxRetries: 0 });
 
-    expect(await write(facts("kutai-kartanegara"))).toEqual({ items: VALID, model: "claude-sonnet-5-5" });
+    expect(await write(facts("kutai-kartanegara"))).toEqual({ items: VALID, model: "claude-haiku-5-5" });
     expect(claude.requests).toHaveLength(1);
     const { url, body } = claude.requests[0]!;
     expect(new URL(url).pathname).toBe("/v1/messages");
-    expect(body.model).toBe("claude-sonnet-5-5");
+    expect(body.model).toBe("claude-haiku-5-5");
     expect(body.max_tokens).toBe(2048);
     // Forced tool_choice is rejected by this model, so the call is steered by the prompt.
     expect(body.tool_choice).toEqual({ type: "auto", disable_parallel_tool_use: true });

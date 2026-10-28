@@ -60,7 +60,7 @@ Keputusan desain: angka hanya muncul bila punya sumber atau ditandai sebagai asu
 | Antarmuka | React 19, HeroUI v3 (komponen), `lucide-react` (ikon), Zustand, Motion, Tailwind CSS 4 |
 | Peta | Mapbox GL JS v3 (gaya Standard, globe, medan 3D, kolom `fill-extrusion`) |
 | Data luar | Mapbox Tilequery dan Search Box, NASA POWER, Open-Meteo |
-| AI | Anthropic Claude (`@anthropic-ai/sdk`), model `claude-sonnet-5-5`: chat dengan alat dan rekomendasi pemerintah |
+| AI | Anthropic Claude (`@anthropic-ai/sdk`), model `claude-haiku-5-5`: chat dengan alat dan rekomendasi pemerintah |
 
 Rincian versi, arsitektur, dan alasan pilihan ada di [docs/technical/architecture.md](docs/technical/architecture.md).
 
@@ -194,7 +194,7 @@ Catatan riset lengkap, termasuk status verifikasi setiap angka, ada di [docs/res
 | [Open-Meteo](https://open-meteo.com/) | Prakiraan cuaca per jam | Data CC BY 4.0. API gratis hanya untuk penggunaan non-komersial. Atribusi: "Weather data by Open-Meteo.com" |
 | Mapbox (gaya Standard, medan, Tilequery, Search Box, dan Mapbox GL JS v3) | Peta dasar, gedung 3D, pencarian POI gedung, dan pencarian tempat untuk chat | Syarat layanan Mapbox (Mapbox Terms of Service). Peta menampilkan atribusi Mapbox dan OpenStreetMap |
 | [Global Energy Monitor (gem.wiki)](https://www.gem.wiki/) dan sumber berita dan perusahaan | Kapasitas, status, dan koordinat pembangkit | gem.wiki berlisensi CC BY-NC-SA, dan aplikasi ini non-komersial. 9 dari 13 koordinat adalah perkiraan tim dan ditandai `approx` |
-| [Anthropic API](https://www.anthropic.com/) (Claude, `claude-sonnet-5-5`) | Chat AI dan rekomendasi pemerintah. Yang dikirim hanya pertanyaan pengguna, keadaan peta, dan angka dari aplikasi | Syarat layanan Anthropic. Tidak ada data pribadi yang dikirim, dan kunci API hanya ada di server |
+| [Anthropic API](https://www.anthropic.com/) (Claude, `claude-haiku-5-5`) | Chat AI dan rekomendasi pemerintah. Yang dikirim hanya pertanyaan pengguna, keadaan peta, dan angka dari aplikasi | Syarat layanan Anthropic. Tidak ada data pribadi yang dikirim, dan kunci API hanya ada di server |
 | Berita dan blog vendor 2026 (tarif PLN, harga panel dan baterai) | Asumsi biaya dan tarif di simulasi surya | Belum diverifikasi, dicatat sebagai asumsi dan diberi label "perkiraan" |
 
 Perangkat lunak pihak ketiga: Bun, React, HeroUI, Motion, Zustand, dan Tailwind CSS berlisensi MIT; TypeScript dan Playwright berlisensi Apache-2.0; ikon Gravity UI berlisensi MIT; Mapbox GL JS v3 berlisensi Mapbox Terms of Service; PostgreSQL dan PostGIS berjalan sebagai layanan Docker terpisah dari image resmi `postgis/postgis`.

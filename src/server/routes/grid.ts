@@ -1,4 +1,4 @@
-import type { AppDeps } from "../index.ts";
+import type { AppDeps } from "../app.ts";
 import { type RouteTable, json, safe } from "../http.ts";
 
 export function gridRoutes(deps: AppDeps): RouteTable {
