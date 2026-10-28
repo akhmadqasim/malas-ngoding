@@ -1,4 +1,4 @@
-import { ArrowRotateLeft, CircleExclamation, Comments, MapPin, PaperPlane, StopFill, Xmark } from "@gravity-ui/icons";
+import { ArrowRotateLeft, CircleExclamation, Comments, MapPin, PaperPlane, StopFill, Xmark } from "../icons.ts";
 import { Button, Card, TextArea, Tooltip } from "@heroui/react";
 import { AnimatePresence, motion } from "motion/react";
 import { type KeyboardEvent, type ReactNode, type RefObject, useEffect, useLayoutEffect, useRef, useState } from "react";
@@ -86,6 +86,13 @@ export function ChatPanel() {
   const launcher = useRef<HTMLButtonElement>(null);
   // Kept here, not in the card: closing the panel (Escape) must not throw away a half-written question.
   const [draft, setDraft] = useState("");
+  // A question handed over from elsewhere ("Tanya asisten" in Rumah saya) lands in the box, ready to send.
+  const handed = useAppStore((s) => s.chatDraft);
+  useEffect(() => {
+    if (handed === null) return;
+    setDraft(handed);
+    useAppStore.getState().setChatDraft(null);
+  }, [handed]);
 
   const close = () => {
     useAppStore.getState().setChatOpen(false);

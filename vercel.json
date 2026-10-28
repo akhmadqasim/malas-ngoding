@@ -5,7 +5,7 @@
   "regions": ["sin1"],
   "installCommand": "bun install",
   "buildCommand": "bun run build",
-  "outputDirectory": "public",
+  "outputDirectory": "dist/vercel",
   "rewrites": [
     { "source": "/api/:path*", "destination": "/api" },
     { "source": "/:path*", "destination": "/index.html" }

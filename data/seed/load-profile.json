@@ -1,0 +1,4 @@
+{
+  "hourlyFactor": [0.86, 0.82, 0.8, 0.79, 0.79, 0.82, 0.86, 0.9, 0.96, 1.01, 1.05, 1.07, 1.06, 1.06, 1.07, 1.06, 1.04, 1.08, 1.2, 1.24, 1.21, 1.13, 1.02, 0.92],
+  "source": "asumsi: no hourly load data for Kalimantan Timur was found (docs/research). Shape of a typical PLN system day (night trough around 03.00-04.00, a flat daytime plateau, the peak at 19.00 WITA when lights and homes come on), hour 0 = 00.00-01.00 WITA. Normalised to a mean of 1 in code, so it moves the yearly average around the day and never changes the yearly kWh. For scale: the Mahakam system's 2021 peak load was 505 MW (grid-and-plants.md, bisnis.com snippet)."
+}

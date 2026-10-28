@@ -17,12 +17,19 @@ Lakukan 15 menit sebelum mulai, bukan di depan juri.
 7. **Cadangan visual.** Buka `docs/technical/screens/` di tab lain (map, building, solar, chat, rain) dan siapkan PDF dokumentasi. Itu bahan bila peta tidak bisa dimuat.
 8. **Tutup** semua notifikasi dan tab lain. Matikan jeda layar.
 
+## Pilihan cepat: alur cerita
+
+Bila waktu sempit atau juri ingin mencoba sendiri, klik **Alur cerita** di kanan atas, lalu pilih **Untuk pemerintah** (6 langkah) atau **Untuk masyarakat** (6 langkah). Setiap langkah menggerakkan peta sendiri dan menyebut fase transisinya (Kondisi sekarang, Memahami, Merencanakan transisi, Bertindak) serta target SDG yang didukung. Tekan **Lanjut** sambil membacakan judul langkah; Esc keluar kapan saja. Untuk juri, alur pemerintah paling kuat; tutup dengan satu langkah dari alur masyarakat (Panel surya) untuk menunjukkan sisi warga.
+
 ## Alur demo
 
 | Waktu | Bagian | Aksi di layar |
 |---|---|---|
 | 0:00 | 1. Intro globe | Biarkan intro berjalan |
 | 0:45 | 2. Ringkasan provinsi | Daftar peringkat, saklar Tinggi kolom, pembangkit |
+| 1:25 | 2b. Skenario PLTS atap | Tombol kanan atas, geser slider 0% ke 30% |
+| 1:45 | 2c. Kembar digital 24 jam | Tombol kanan atas, Putar 24 jam |
+| 2:15 | 2d. Potensi EBT | Tombol kanan atas, Surya lalu Angin |
 | 1:45 | 3. Rincian wilayah | Klik Samarinda, lalu Kutai Barat, buka rekomendasi |
 | 2:45 | 4. Klik gedung | Energi, Emisi, ganti jenis, Surya, Cuaca |
 | 4:30 | 5. Hujan | Buka "Lapisan dan tampilan", lalu saklar Hujan di tingkat gedung |
@@ -44,6 +51,34 @@ Lakukan 15 menit sebelum mulai, bukan di depan juri.
   4. Arahkan penunjuk ke satu pin pembangkit untuk memperlihatkan nama, bahan bakar, kapasitas, dan "Lokasi perkiraan". Pin berdiri di puncak kolom wilayahnya; kepalanya berwarna menurut bahan bakar, dan pin berangka adalah beberapa pembangkit yang berdekatan (klik untuk memisahkannya).
 - **Ucapan.** *"Tinggi kolom adalah emisi per tahun. Samarinda, Kutai Kartanegara, dan Balikpapan paling tinggi. Pin berwarna adalah 13 pembangkit, abu-abu untuk batu bara. Sebagian besar listrik kita berasal dari batu bara. Semua angka ini perkiraan, kami tulis sumbernya."*
 - **Catatan.** Kunci warna bahan bakar ada di bawah saklar Pembangkit, di balik "Lapisan dan tampilan". Tidak perlu dibuka di bagian ini; tooltip pin sudah menyebut bahan bakarnya.
+
+### 2b. Skenario PLTS atap (1:25 sampai 1:45)
+
+- **Aksi.**
+  1. Klik tombol **Skenario PLTS atap** di kanan atas. Panel kiri berganti ke skenario, dimulai dari 20%.
+  2. Geser slider "Listrik dari PLTS atap" pelan ke 0%, lalu ke 30%. Kolom CO2 tiap wilayah turun dan memucat, dan angka di panel ikut menghitung: emisi yang dihindari, sisa emisi, kapasitas panel (MWp), listrik surya, biaya pasang, dan porsi surya di Kaltim (dari 1% sekarang).
+  3. Klik "Semua wilayah" untuk menutup skenario. Kolom naik kembali.
+- **Ucapan.** *"Ini jawaban kami untuk SDG 7: bila 30% listrik tiap wilayah datang dari panel surya di atap gedungnya sendiri, Kaltim menghindari sekitar 1,8 juta ton CO2 per tahun, perkiraan. Kapasitasnya sekitar 1,2 gigawatt-peak, biayanya sekitar 18 triliun rupiah. Jam matahari diambil dari NASA POWER per wilayah."*
+- **Catatan.** Hitungannya hanya listrik yang dipakai sendiri di gedung (tanpa imbalan ekspor, Permen ESDM 2/2024) dan faktor emisi PLTS 1,13 kg CO2 per kWh (Kepmen ESDM 163.K/2021). Tombolnya hanya tampak bila panel gedung dan chat tertutup dan tidak ada wilayah terpilih.
+
+### 2c. Kembar digital 24 jam (1:45 sampai 2:15)
+
+- **Aksi.**
+  1. Klik **Kembar digital 24 jam** di kanan atas. Panel kiri menunjukkan jam sekarang dan "Tersinkron ... WITA dengan prakiraan cuaca Open-Meteo".
+  2. Biarkan "PLTS atap" di **Skenario**, lalu klik **Putar 24 jam**. Sekitar 17 detik: cahaya peta berganti siang dan malam, kolom CO2 turun saat matahari menutup beban, dan memuncak sekitar pukul 19.00. Grafik kecil menunjukkan beban, bagian PLN (amber) dan surya (kuning).
+  3. Ganti ke **Seperti sekarang** untuk menunjukkan bedanya tanpa PLTS atap, lalu "Semua wilayah".
+- **Ucapan.** *"Ini kembar digitalnya: peta tersinkron dengan prakiraan cuaca tiap wilayah, jadi kita bisa melihat 24 jam ke depan. Siang hari panel surya menutup sebagian beban, malam hari semuanya kembali ke PLN yang sebagian besar batu bara."*
+- **Catatan.** Pola beban per jam adalah asumsi (puncak 19.00) karena data per jam Kaltim tidak ditemukan; radiasi dan awan dari prakiraan asli. Buka sekali sebelum demo supaya prakiraan 10 wilayah sudah tersimpan (cache 1 jam).
+
+### 2d. Potensi energi terbarukan (2:15 sampai 2:35)
+
+- **Aksi.**
+  1. Klik **Potensi EBT** di kanan atas. Kolom wilayah menghilang, diganti sel grid berwarna di daratan Kaltim.
+  2. Di "Surya (PLTS)", klik sel teratas di daftar: produksi PLTS 1 MWp per tahun, lahan, biaya, pembangkit terdekat.
+  3. Klik **Bangun PLTS di sini**. Kamera turun ke lokasi dan ladang panel 3D berdiri di atas permukaan peta; geser kapasitas (misalnya 10 ke 30 MWp) dan lihat luas lahan, produksi, CO2 dihindari, dan biaya berubah.
+  4. Ganti ke **Angin (PLTB)**. Semua sel pucat, dan panel menjelaskan bahwa angin terlalu lemah untuk PLTB skala besar. Klik **Pasang turbin angin di sini** untuk memperlihatkan turbin 3D yang rotornya berputar pelan, dengan faktor kapasitas sekitar 10%.
+- **Ucapan.** *"Kami cek juga di mana sebaiknya membangun. Data BMKG yang terbuka hanya prakiraan tiga hari, jadi kami pakai rata-rata 25 tahun dari NASA. Hasilnya jujur: matahari Kaltim merata dan cukup untuk PLTS di mana saja, sedangkan anginnya terlalu lemah untuk kincir angin besar. Jadi rekomendasinya PLTS, dan lokasinya ditentukan lahan dan jaringan."*
+- **Catatan.** Belum memperhitungkan kawasan hutan, gambut, kemiringan, dan jarak ke jaringan transmisi; panel menyebutnya.
 
 ### 3. Rincian wilayah dan rekomendasi (1:45 sampai 2:45)
 

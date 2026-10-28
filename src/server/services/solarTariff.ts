@@ -120,6 +120,7 @@ export interface BuildingSolar {
  * the chat and the region card all price PV here, so one building type gives one payback everywhere.
  */
 export function simulateBuildingSolar(input: {
+  panelCount?: number;
   peakSunHours: number;
   roofAreaM2: number;
   kwhYear: number;
@@ -129,6 +130,7 @@ export function simulateBuildingSolar(input: {
   const tariff = chooseTariff(input.buildingType, input.kwhYear);
   const use = usePatternFor(input.buildingType);
   const result = simulateSolar({
+    panelCount: input.panelCount,
     roofAreaM2: input.roofAreaM2,
     kwhYear: input.kwhYear,
     peakSunHours: input.peakSunHours,

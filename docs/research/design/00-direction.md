@@ -2,6 +2,10 @@
 
 Date: 21 Oct 2026. Every UI task follows this file. It replaces "Mahakam malam" (Task 6). Sources: reports 01 to 10 in this folder.
 
+Dashboard update, 22 Oct 2026 (user request): replace the rigid rectangular dashboard with a floating workspace, rounded navigation and panels, and open metric rows. Dashboard-specific radius tokens override the older panel/control radius prescriptions below. Preserve source attribution, honest estimate labels, accessible contrast, reduced motion, and the existing typography and data colours. The navigation calls the 24-hour simulation "Digital twin". Automatic current-model wind refresh does not imply sensor telemetry; hourly CO₂ remains an estimate from the load profile and grid factor.
+
+Later user direction, 22 Oct 2026: Lucide replaces Gravity UI as the application icon family (`src/web/icons.ts`). Ready-to-use character illustrations may accompany the citizen, government, and technician roles. Virtual IoT packets update every two seconds; energy-flow motion communicates those simulated readings, stops for an offline device, and respects reduced-motion preferences. These user-directed changes override the earlier icon-set and decorative-character restrictions below.
+
 **Concept.** A printed thematic atlas, read at night. The map is the page; panels are its margins. On a light map (day, dawn) the margins are printed paper with ink type; on a dark map (dusk, night) they are ink with paper type (section 10). Everything in the panels is set in HeroUI's system sans (section 3), place names largest; figures use tabular numerals; names on the map itself use the basemap's DIN Pro (section 7). **Colour belongs to data.** The interface itself is ink and paper. **Signature:** the legend is a meter. When you point at a region (on the map or in the list), its needle swings along the scale to that value, the column rises and the other columns recede. Everything else stays quiet.
 
 ## 1. Anti-slop rules (do not break)

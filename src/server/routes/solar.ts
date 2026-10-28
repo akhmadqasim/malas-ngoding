@@ -18,6 +18,7 @@ export type SolarSimulation = SolarResult & {
 };
 
 export interface SolarRequestInput {
+  panelCount?: number;
   lat: number;
   lng: number;
   roofAreaM2: number;
@@ -42,8 +43,10 @@ export function parseSolarInput(body: unknown): { input: SolarRequestInput } | {
   if (!isNum(b.kwhYear) || b.kwhYear <= 0) return { problem: "Konsumsi listrik (kwhYear) harus berupa angka lebih dari 0." };
   if (!isNum(b.backupHours) || b.backupHours < 0) return { problem: "Jam cadangan baterai (backupHours) harus berupa angka 0 atau lebih." };
   if (b.buildingType !== undefined && !isBuildingType(b.buildingType)) return { problem: "Jenis gedung (buildingType) tidak dikenal." };
+  if (b.panelCount !== undefined && (!isNum(b.panelCount) || !Number.isInteger(b.panelCount) || b.panelCount < 0 || b.panelCount > 20000)) return { problem: "Jumlah panel harus bilangan bulat 0 sampai 20.000." };
   return {
     input: {
+      ...(b.panelCount !== undefined ? { panelCount: b.panelCount as number } : {}),
       lat: b.lat,
       lng: b.lng,
       roofAreaM2: Math.min(b.roofAreaM2, MAX_ROOF_M2),
@@ -61,10 +64,11 @@ export function parseSolarInput(body: unknown): { input: SolarRequestInput } | {
  */
 export async function simulateSolarAt(
   deps: Pick<AppDeps, "db" | "nasa">,
-  { lat, lng, roofAreaM2, kwhYear, backupHours, buildingType }: SolarRequestInput,
+  { lat, lng, roofAreaM2, kwhYear, backupHours, buildingType, panelCount }: SolarRequestInput,
 ): Promise<SolarSimulation> {
   const climate = await cachedClimatology(deps, lat, lng);
   const { result, tariff, use } = simulateBuildingSolar({
+    panelCount,
     peakSunHours: climate.pshYear,
     roofAreaM2,
     kwhYear,
@@ -74,6 +78,7 @@ export async function simulateSolarAt(
   const assumptions = [
     tariff.note,
     ...use.notes,
+    ...(panelCount === undefined ? [] : [`Jumlah ${result.panels} panel dipilih untuk pratinjau, dibatasi luas atap; bukan rekomendasi ukuran otomatis. Hanya listrik yang dipakai sendiri memberi penghematan.`]),
     NO_EXPORT_NOTE,
     `Biaya panel Rp ${costs.costRpPerKwp.toLocaleString("id-ID")} per kWp dan baterai Rp ${costs.batteryRpPerKwh.toLocaleString("id-ID")} per kWh (perkiraan).`,
   ];

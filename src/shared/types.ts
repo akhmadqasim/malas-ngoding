@@ -10,7 +10,7 @@ export interface EquivalentFactor { key: Equivalent["key"]; label: string; kgCo2
  * export credit). Missing means all of it. `openDaysPerYear` (1..365, missing = 365): days the building is in
  * use; on the other days it draws `closedDayLoadShare` (0..1) of an open day's load as base load.
  */
-export interface SolarInput { roofAreaM2: number; kwhYear: number; peakSunHours: number; backupHours: number; tariffRpPerKwh: number; costRpPerKwp: number; batteryRpPerKwh: number; gridFactorKgPerKwh: number; daytimeShare?: number; openDaysPerYear?: number; closedDayLoadShare?: number }
+export interface SolarInput { panelCount?: number; roofAreaM2: number; kwhYear: number; peakSunHours: number; backupHours: number; tariffRpPerKwh: number; costRpPerKwp: number; batteryRpPerKwh: number; gridFactorKgPerKwh: number; daytimeShare?: number; openDaysPerYear?: number; closedDayLoadShare?: number }
 /** `kwhYear` is what the panels make; `selfUseKwh` of it is used on site (it saves money and CO2), `exportKwh` goes to the grid for nothing. `paybackPanelYears` leaves the backup battery out. */
 export interface SolarResult { kWp: number; panels: number; kwhYear: number; selfUseKwh: number; exportKwh: number; coveragePct: number; batteryKwh: number; costRp: number; savingRpYear: number; paybackYears: number; paybackPanelYears: number; co2AvoidedKgYear: number }
 export interface PvHour { time: string; ghiWm2: number; cloudPct: number; precipMm: number; weatherCode: number; pvKwh: number }
